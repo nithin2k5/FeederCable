@@ -77,29 +77,32 @@ def main():
     product_frame = ttk.LabelFrame(top_info_frame, text="Product Info")
     product_frame.grid(row=0, column=0, rowspan=2, padx=(0,2), pady=0, sticky="nsew")
     
-    tk.Label(product_frame, text="Product No", bg="black", fg="white").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-    create_entry(product_frame, 20, "96230-K6510").grid(row=0, column=1, columnspan=3, sticky="w", padx=2)
+    tk.Label(product_frame, text="Product No", bg="black", fg="white").grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+    create_entry(product_frame, 20, "96230-K6510").grid(row=0, column=1, columnspan=3, sticky="ew", padx=2)
     tk.Label(product_frame, bg="black", text="v", fg="black", width=2).grid(row=0, column=3, sticky="e", padx=2)
     
-    tk.Label(product_frame, text="ProductNa", bg="black", fg="white").grid(row=1, column=0, sticky="w", padx=2, pady=2)
-    create_entry(product_frame, 15).grid(row=1, column=1, sticky="w", padx=2)
-    tk.Label(product_frame, text="FLOOR", bg="black", fg="white").grid(row=1, column=2, sticky="w", padx=2)
-    create_entry(product_frame, 8).grid(row=1, column=3, sticky="w", padx=2)
-    tk.Label(product_frame, text="Car", bg="black", fg="white").grid(row=1, column=4, sticky="w", padx=2)
-    create_entry(product_frame, 5, "AI3").grid(row=1, column=5, sticky="w", padx=2)
+    tk.Label(product_frame, text="ProductNa", bg="black", fg="white").grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+    create_entry(product_frame, 15).grid(row=1, column=1, sticky="ew", padx=2)
+    tk.Label(product_frame, text="FLOOR", bg="black", fg="white").grid(row=1, column=2, sticky="ew", padx=2)
+    create_entry(product_frame, 8).grid(row=1, column=3, sticky="ew", padx=2)
+    tk.Label(product_frame, text="Car", bg="black", fg="white").grid(row=1, column=4, sticky="ew", padx=2)
+    create_entry(product_frame, 5, "AI3").grid(row=1, column=5, sticky="ew", padx=2)
 
-    tk.Label(product_frame, text="ALC code", bg="black", fg="white").grid(row=2, column=0, sticky="w", padx=2, pady=2)
-    create_entry(product_frame, 6, "K65").grid(row=2, column=1, sticky="w", padx=2)
-    tk.Label(product_frame, text="LOT", bg="black", fg="white").grid(row=2, column=2, sticky="w", padx=2)
-    create_entry(product_frame, 5, "HL").grid(row=2, column=3, sticky="w", padx=2)
-    tk.Label(product_frame, text="Serial", bg="black", fg="white").grid(row=2, column=4, sticky="w", padx=2)
-    create_entry(product_frame, 6, "0062").grid(row=2, column=5, sticky="w", padx=2)
+    tk.Label(product_frame, text="ALC code", bg="black", fg="white").grid(row=2, column=0, sticky="ew", padx=2, pady=2)
+    create_entry(product_frame, 6, "K65").grid(row=2, column=1, sticky="ew", padx=2)
+    tk.Label(product_frame, text="LOT", bg="black", fg="white").grid(row=2, column=2, sticky="ew", padx=2)
+    create_entry(product_frame, 5, "HL").grid(row=2, column=3, sticky="ew", padx=2)
+    tk.Label(product_frame, text="Serial", bg="black", fg="white").grid(row=2, column=4, sticky="ew", padx=2)
+    create_entry(product_frame, 6, "0062").grid(row=2, column=5, sticky="ew", padx=2)
 
-    tk.Label(product_frame, text="Barcode Scan(ALC check)", bg="black", fg="white").grid(row=3, column=0, sticky="w", padx=2, pady=5)
-    create_entry(product_frame, 30).grid(row=3, column=1, columnspan=5, sticky="w", padx=2)
+    tk.Label(product_frame, text="Barcode Scan(ALC check)", bg="black", fg="white").grid(row=3, column=0, sticky="ew", padx=2, pady=5)
+    create_entry(product_frame, 30).grid(row=3, column=1, columnspan=5, sticky="ew", padx=2)
 
 
     # 2. Assistant Info
+    product_frame.columnconfigure(1, weight=1)
+    product_frame.columnconfigure(3, weight=1)
+    product_frame.columnconfigure(5, weight=1)
     assistant_frame = ttk.LabelFrame(top_info_frame, text="Assistant Info")
     assistant_frame.grid(row=0, column=1, padx=2, pady=0, sticky="nsew")
     
@@ -132,6 +135,8 @@ def main():
     right_top_frame.grid(row=0, column=2, rowspan=2, padx=2, pady=0, sticky="nsew")
     
     worker_frame = ttk.LabelFrame(right_top_frame, text="Worker Inspect")
+    worker_frame.columnconfigure(1, weight=1)
+    worker_frame.columnconfigure(2, weight=1)
     worker_frame.pack(fill="x", pady=(0, 2))
     
     tk.Label(worker_frame, text="CLIENT", bg="black", fg="white").grid(row=0, column=1, padx=20)
@@ -141,6 +146,8 @@ def main():
     create_entry(worker_frame, 10, "11:00:10").grid(row=1, column=2, padx=5, pady=2)
     
     count_frame = ttk.LabelFrame(right_top_frame, text="Count")
+    count_frame.columnconfigure(1, weight=1)
+    count_frame.columnconfigure(3, weight=1)
     count_frame.pack(fill="x")
     
     tk.Label(count_frame, text="Total", bg="black", fg="white").grid(row=0, column=0, padx=10, pady=2)
@@ -261,10 +268,12 @@ def main():
     io_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
     
     io_layout = tk.Frame(io_frame, bg="black")
+    io_layout.columnconfigure(0, weight=1)
     io_layout.pack(fill="both", expand=True, padx=2, pady=2)
     
     left_io = tk.Frame(io_layout, bg="black")
-    left_io.grid(row=0, column=0, rowspan=2, sticky="w")
+    left_io.columnconfigure(1, weight=1)
+    left_io.grid(row=0, column=0, rowspan=2, sticky="nsew")
     
     tk.Label(left_io, text="SP4", bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=4).grid(row=0, column=0, pady=1)
     tk.Entry(left_io, bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=15).grid(row=0, column=1, pady=1)
