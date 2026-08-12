@@ -26,7 +26,7 @@ def main():
 
     # 1. Product Info
     p1 = tk.Frame(top_frame, bg="black")
-    p1.pack(side="left", fill="y", padx=(0, 10))
+    p1.pack(side="left", fill="y", expand=True)
     tk.Label(p1, text="PRODUCT INFORMATION", fg="yellow", bg="black", font=('Arial', 9, 'bold')).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
     make_field(p1, 1, 0, "Customer", "HMI")
     make_field(p1, 2, 0, "Model", "QY")
@@ -37,7 +37,7 @@ def main():
 
     # 2. Scan Codes
     p2 = tk.Frame(top_frame, bg="black")
-    p2.pack(side="left", fill="y", padx=10)
+    p2.pack(side="left", fill="y", expand=True)
     tk.Label(p2, text="SCAN CODES", fg="yellow", bg="black", font=('Arial', 9, 'bold')).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
     make_field(p2, 1, 0, "Master Cable", "300")
     # Empty space
@@ -48,7 +48,7 @@ def main():
 
     # 3. Production Count
     p3 = tk.Frame(top_frame, bg="black")
-    p3.pack(side="left", fill="y", padx=10)
+    p3.pack(side="left", fill="y", expand=True)
     tk.Label(p3, text="PRODUCTION COUNT", fg="yellow", bg="black", font=('Arial', 9, 'bold')).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 5))
     make_field(p3, 1, 0, "Total", "")
     make_field(p3, 1, 2, "PASS", "")
@@ -62,7 +62,7 @@ def main():
 
     # 4. Comport Status
     p4 = tk.Frame(top_frame, bg="black")
-    p4.pack(side="left", fill="y", padx=10)
+    p4.pack(side="left", fill="y", expand=True)
     tk.Label(p4, text="COMPORT STATUS", fg="yellow", bg="black", font=('Arial', 9, 'bold')).pack(anchor="w", pady=(0, 5))
     tk.Button(p4, text="HIPOT", bg="#7fffd4", font=('Arial', 9, 'bold'), width=15).pack(pady=4)
     tk.Button(p4, text="LCR METER", bg="#7fffd4", font=('Arial', 9, 'bold'), width=15).pack(pady=4)
@@ -70,7 +70,7 @@ def main():
 
     # 5. Function
     p5 = tk.Frame(top_frame, bg="black")
-    p5.pack(side="left", fill="y", padx=10)
+    p5.pack(side="left", fill="y", expand=True)
     tk.Label(p5, text="FUNCTION", fg="yellow", bg="black", font=('Arial', 9, 'bold')).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
     
     btn_opts = {"bg": "black", "fg": "white", "font": ('Arial', 8), "width": 12, "relief": "ridge"}
