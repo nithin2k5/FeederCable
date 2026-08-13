@@ -44,25 +44,47 @@ def render(parent):
         ("Scanner", "COM 0", "9600", "-"),
     ]
 
-    def mk_combo(parent, val):
-        cb = ttk.Combobox(parent, values=[val], font=('Arial', 10), width=10, state="readonly")
-        cb.current(0)
+    import serial.tools.list_ports
+    
+    # Fetch available COM ports
+    available_ports = [port.device for port in serial.tools.list_ports.comports()]
+    if not available_ports:
+        available_ports = ["COM 1", "COM 2", "COM 3"]
+
+    def mk_combo(parent, vals, current_val):
+        cb = ttk.Combobox(parent, values=vals, font=('Arial', 10), width=10, state="readonly")
+        if current_val in vals:
+            cb.set(current_val)
+        elif vals:
+            cb.current(0)
         return cb
+
+    baud_rates = ["9600", "14400", "19200", "38400", "57600", "115200"]
+    sids = ["-", "01", "02", "03", "04", "05"]
 
     for r, (dev, port, baud, sid) in enumerate(devices, start=1):
         tk.Label(table_frame, text=dev, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=r, column=0, sticky="w", padx=15, pady=10)
         
         # COM Port
-        mk_combo(table_frame, port).grid(row=r, column=1, padx=15)
+        port_list = list(available_ports)
+        if port not in port_list and port != "None":
+            port_list.append(port)
+        mk_combo(table_frame, port_list, port).grid(row=r, column=1, padx=15)
         
         # Hyphen
         tk.Label(table_frame, text="-", bg="#12151b", fg="white", font=('Arial', 11)).grid(row=r, column=2, padx=5)
         
         # Baud Rate
-        mk_combo(table_frame, baud).grid(row=r, column=3, padx=15)
+        baud_list = list(baud_rates)
+        if baud not in baud_list:
+            baud_list.append(baud)
+        mk_combo(table_frame, baud_list, baud).grid(row=r, column=3, padx=15)
         
         # Station ID
-        mk_combo(table_frame, sid).grid(row=r, column=4, padx=15)
+        sid_list = list(sids)
+        if sid not in sid_list:
+            sid_list.append(sid)
+        mk_combo(table_frame, sid_list, sid).grid(row=r, column=4, padx=15)
         
         # TEST Button
         tk.Button(table_frame, text="TEST", bg="#e0e0e0", fg="black", font=('Arial', 10, 'bold'), width=10, bd=0).grid(row=r, column=5, padx=15)
