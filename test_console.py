@@ -145,8 +145,6 @@ def main():
     mk_entry(pi, "P96", w=5).grid(row=2, column=1, sticky="ew", padx=5)
     tk.Label(pi, text="LOT", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=2, sticky="w", padx=(10, 5))
     mk_entry(pi, "", w=5).grid(row=2, column=3, sticky="ew", padx=5)
-    tk.Label(pi, text="PCI", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=4, sticky="w", padx=(10, 5))
-    mk_entry(pi, "", w=5).grid(row=2, column=5, sticky="ew", padx=5)
     tk.Label(pi, text="Serial", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=6, sticky="w", padx=(10, 5))
     mk_entry(pi, "0229", w=6).grid(row=2, column=7, sticky="ew", padx=(0, 5))
 
