@@ -125,27 +125,30 @@ def main():
     pf.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 5))
     pi = tk.Frame(pf, bg="black", padx=8, pady=5)
     pi.pack(fill="both", expand=True)
-    for c in (1, 3, 5):
-        pi.columnconfigure(c, weight=1)
+    for i in range(8):
+        pi.columnconfigure(i, weight=1 if i % 2 != 0 else 0)
 
+    # Row 0
     tk.Label(pi, text="Product No", bg="black", fg="white", font=('Arial', 10)).grid(row=0, column=0, sticky="w", pady=4)
-    mk_entry(pi, "96220 06250", w=20).grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
-    tk.Label(pi, text="EMP ID", bg="black", fg="white", font=('Arial', 10)).grid(row=0, column=4, sticky="w", padx=(10, 0))
-    mk_entry(pi, "", w=10).grid(row=0, column=5, sticky="ew", padx=5)
+    mk_entry(pi, "96220 06250", w=20).grid(row=0, column=1, columnspan=5, sticky="ew", padx=5)
+    tk.Label(pi, text="EMP ID", bg="black", fg="white", font=('Arial', 10)).grid(row=0, column=6, sticky="w", padx=(10, 5))
+    mk_entry(pi, "", w=8).grid(row=0, column=7, sticky="ew", padx=(0, 5))
 
+    # Row 1
     tk.Label(pi, text="ProductNa", bg="black", fg="white", font=('Arial', 10)).grid(row=1, column=0, sticky="w", pady=4)
-    mk_entry(pi, "SP2I", w=12).grid(row=1, column=1, sticky="ew", padx=5)
-    tk.Label(pi, text="Car", bg="black", fg="white", font=('Arial', 10)).grid(row=1, column=2, sticky="w", padx=(10, 0))
-    mk_entry(pi, "MAI", w=6).grid(row=1, column=3, sticky="ew", padx=5)
+    mk_entry(pi, "SP2I", w=12).grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
+    tk.Label(pi, text="Car", bg="black", fg="white", font=('Arial', 10)).grid(row=1, column=4, sticky="w", padx=(10, 5))
+    mk_entry(pi, "MAI", w=6).grid(row=1, column=5, sticky="ew", padx=5)
 
+    # Row 2
     tk.Label(pi, text="ALC code", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=0, sticky="w", pady=4)
-    mk_entry(pi, "P96", w=5).grid(row=2, column=1, sticky="w", padx=5)
-    tk.Label(pi, text="LOT", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=2, sticky="w", padx=(10, 0))
-    mk_entry(pi, "", w=5).grid(row=2, column=3, sticky="w", padx=5)
-    tk.Label(pi, text="PCI", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=4, sticky="w", padx=(10, 0))
-    mk_entry(pi, "", w=5).grid(row=2, column=5, sticky="w", padx=5)
-    tk.Label(pi, text="Serial", bg="black", fg="white", font=('Arial', 10)).grid(row=3, column=0, sticky="w")
-    mk_entry(pi, "0229", w=6).grid(row=3, column=1, sticky="w", padx=5)
+    mk_entry(pi, "P96", w=5).grid(row=2, column=1, sticky="ew", padx=5)
+    tk.Label(pi, text="LOT", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=2, sticky="w", padx=(10, 5))
+    mk_entry(pi, "", w=5).grid(row=2, column=3, sticky="ew", padx=5)
+    tk.Label(pi, text="PCI", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=4, sticky="w", padx=(10, 5))
+    mk_entry(pi, "", w=5).grid(row=2, column=5, sticky="ew", padx=5)
+    tk.Label(pi, text="Serial", bg="black", fg="white", font=('Arial', 10)).grid(row=2, column=6, sticky="w", padx=(10, 5))
+    mk_entry(pi, "0229", w=6).grid(row=2, column=7, sticky="ew", padx=(0, 5))
 
     # Count
     cf = ttk.LabelFrame(row1, text="Count")
