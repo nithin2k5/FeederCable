@@ -184,9 +184,9 @@ def main():
     # --- Row 2: Inspection Specification ---
     tk.Label(left_area, text="Inspection Specification", bg="black", fg="white", font=('Arial', 11), anchor="w").pack(fill="x", pady=(8, 2))
 
-    cols_insp = ("TEST", "No", "Channel", "Type", "Freq (kHz/MHz)", "Volt (V)", "Sec (s)", "Min", "Max", "Std", "unit")
+    cols_insp = ("TEST", "unit", "No", "Channel", "Type", "Freq (kHz/MHz)", "Volt (V)", "Sec (s)", "Min", "Max", "Std")
     tree_insp = ttk.Treeview(left_area, columns=cols_insp, show="headings", height=5)
-    col_w = [70, 50, 80, 70, 120, 80, 70, 70, 70, 50, 70]
+    col_w = [110, 50, 50, 80, 70, 120, 80, 70, 70, 70, 50]
     for i, col in enumerate(cols_insp):
         tree_insp.heading(col, text=col)
         tree_insp.column(col, width=col_w[i], anchor="center")
@@ -195,9 +195,9 @@ def main():
     tree_insp.tag_configure('normal', background='white', foreground='black')
     tree_insp.tag_configure('selected', background='#b0d8b0', foreground='black')
 
-    tree_insp.insert("", "end", values=("", "1", "3", "All", "", "500", "1", "100", "", "", ""), tags=('normal',))
-    tree_insp.insert("", "end", values=("", "2", "3", "All", "", "1000", "3", "0", "10", "", ""), tags=('normal',))
-    tree_insp.insert("", "end", values=("", "3", "3", "Single", "", "", "", "", "", "", ""), tags=('selected',))
+    tree_insp.insert("", "end", values=("Insulation Test", "Volts", "1", "3", "All", "", "500", "1", "100", "", ""), tags=('normal',))
+    tree_insp.insert("", "end", values=("With Stand(mA)", "mA", "2", "3", "All", "", "1000", "3", "0", "10", ""), tags=('normal',))
+    tree_insp.insert("", "end", values=("Contact", "-", "3", "3", "Single", "", "", "", "", "", ""), tags=('selected',))
 
     # --- Row 3: Testing ---
     tk.Label(left_area, text="Testing", bg="black", fg="white", font=('Arial', 11), anchor="w").pack(fill="x", pady=(10, 2))
@@ -205,7 +205,7 @@ def main():
     test_frame = tk.Frame(left_area, bg="black")
     test_frame.pack(fill="x")
 
-    ch_labels = ["TEST", "CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7", "CH8", "CH9", "CH10", "Result", "unit"]
+    ch_labels = ["TEST", "unit", "CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7", "CH8", "CH9", "CH10", "Result"]
     for i in range(13):
         test_frame.columnconfigure(i, weight=1)
 
@@ -214,15 +214,15 @@ def main():
         tk.Label(test_frame, text=h, bg="#d0d0d0", fg="black", font=('Arial', 9, 'bold'), bd=1, relief="solid", pady=8).grid(row=0, column=i, sticky="nsew")
 
     test_data = [
-        (["", "3253", "3253", "3253", "-", "-", "-", "-", "-", "-", "-", "PASS", ""]),
-        (["", "0.82", "0.82", "0.82", "-", "-", "-", "-", "-", "-", "-", "PASS", ""]),
-        (["", "OK", "OK", "OK", "-", "-", "-", "-", "-", "-", "-", "PASS", ""]),
+        (["Insulation Test", "Volts", "3253", "3253", "3253", "-", "-", "-", "-", "-", "-", "-", "PASS"]),
+        (["With Stand(mA)", "mA", "0.82", "0.82", "0.82", "-", "-", "-", "-", "-", "-", "-", "PASS"]),
+        (["Contact", "-", "OK", "OK", "OK", "-", "-", "-", "-", "-", "-", "-", "PASS"]),
     ]
     for r, row_data in enumerate(test_data):
         for c, val in enumerate(row_data):
-            if 0 < c < 4:
+            if 1 < c < 5:
                 bg_c = "#aeea00"
-            elif c == 11:
+            elif c == 12:
                 bg_c = "#aeea00"
             else:
                 bg_c = "white"
