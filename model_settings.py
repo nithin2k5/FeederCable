@@ -120,7 +120,9 @@ def render(parent):
         combo.pack(expand=True, pady=4)
         
         for c_idx, val in enumerate([ttime, freq, volts, rmin, rmax, ref, offset], start=5):
-            tk.Label(table_frame, text=val, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid").grid(row=r+1, column=c_idx, sticky="nsew")
+            entry = tk.Entry(table_frame, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid", justify="center", insertbackground="white")
+            entry.insert(0, val)
+            entry.grid(row=r+1, column=c_idx, sticky="nsew", ipady=4)
 
     # --- Bottom Section ---
     bot_frame = tk.Frame(content, bg="black", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1)
