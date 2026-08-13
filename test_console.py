@@ -3,321 +3,292 @@ from tkinter import ttk
 
 def main():
     root = tk.Tk()
-    root.title("Feeder Cable Tester ver. V0.02.33.1")
+    root.title("Feeder Cable Tester")
     root.geometry("1280x800")
-    root.configure(bg="black")
-
+    
+    # Colors to match the image
+    bg_color = "#080c14"
+    fg_color = "white"
+    border_color = "#3a4150"
+    
+    root.configure(bg=bg_color)
+    
     style = ttk.Style()
     style.theme_use("clam")
     
-    # Common colors
-    bg_color = "black"
-    fg_color = "white"
+    # Configure styles
+    style.configure("TLabelframe", background=bg_color, foreground="white", bordercolor=border_color)
+    style.configure("TLabelframe.Label", background=bg_color, foreground="white", font=('Arial', 10))
+    style.configure("Treeview.Heading", background="#f0f0f0", foreground="black", font=('Arial', 9, 'bold'))
+    style.configure("Treeview", background="#f0f0f0", foreground="black", fieldbackground="#f0f0f0", font=('Arial', 9), rowheight=25)
     
-    style.configure("TLabelframe", background=bg_color, foreground=fg_color, bordercolor="white")
-    style.configure("TLabelframe.Label", background=bg_color, foreground=fg_color, font=('Arial', 10))
-    style.configure("TLabel", background=bg_color, foreground=fg_color, font=('Arial', 9))
-    style.configure("TButton", background="black", foreground=fg_color, font=('Arial', 9, 'bold'), bordercolor="white")
-    
-    # Treeview style
-    style.configure("Treeview.Heading", background="white", foreground="black", font=('Arial', 9, 'bold'))
-    style.configure("Treeview", background="white", foreground="black", fieldbackground="white", font=('Arial', 9), rowheight=25)
-    
-    # ------------------ TOP HEADER ------------------
+    # ---- TOP HEADER ----
     header_frame = tk.Frame(root, bg="black", height=40)
     header_frame.pack(side="top", fill="x")
     
     # INFAC logo box
     logo_frame = tk.Frame(header_frame, bg="white", padx=5, pady=2)
     logo_frame.pack(side="left", padx=10, pady=5)
-    
     tk.Label(logo_frame, text="INFAC", fg="#c00000", bg="white", font=('Arial', 18, 'bold')).pack(side="left")
     tk.Label(logo_frame, text="주식회사인팩", fg="black", bg="white", font=('Malgun Gothic', 10)).pack(side="left", padx=(5,0))
     
     tk.Label(header_frame, text="Feeder Cable", fg="#ffaa00", bg="black", font=('Arial', 14, 'bold')).pack(side="left", padx=20)
-
-    # ------------------ MAIN LAYOUT ------------------
-    main_frame = tk.Frame(root, bg="black")
+    tk.Label(header_frame, text="15/07/2025 15:05:07", fg="white", bg="black", font=('Arial', 10)).pack(side="right", padx=20)
+    
+    # ---- MAIN LAYOUT ----
+    main_frame = tk.Frame(root, bg=bg_color)
     main_frame.pack(fill="both", expand=True, padx=5, pady=5)
     
-    # Left Sidebar (Buttons)
-    left_sidebar = tk.Frame(main_frame, bg="black", width=80)
-    left_sidebar.pack(side="left", fill="y", padx=(0, 5))
+    # ---- SIDEBAR ----
+    sidebar = tk.Frame(main_frame, bg="black", width=80)
+    sidebar.pack(side="left", fill="y", padx=(0, 5))
     
-    def create_sidebar_btn(parent, text, bg="black", fg="white", height=2):
-        return tk.Button(parent, text=text, bg=bg, fg=fg, font=('Arial', 9, 'bold'), height=height, width=8, relief="solid", bd=1, highlightbackground="white")
+    def create_sidebar_btn(parent, text, icon_placeholder=None):
+        f = tk.Frame(parent, bg="black", bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+        f.pack(fill="x", pady=2, padx=2)
+        if icon_placeholder:
+            tk.Label(f, text=icon_placeholder, fg="white", bg="black", font=('Arial', 16)).pack(pady=(5,0))
+        tk.Label(f, text=text, fg="white", bg="black", font=('Arial', 9)).pack(pady=(0,5))
         
-    create_sidebar_btn(left_sidebar, "USER").pack(pady=2)
-    tk.Frame(left_sidebar, height=20, bg="black").pack() # Spacer
-    create_sidebar_btn(left_sidebar, "START").pack(pady=2)
-    create_sidebar_btn(left_sidebar, "STOP").pack(pady=2)
-    tk.Frame(left_sidebar, height=20, bg="black").pack() # Spacer
+        # Hover effect
+        def on_enter(e):
+            f.config(bg="#333")
+            for child in f.winfo_children(): child.config(bg="#333")
+        def on_leave(e):
+            f.config(bg="black")
+            for child in f.winfo_children(): child.config(bg="black")
+            
+        f.bind("<Enter>", on_enter)
+        f.bind("<Leave>", on_leave)
+        for child in f.winfo_children():
+            child.bind("<Enter>", on_enter)
+            child.bind("<Leave>", on_leave)
+            
+    create_sidebar_btn(sidebar, "Admin", "👤")
+    create_sidebar_btn(sidebar, "Settings", "⚙")
+    create_sidebar_btn(sidebar, "Comparator", "⚖")
+    create_sidebar_btn(sidebar, "Test Data", "📄")
+    create_sidebar_btn(sidebar, "COM Setting", "🔌")
     
-    # The image shows empty space, then smaller buttons for LABEL, MASTER, TEST, RESULT, Form Loadi
-    create_sidebar_btn(left_sidebar, "LABEL").pack(pady=2)
-    create_sidebar_btn(left_sidebar, "MASTE\nR").pack(pady=2)
-    create_sidebar_btn(left_sidebar, "TEST").pack(pady=2)
-    create_sidebar_btn(left_sidebar, "RESULT").pack(pady=2)
-    create_sidebar_btn(left_sidebar, "Form\nLoadi", bg="#4caf50", fg="black").pack(pady=2)
-
-    # Right Content Area
-    right_content = tk.Frame(main_frame, bg="black")
-    right_content.pack(side="left", fill="both", expand=True)
+    # ---- CONTENT COLUMNS ----
+    content_area = tk.Frame(main_frame, bg=bg_color)
+    content_area.pack(side="left", fill="both", expand=True)
     
-    # --- Top Info Section ---
-    top_info_frame = tk.Frame(right_content, bg="black")
-    top_info_frame.pack(fill="x", pady=(0, 5))
+    content_area.columnconfigure(0, weight=4) # Left large column
+    content_area.columnconfigure(1, weight=1) # Right smaller column
+    content_area.rowconfigure(0, weight=1)
     
-    def create_entry(parent, width, val=""):
-        e = tk.Entry(parent, width=width, bg="black", fg="white", font=('Arial', 10), insertbackground="white")
+    left_col = tk.Frame(content_area, bg=bg_color)
+    left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+    
+    right_col = tk.Frame(content_area, bg=bg_color)
+    right_col.grid(row=0, column=1, sticky="nsew")
+    
+    def create_entry(parent, val="", fg="white", bg="black", font_size=12):
+        e = tk.Entry(parent, bg=bg, fg=fg, font=('Arial', font_size), insertbackground="white", bd=1, relief="solid")
         e.insert(0, val)
         return e
 
-    # 1. Product Info
-    product_frame = ttk.LabelFrame(top_info_frame, text="Product Info")
-    product_frame.grid(row=0, column=0, rowspan=2, padx=(0,2), pady=0, sticky="nsew")
+    # ---- LEFT COLUMN ----
     
-    tk.Label(product_frame, text="Product No", bg="black", fg="white").grid(row=0, column=0, sticky="ew", padx=2, pady=2)
-    create_entry(product_frame, 20, "96230-K6510").grid(row=0, column=1, columnspan=3, sticky="ew", padx=2)
-    tk.Label(product_frame, bg="black", text="v", fg="black", width=2).grid(row=0, column=3, sticky="e", padx=2)
-    
-    tk.Label(product_frame, text="ProductNa", bg="black", fg="white").grid(row=1, column=0, sticky="ew", padx=2, pady=2)
-    create_entry(product_frame, 15).grid(row=1, column=1, sticky="ew", padx=2)
-    tk.Label(product_frame, text="FLOOR", bg="black", fg="white").grid(row=1, column=2, sticky="ew", padx=2)
-    create_entry(product_frame, 8).grid(row=1, column=3, sticky="ew", padx=2)
-    tk.Label(product_frame, text="Car", bg="black", fg="white").grid(row=1, column=4, sticky="ew", padx=2)
-    create_entry(product_frame, 5, "AI3").grid(row=1, column=5, sticky="ew", padx=2)
-
-    tk.Label(product_frame, text="ALC code", bg="black", fg="white").grid(row=2, column=0, sticky="ew", padx=2, pady=2)
-    create_entry(product_frame, 6, "K65").grid(row=2, column=1, sticky="ew", padx=2)
-    tk.Label(product_frame, text="LOT", bg="black", fg="white").grid(row=2, column=2, sticky="ew", padx=2)
-    create_entry(product_frame, 5, "HL").grid(row=2, column=3, sticky="ew", padx=2)
-    tk.Label(product_frame, text="Serial", bg="black", fg="white").grid(row=2, column=4, sticky="ew", padx=2)
-    create_entry(product_frame, 6, "0062").grid(row=2, column=5, sticky="ew", padx=2)
-
-    tk.Label(product_frame, text="Barcode Scan(ALC check)", bg="black", fg="white").grid(row=3, column=0, sticky="ew", padx=2, pady=5)
-    create_entry(product_frame, 30).grid(row=3, column=1, columnspan=5, sticky="ew", padx=2)
-
-
-    # 2. Assistant Info
-    product_frame.columnconfigure(1, weight=1)
-    product_frame.columnconfigure(3, weight=1)
-    product_frame.columnconfigure(5, weight=1)
-    assistant_frame = ttk.LabelFrame(top_info_frame, text="Assistant Info")
-    assistant_frame.grid(row=0, column=1, padx=2, pady=0, sticky="nsew")
-    
-    top_asst = tk.Frame(assistant_frame, bg="black")
-    top_asst.pack(fill="x", pady=2)
-    tk.Checkbutton(top_asst, text="Label print", bg="#76ff03", fg="black", selectcolor="#76ff03", font=('Arial', 9, 'bold')).pack(side="left", padx=5)
-    tk.Button(top_asst, text="Reprint", bg="black", fg="white", relief="solid", bd=1).pack(side="left", padx=5)
-    
-    mid_asst = tk.Frame(assistant_frame, bg="black")
-    mid_asst.pack(fill="x", pady=2)
-    tk.Label(mid_asst, text="Master", bg="black", fg="white").pack(side="left", padx=2)
-    create_entry(mid_asst, 4, "1").pack(side="left", padx=2)
-    tk.Label(mid_asst, text="JIG No", bg="black", fg="white").pack(side="left", padx=10)
-    create_entry(mid_asst, 4, "6").pack(side="left", padx=2)
-    
-    bot_asst = tk.Frame(assistant_frame, bg="black")
-    bot_asst.pack(fill="x", pady=2)
-    tk.Checkbutton(bot_asst, text="NG Box", bg="#76ff03", fg="black", selectcolor="#76ff03", font=('Arial', 9, 'bold')).pack(side="left", padx=40)
-
-    # 3. Method
-    method_frame = ttk.LabelFrame(top_info_frame, text="Method")
-    method_frame.grid(row=1, column=1, padx=2, pady=0, sticky="nsew")
-    
-    tk.Radiobutton(method_frame, text="Single", bg="#76ff03", fg="black", selectcolor="#76ff03", font=('Arial', 9, 'bold')).pack(side="left", padx=5, pady=5)
-    tk.Button(method_frame, text="Retest", bg="black", fg="white", relief="solid", bd=1).pack(side="left", padx=5)
-    tk.Label(method_frame, text="0 / 0", bg="black", fg="white").pack(side="left", padx=15)
-
-    # 4. Worker Inspect & Count
-    right_top_frame = tk.Frame(top_info_frame, bg="black")
-    right_top_frame.grid(row=0, column=2, rowspan=2, padx=2, pady=0, sticky="nsew")
-    
-    worker_frame = ttk.LabelFrame(right_top_frame, text="Worker Inspect")
-    worker_frame.columnconfigure(1, weight=1)
-    worker_frame.columnconfigure(2, weight=1)
-    worker_frame.pack(fill="x", pady=(0, 2))
-    
-    tk.Label(worker_frame, text="CLIENT", bg="black", fg="white").grid(row=0, column=1, padx=20)
-    tk.Label(worker_frame, text="WORKER", bg="black", fg="white").grid(row=0, column=2, padx=20)
-    tk.Label(worker_frame, text="Now", bg="black", fg="white").grid(row=1, column=0, padx=5)
-    create_entry(worker_frame, 12, "2026-08-12").grid(row=1, column=1, padx=5, pady=2)
-    create_entry(worker_frame, 10, "11:00:10").grid(row=1, column=2, padx=5, pady=2)
-    
-    count_frame = ttk.LabelFrame(right_top_frame, text="Count")
-    count_frame.columnconfigure(1, weight=1)
-    count_frame.columnconfigure(3, weight=1)
-    count_frame.pack(fill="x")
-    
-    tk.Label(count_frame, text="Total", bg="black", fg="white").grid(row=0, column=0, padx=10, pady=2)
-    create_entry(count_frame, 5, "64").grid(row=0, column=1, padx=5)
-    tk.Label(count_frame, text="NG", bg="black", fg="white").grid(row=0, column=2, padx=10)
-    e1 = create_entry(count_frame, 5, "2")
-    e1.config(fg="red")
-    e1.grid(row=0, column=3, padx=5)
-    
-    tk.Label(count_frame, text="OK", bg="black", fg="white").grid(row=1, column=0, padx=10, pady=2)
-    e2 = create_entry(count_frame, 5, "62")
-    e2.config(fg="#76ff03")
-    e2.grid(row=1, column=1, padx=5)
-    tk.Label(count_frame, text="NG", bg="black", fg="white").grid(row=1, column=2, padx=10)
-    e3 = create_entry(count_frame, 5, "3.13")
-    e3.config(fg="red")
-    e3.grid(row=1, column=3, padx=5)
-    
-    top_info_frame.columnconfigure(0, weight=1)
+    # 1. Top Info Section
+    top_info_frame = tk.Frame(left_col, bg=bg_color)
+    top_info_frame.pack(fill="x", pady=(0, 5))
+    top_info_frame.columnconfigure(0, weight=2)
     top_info_frame.columnconfigure(1, weight=1)
-    top_info_frame.columnconfigure(2, weight=1)
+    
+    # Product Info
+    product_frame = ttk.LabelFrame(top_info_frame, text="Product Info")
+    product_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 5))
+    
+    pf_inner = tk.Frame(product_frame, bg=bg_color, padx=5, pady=5)
+    pf_inner.pack(fill="both", expand=True)
+    pf_inner.columnconfigure(1, weight=1)
+    pf_inner.columnconfigure(3, weight=1)
+    
+    tk.Label(pf_inner, text="Product No", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=0, sticky="w", pady=5)
+    create_entry(pf_inner, "96220 06250").grid(row=0, column=1, sticky="ew", padx=5)
+    tk.Label(pf_inner, text="EMP ID", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=2, sticky="w", padx=10)
+    create_entry(pf_inner, "").grid(row=0, column=3, sticky="ew", padx=5)
+    
+    tk.Label(pf_inner, text="ProductNa", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=1, column=0, sticky="w", pady=5)
+    create_entry(pf_inner, "SP2I").grid(row=1, column=1, sticky="ew", padx=5)
+    tk.Label(pf_inner, text="Car", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=1, column=2, sticky="w", padx=10)
+    create_entry(pf_inner, "MAI").grid(row=1, column=3, sticky="ew", padx=5)
+    
+    row2_f = tk.Frame(pf_inner, bg=bg_color)
+    row2_f.grid(row=2, column=0, columnspan=4, sticky="ew", pady=5)
+    for i in range(8):
+        row2_f.columnconfigure(i, weight=1 if i%2!=0 else 0)
+        
+    tk.Label(row2_f, text="ALC code", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=0, sticky="w")
+    create_entry(row2_f, "P96").grid(row=0, column=1, sticky="ew", padx=(5,10))
+    tk.Label(row2_f, text="LOT", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=2, sticky="w")
+    create_entry(row2_f, "").grid(row=0, column=3, sticky="ew", padx=(5,10))
+    tk.Label(row2_f, text="PCI", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=4, sticky="w")
+    create_entry(row2_f, "").grid(row=0, column=5, sticky="ew", padx=(5,10))
+    tk.Label(row2_f, text="Serial", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=6, sticky="w")
+    create_entry(row2_f, "0229").grid(row=0, column=7, sticky="ew", padx=(5,0))
+    
+    # Count
+    count_frame = ttk.LabelFrame(top_info_frame, text="Count")
+    count_frame.grid(row=0, column=1, sticky="nsew", pady=(0, 2))
+    cf_inner = tk.Frame(count_frame, bg=bg_color, padx=5, pady=5)
+    cf_inner.pack(fill="both", expand=True)
+    cf_inner.columnconfigure(1, weight=1)
+    cf_inner.columnconfigure(3, weight=1)
+    
+    tk.Label(cf_inner, text="Total", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=0, sticky="w", pady=2)
+    create_entry(cf_inner, "235").grid(row=0, column=1, sticky="ew", padx=5)
+    tk.Label(cf_inner, text="NG", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=0, column=2, sticky="w", padx=5)
+    create_entry(cf_inner, "6", fg="#ff4444").grid(row=0, column=3, sticky="ew")
+    
+    tk.Label(cf_inner, text="OK", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=1, column=0, sticky="w", pady=2)
+    create_entry(cf_inner, "229", fg="#76ff03").grid(row=1, column=1, sticky="ew", padx=5)
+    tk.Label(cf_inner, text="NG", bg=bg_color, fg="white", font=('Arial', 10)).grid(row=1, column=2, sticky="w", padx=5)
+    create_entry(cf_inner, "2.55", fg="#ff4444").grid(row=1, column=3, sticky="ew")
 
-    # --- Inspection Section ---
-    inspect_frame = tk.Frame(right_content, bg="black")
-    inspect_frame.pack(fill="x", pady=2)
+    # Method
+    method_frame = ttk.LabelFrame(top_info_frame, text="Method")
+    method_frame.grid(row=1, column=1, sticky="nsew", pady=(2, 0))
+    mf_inner = tk.Frame(method_frame, bg=bg_color, padx=5, pady=5)
+    mf_inner.pack(fill="both", expand=True)
     
-    lbl_inspect = tk.Label(inspect_frame, text="Inspecti", bg="black", fg="white", font=('Arial', 12, 'bold'), anchor="w")
-    lbl_inspect.pack(fill="x")
+    tk.Label(mf_inner, text="Combined", bg="#222", fg="white", font=('Arial', 10), relief="solid", bd=1).pack(side="left", expand=True, fill="both", padx=2)
+    tk.Label(mf_inner, text="Individual", bg="#388e3c", fg="white", font=('Arial', 10), relief="solid", bd=1).pack(side="left", expand=True, fill="both", padx=2)
+    tk.Label(mf_inner, text="Rework", bg="#388e3c", fg="white", font=('Arial', 10), relief="solid", bd=1).pack(side="left", expand=True, fill="both", padx=2)
+
+    # 2. Inspection Spec
+    insp_label = tk.Label(left_col, text="Inspection Specification", bg=bg_color, fg="white", font=('Arial', 11), anchor="w")
+    insp_label.pack(fill="x", pady=(5,0))
     
-    inspect_mid = tk.Frame(inspect_frame, bg="black")
-    inspect_mid.pack(fill="x")
-    
-    cols_insp = ("No", "Channel", "Type", "Freq(kHz/MHz)", "Volt(V)", "Sec(s)", "Min", "Max", "S")
-    tree_insp = ttk.Treeview(inspect_mid, columns=cols_insp, show="headings", height=4)
-    
-    col_widths = [40, 70, 70, 100, 70, 70, 70, 70, 30]
-    for i, col in enumerate(cols_insp):
+    cols_insp = ("No", "Channel", "Type", "Freq (kHz/MHz)", "Volt (V)", "Sec (s)", "Min", "Max", "Std")
+    tree_insp = ttk.Treeview(left_col, columns=cols_insp, show="headings", height=4)
+    for col in cols_insp:
         tree_insp.heading(col, text=col)
-        tree_insp.column(col, width=col_widths[i], anchor="center")
-    tree_insp.pack(side="left", fill="x", expand=True)
+        tree_insp.column(col, width=80, anchor="center")
+    tree_insp.pack(fill="x")
     
-    tree_insp.tag_configure('cyan_row', background='#b2ebf2', foreground='black')
-    tree_insp.tag_configure('white_row', background='white', foreground='black')
+    tree_insp.tag_configure('grey', background='#f0f0f0')
+    tree_insp.tag_configure('blue', background='#1945d1', foreground='white')
     
-    tree_insp.insert("", "end", values=("1", "1", "Single", "", "", "", "", "", ""), tags=('white_row',))
-    tree_insp.insert("", "end", values=("2", "1", "Single", "", "500", "1", "100", "9999", ""), tags=('cyan_row',))
-    tree_insp.insert("", "end", values=("3", "1", "Single", "", "1000", "3", "0", "10", ""), tags=('white_row',))
-    tree_insp.insert("", "end", values=("4", "1", "Single", "", "", "", "", "", ""), tags=('cyan_row',))
-
-    # Test progress Info
-    progress_frame = ttk.LabelFrame(inspect_mid, text="Test progress Info")
-    progress_frame.pack(side="right", fill="y", padx=(5, 0))
+    tree_insp.insert("", "end", values=("1", "3", "All", "", "500", "1", "100", "", ""), tags=('grey',))
+    tree_insp.insert("", "end", values=("2", "3", "All", "", "1000", "3", "0", "10", ""), tags=('grey',))
+    tree_insp.insert("", "end", values=("3", "3", "Single", "", "", "", "", "", ""), tags=('blue',))
     
-    div_frame = tk.Frame(progress_frame, bg="#4caf50", padx=5, pady=5)
-    div_frame.pack(fill="x", padx=2, pady=2)
-    tk.Label(div_frame, text="Product Division", bg="#4caf50", fg="black", font=('Arial', 9)).pack(anchor="w")
+    # 3. Testing
+    test_label = tk.Label(left_col, text="Testing", bg=bg_color, fg="white", font=('Arial', 11), anchor="w")
+    test_label.pack(fill="x", pady=(10,0))
     
-    rd_frame = tk.Frame(div_frame, bg="#4caf50")
-    rd_frame.pack(anchor="center", pady=5)
-    
-    tk.Radiobutton(rd_frame, text="Cable", bg="#4caf50", fg="black", selectcolor="white", value=1, font=('Arial', 10, 'bold')).pack(side="left", padx=5)
-    tk.Radiobutton(rd_frame, text="Coil", bg="#4caf50", fg="white", selectcolor="black", value=2, font=('Arial', 10)).pack(side="left", padx=5)
-    
-    save_frame = tk.Frame(progress_frame, bg="black")
-    save_frame.pack(fill="x", pady=2)
-    tk.Label(save_frame, text="Saving test\nresults", bg="black", fg="white", font=('Arial', 11), justify="left").pack(side="left", padx=10, pady=5)
-    
-    test_time_frame = tk.Frame(save_frame, bg="black")
-    test_time_frame.pack(side="right", padx=10)
-    tk.Label(test_time_frame, text="Test", bg="black", fg="white").pack()
-    tk.Label(test_time_frame, text="12.92 s", bg="black", fg="white", borderwidth=1, relief="solid", width=8, font=('Arial', 10)).pack()
-
-    # --- Test Results Section ---
-    test_res_frame = tk.Frame(right_content, bg="black")
-    test_res_frame.pack(fill="both", expand=True, pady=2)
-    
-    lbl_test = tk.Label(test_res_frame, text="Test", bg="black", fg="white", font=('Arial', 12, 'bold'), anchor="w")
-    lbl_test.pack(fill="x")
-    
-    test_mid = tk.Frame(test_res_frame, bg="black")
-    test_mid.pack(fill="both", expand=True)
+    test_grid = tk.Frame(left_col, bg=bg_color)
+    test_grid.pack(fill="x")
     
     cols_test = ("CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7", "CH8", "CH9", "CH10", "Result")
     
-    test_grid = tk.Frame(test_mid, bg="black")
-    test_grid.pack(side="left", fill="both", expand=True)
-    
     for i, col in enumerate(cols_test):
-        tk.Label(test_grid, text=col, bg="white", fg="black", borderwidth=1, relief="solid", font=('Arial', 10), width=6).grid(row=0, column=i, sticky="nsew")
+        tk.Label(test_grid, text=col, bg="#f0f0f0", fg="black", bd=1, relief="solid", font=('Arial', 10, 'bold'), width=8).grid(row=0, column=i, sticky="nsew")
+        test_grid.columnconfigure(i, weight=1)
         
     for r, vals in enumerate([
-        ("OK", "-", "-", "-", "-", "-", "-", "-", "-", "-", "PASS"),
-        ("1297", "-", "-", "-", "-", "-", "-", "-", "-", "-", "PASS"),
-        ("0.33", "-", "-", "-", "-", "-", "-", "-", "-", "-", "PASS"),
-        ("OK", "-", "-", "-", "-", "-", "-", "-", "-", "-", "PASS")
+        ("3253", "3253", "3253", "-", "-", "-", "-", "-", "-", "-", "PASS"),
+        ("0.82", "0.82", "0.82", "-", "-", "-", "-", "-", "-", "-", "PASS"),
+        ("OK", "OK", "OK", "-", "-", "-", "-", "-", "-", "-", "PASS")
     ]):
         for c, val in enumerate(vals):
-            bg_c = "#aeea00" if c == 0 or c == 10 else "white"
-            font_w = ('Arial', 10, 'bold') if c == 0 or c == 10 else ('Arial', 10)
-            tk.Label(test_grid, text=val, bg=bg_c, fg="black", borderwidth=1, relief="solid", font=font_w).grid(row=r+1, column=c, sticky="nsew")
+            bg_c = "#aeea00" if c < 3 or c == 10 else "#f0f0f0"
+            tk.Label(test_grid, text=val, bg=bg_c, fg="black", bd=1, relief="solid", font=('Arial', 10)).grid(row=r+1, column=c, sticky="nsew")
             
-    for i in range(11):
-        test_grid.columnconfigure(i, weight=1)
-    for i in range(5):
-        test_grid.rowconfigure(i, weight=1)
+    # 4. Scan Label Display
+    scan_frame = tk.Frame(left_col, bg="#001835", bd=1, relief="solid", highlightbackground="#1945d1", highlightthickness=1)
+    scan_frame.pack(fill="x", pady=15)
+    tk.Label(scan_frame, text="Scan the printed label & PASS Display", fg="white", bg="#001835", font=('Arial', 16, 'bold'), pady=15).pack()
 
-    # Big PASS Box
-    pass_lbl = tk.Label(test_mid, text="PASS", bg="#1945d1", fg="white", font=('Arial', 60, 'bold'), width=6)
-    pass_lbl.pack(side="right", fill="both", expand=True, padx=(5, 0))
-
-    # --- Bottom Log & Status Section ---
-    bottom_section = tk.Frame(right_content, bg="black", height=80)
-    bottom_section.pack(fill="x", pady=2)
-    bottom_section.pack_propagate(False)
+    # 5. Bottom Section
+    bottom_frame = tk.Frame(left_col, bg=bg_color)
+    bottom_frame.pack(fill="x")
+    bottom_frame.columnconfigure(0, weight=4)
+    bottom_frame.columnconfigure(1, weight=2)
+    bottom_frame.columnconfigure(2, weight=3)
     
-    # Receive IO
-    io_frame = ttk.LabelFrame(bottom_section, text="Receive IO Cable Data")
-    io_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+    # IO Cable Data
+    io_frame = ttk.LabelFrame(bottom_frame, text="Receive IO Cable Data")
+    io_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+    io_inner = tk.Frame(io_frame, bg=bg_color, padx=5, pady=5)
+    io_inner.pack(fill="both", expand=True)
     
-    io_layout = tk.Frame(io_frame, bg="black")
-    io_layout.columnconfigure(0, weight=1)
-    io_layout.pack(fill="both", expand=True, padx=2, pady=2)
+    io_inner.columnconfigure(1, weight=1)
     
-    left_io = tk.Frame(io_layout, bg="black")
-    left_io.columnconfigure(1, weight=1)
-    left_io.grid(row=0, column=0, rowspan=2, sticky="nsew")
-    
-    tk.Label(left_io, text="SP4", bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=4).grid(row=0, column=0, pady=1)
-    tk.Entry(left_io, bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=15).grid(row=0, column=1, pady=1)
-    
-    tk.Label(left_io, text="SB8", bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=4).grid(row=1, column=0, pady=1)
-    tk.Entry(left_io, bg="black", fg="white", font=('Arial', 7), borderwidth=1, relief="solid", width=15).grid(row=1, column=1, pady=1)
-    
-    tk.Label(io_layout, text="MPU", bg="black", fg="white", font=('Arial', 8, 'bold')).grid(row=0, column=1, rowspan=2, padx=15)
-    
-    ch_top = tk.Frame(io_layout, bg="black")
-    ch_top.grid(row=0, column=2, sticky="sw")
-    ch_bot = tk.Frame(io_layout, bg="black")
-    ch_bot.grid(row=1, column=2, sticky="nw")
-    
+    tk.Label(io_inner, text="INPUT", bg=bg_color, fg="white", font=('Arial', 9, 'bold')).grid(row=0, column=0, sticky="w", columnspan=2)
+    in_box = tk.Frame(io_inner, bg=bg_color)
+    in_box.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
     for i in range(1, 11):
-        tk.Label(ch_top, text=f"CH{i}", bg="#222", fg="white", borderwidth=1, relief="solid", width=3, font=('Arial', 7)).pack(side="left")
-        tk.Label(ch_bot, text=f"CH{i}", bg="#222", fg="white", borderwidth=1, relief="solid", width=3, font=('Arial', 7)).pack(side="left")
+        tk.Label(in_box, text=f"CH{i}", bg="#001000", fg="#4caf50", bd=1, relief="solid", highlightbackground="#4caf50", font=('Arial', 8), width=3).pack(side="left", padx=1)
         
-    out_frame = tk.Frame(io_layout, bg="black")
-    out_frame.grid(row=0, column=3, rowspan=2, padx=10, sticky="nsew")
+    tk.Label(io_inner, text="OUTPUT", bg=bg_color, fg="white", font=('Arial', 9, 'bold')).grid(row=2, column=0, sticky="w")
+    tk.Label(io_inner, text="CS", bg=bg_color, fg="white", font=('Arial', 9, 'bold')).grid(row=2, column=1, sticky="e", padx=10)
     
-    tk.Label(out_frame, text="OUTPUT", bg="black", fg="white", font=('Arial', 8, 'bold')).pack()
-    rev_frame = tk.Frame(out_frame, bg="black")
-    rev_frame.pack()
-    tk.Label(rev_frame, text="Rev", bg="black", fg="white", font=('Arial', 7)).pack(side="left")
-    tk.Label(rev_frame, text="S1./\nCG6 C's", bg="black", fg="white", font=('Arial', 7), justify="left").pack(side="left", padx=5)
+    out_box = tk.Frame(io_inner, bg=bg_color)
+    out_box.grid(row=3, column=0, sticky="w")
+    for i in range(1, 11):
+        tk.Label(out_box, text=f"CH{i}", bg="#001000", fg="#4caf50", bd=1, relief="solid", highlightbackground="#4caf50", font=('Arial', 8), width=3).pack(side="left", padx=1)
+        
+    cs_box = tk.Frame(io_inner, bg=bg_color)
+    cs_box.grid(row=3, column=1, sticky="e", padx=10)
+    canvas = tk.Canvas(cs_box, width=40, height=20, bg=bg_color, highlightthickness=0)
+    canvas.pack()
+    canvas.create_oval(2, 4, 14, 16, fill="#4caf50", outline="#4caf50")
+    canvas.create_oval(20, 4, 32, 16, fill="#4caf50", outline="#4caf50")
 
     # COM Status
-    com_frame = ttk.LabelFrame(bottom_section, text="COM Status")
-    com_frame.pack(side="left", fill="y", padx=5)
+    com_frame = ttk.LabelFrame(bottom_frame, text="COM Status")
+    com_frame.grid(row=0, column=1, sticky="nsew", padx=5)
+    com_inner = tk.Frame(com_frame, bg=bg_color, padx=5, pady=5)
+    com_inner.pack(expand=True)
     
-    tk.Label(com_frame, text="HOST", bg="#76ff03", fg="black", width=5, font=('Arial', 7, 'bold')).grid(row=0, column=0, padx=1, pady=1)
-    tk.Label(com_frame, text="LCR", bg="#555", fg="white", width=5, font=('Arial', 7)).grid(row=0, column=1, padx=1, pady=1)
-    tk.Label(com_frame, text="RELAY", bg="#555", fg="white", width=5, font=('Arial', 7)).grid(row=0, column=2, padx=1, pady=1)
-    tk.Label(com_frame, text="IO", bg="#76ff03", fg="black", width=5, font=('Arial', 7, 'bold')).grid(row=1, column=0, padx=1, pady=1)
-    tk.Label(com_frame, text="R/MPU", bg="#76ff03", fg="black", width=5, font=('Arial', 7, 'bold')).grid(row=1, column=1, padx=1, pady=1)
-    tk.Label(com_frame, text="SCANNE", bg="#555", fg="white", width=6, font=('Arial', 7)).grid(row=1, column=2, padx=1, pady=1)
+    def mk_com_lbl(parent, text, on=True):
+        bg = "#4caf50" if on else "#3a4150"
+        fg = "white" if not on else "black"
+        return tk.Label(parent, text=text, bg=bg, fg=fg, width=8, font=('Arial', 9))
+        
+    mk_com_lbl(com_inner, "PROT", True).grid(row=0, column=0, padx=2, pady=3)
+    mk_com_lbl(com_inner, "LCR", False).grid(row=0, column=1, padx=2, pady=3)
+    mk_com_lbl(com_inner, "Rever", False).grid(row=0, column=2, padx=2, pady=3)
+    mk_com_lbl(com_inner, "IO", True).grid(row=1, column=0, padx=2, pady=3)
+    mk_com_lbl(com_inner, "Printer", True).grid(row=1, column=1, padx=2, pady=3)
+    mk_com_lbl(com_inner, "Scanner", True).grid(row=1, column=2, padx=2, pady=3)
 
     # Log
-    log_frame = ttk.LabelFrame(bottom_section, text="Log")
-    log_frame.pack(side="left", fill="y", padx=(5, 0))
-    log_text = tk.Text(log_frame, bg="black", fg="white", font=('Arial', 8), borderwidth=0, width=25)
-    log_text.pack(fill="both", expand=True)
-    log_text.insert("end", ")\n11:00:06.916> function\nname=Connect\n11:00:08.596> Quit\n(0)=Normal")
+    log_frame = ttk.LabelFrame(bottom_frame, text="Log")
+    log_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 0))
+    log_text = tk.Text(log_frame, bg=bg_color, fg="#aaa", font=('Consolas', 10), borderwidth=0, width=30, height=5)
+    log_text.pack(fill="both", expand=True, padx=5, pady=5)
+    log_text.insert("end", "15:05:07.305> function name=Connect\n")
+    log_text.insert("end", "15:05:10.264> Quit\n")
+    log_text.insert("end", "(0)=Normal\n")
+    log_text.config(state="disabled")
+
+    # ---- RIGHT COLUMN ----
+    right_col.rowconfigure(0, weight=2)
+    right_col.rowconfigure(1, weight=2)
+    right_col.rowconfigure(2, weight=1)
+    
+    def create_right_panel(parent, title, content_bg, content_fg, content_text, font_size, is_bold=False):
+        outer = tk.Frame(parent, bg="#7a7a7a", padx=1, pady=1) # border
+        inner = tk.Frame(outer, bg="black")
+        inner.pack(fill="both", expand=True)
+        tk.Label(inner, text=title, bg="black", fg="white", font=('Arial', 11)).pack(pady=4)
+        font_weight = 'bold' if is_bold else 'normal'
+        tk.Label(inner, text=content_text, bg=content_bg, fg=content_fg, font=('Arial', font_size, font_weight)).pack(fill="both", expand=True)
+        return outer
+        
+    cam1_frame = create_right_panel(right_col, "Cam 1", "#e0e0e0", "black", "Image / result", 14)
+    cam1_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+    
+    cam2_frame = create_right_panel(right_col, "Cam 2", "#e0e0e0", "black", "Image / result", 14)
+    cam2_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+    
+    res_frame = create_right_panel(right_col, "Test Result", "#1945d1", "white", "PASS", 60, True)
+    res_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
 
     root.mainloop()
 
