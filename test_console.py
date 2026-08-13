@@ -1,78 +1,18 @@
 import tkinter as tk
 from tkinter import ttk
 
-def main():
-    root = tk.Tk()
-    root.title("Feeder Cable Tester ver. V0.02.33.1")
-    root.geometry("1350x860")
-    root.configure(bg="black")
-    root.resizable(True, True)
-
+def render(parent):
     style = ttk.Style()
-    style.theme_use("clam")
-
+    
     bg = "black"
     style.configure("TLabelframe", background=bg, foreground="white", bordercolor="#555")
     style.configure("TLabelframe.Label", background=bg, foreground="white", font=('Arial', 10))
     style.configure("Treeview.Heading", background="#d0d0d0", foreground="black", font=('Arial', 9, 'bold'))
     style.configure("Treeview", background="white", foreground="black", fieldbackground="white", font=('Arial', 9), rowheight=28)
 
-    # ==================== HEADER ====================
-    header = tk.Frame(root, bg="black", height=45)
-    header.pack(fill="x")
-    header.pack_propagate(False)
-
-    logo_box = tk.Frame(header, bg="white", padx=6, pady=3)
-    logo_box.pack(side="left", padx=10, pady=6)
-    tk.Label(logo_box, text="INFAC", fg="#c00000", bg="white", font=('Arial', 16, 'bold')).pack(side="left")
-    tk.Label(logo_box, text=" 주식회사인팩", fg="black", bg="white", font=('Malgun Gothic', 9)).pack(side="left")
-
-    tk.Label(header, text="Feeder Cable", fg="#e8a000", bg="black", font=('Arial', 15, 'bold')).pack(side="left", padx=25)
-    tk.Label(header, text="15/07/2025  15:05:07", fg="white", bg="black", font=('Arial', 10)).pack(side="right", padx=15)
-
-    # ==================== BODY ====================
-    body = tk.Frame(root, bg="black")
-    body.pack(fill="both", expand=True)
-
-    # --- Sidebar ---
-    sidebar_w = 90
-    sidebar = tk.Frame(body, bg="black", width=sidebar_w)
-    sidebar.pack(side="left", fill="y")
-    sidebar.pack_propagate(False)
-
-    sidebar_buttons = [
-        ("👤", "Admin", "test_console.py"),
-        ("⚙", "Settings", "model_settings.py"),
-        ("⚖", "Comparator", ""),
-        ("📋", "Test Data", "data_console.py"),
-        ("🔧", "COM Setting", "comport_settings.py"),
-    ]
-    
-    import subprocess
-    import sys
-    import os
-    
-    def on_btn_click(script):
-        if script and os.path.exists(script):
-            subprocess.Popen([sys.executable, script])
-            root.destroy()
-            
-    for icon, text, script in sidebar_buttons:
-        f = tk.Frame(sidebar, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1, cursor="hand2" if script else "arrow")
-        f.pack(fill="x", padx=4, pady=3)
-        lbl_icon = tk.Label(f, text=icon, bg="#111", fg="white", font=('Arial', 18), cursor="hand2" if script else "arrow")
-        lbl_icon.pack(pady=(6, 0))
-        lbl_text = tk.Label(f, text=text, bg="#111", fg="white", font=('Arial', 8), cursor="hand2" if script else "arrow")
-        lbl_text.pack(pady=(0, 6))
-        
-        if script:
-            f.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-            lbl_icon.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-            lbl_text.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-
-    # --- Main content area ---
-    content = tk.Frame(body, bg="black")
-    content.pack(side="left", fill="both", expand=True, padx=(5, 0))
+    # Main content area
+    content = tk.Frame(parent, bg="black")
+    content.pack(fill="both", expand=True, padx=(5, 0))
 
     # Use grid: row0 = upper (left_area + right_panels), row1 = bottom bar
     content.rowconfigure(0, weight=1)
@@ -311,7 +251,4 @@ def main():
     log_txt.insert("end", "(0)=Normal\n")
     log_txt.config(state="disabled")
 
-    root.mainloop()
 
-if __name__ == "__main__":
-    main()
