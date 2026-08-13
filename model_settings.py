@@ -95,7 +95,6 @@ def render(parent):
         ("1", "Insulation Test", "Volts", "All/Single", "1", "", "500", "100", "999", "0", "0"),
         ("2", "With Stand (mA)", "mA", "All/Single", "3", "", "1000", "0", "10", "0", "0"),
         ("3", "Contact", "-", "All/Single", "-", "-", "-", "-", "-", "-", "-"),
-        ("4", "Resistance", "Ω", "All/Single", "-", "-", "-", "-", "-", "-", "-"),
     ]
     
     style.configure("Dark.TCheckbutton", background="#0a0a0a")
