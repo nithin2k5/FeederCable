@@ -36,12 +36,12 @@ def render(parent):
         tk.Label(table_frame, text=h, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=0, column=i, sticky=sticky, padx=15, pady=(0, 15))
 
     devices = [
-        ("HIPOT", "COM 3", "9600", "-"),
-        ("LCR METER", "COM 0", "9600", "-"),
-        ("PLC", "COM 0", "9600", "01"),
-        ("IO Controller Cable", "COM 5", "9600", "-"),
-        ("Label Printer", "COM 6", "9600", "-"),
-        ("Scanner", "COM 0", "9600", "-"),
+        ("HIPOT", "COM0", "9600", "-"),
+        ("LCR METER", "COM0", "9600", "-"),
+        ("PLC", "COM0", "9600", "01"),
+        ("IO Controller Cable", "COM0", "9600", "-"),
+        ("Label Printer", "COM0", "9600", "-"),
+        ("Scanner", "COM0", "9600", "-"),
     ]
 
     import serial.tools.list_ports
