@@ -41,17 +41,34 @@ def main():
     sidebar.pack_propagate(False)
 
     sidebar_buttons = [
-        ("👤", "Admin"),
-        ("⚙", "Settings"),
-        ("⚖", "Comparator"),
-        ("📋", "Test Data"),
-        ("🔧", "COM Setting"),
+        ("👤", "Admin", "test_console.py"),
+        ("⚙", "Settings", "model_settings.py"),
+        ("⚖", "Comparator", ""),
+        ("📋", "Test Data", "data_console.py"),
+        ("🔧", "COM Setting", "comport_settings.py"),
     ]
-    for icon, text in sidebar_buttons:
-        f = tk.Frame(sidebar, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1)
+    
+    import subprocess
+    import sys
+    import os
+    
+    def on_btn_click(script):
+        if script and os.path.exists(script):
+            subprocess.Popen([sys.executable, script])
+            root.destroy()
+            
+    for icon, text, script in sidebar_buttons:
+        f = tk.Frame(sidebar, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1, cursor="hand2" if script else "arrow")
         f.pack(fill="x", padx=4, pady=3)
-        tk.Label(f, text=icon, bg="#111", fg="white", font=('Arial', 18)).pack(pady=(6, 0))
-        tk.Label(f, text=text, bg="#111", fg="white", font=('Arial', 8)).pack(pady=(0, 6))
+        lbl_icon = tk.Label(f, text=icon, bg="#111", fg="white", font=('Arial', 18), cursor="hand2" if script else "arrow")
+        lbl_icon.pack(pady=(6, 0))
+        lbl_text = tk.Label(f, text=text, bg="#111", fg="white", font=('Arial', 8), cursor="hand2" if script else "arrow")
+        lbl_text.pack(pady=(0, 6))
+        
+        if script:
+            f.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
+            lbl_icon.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
+            lbl_text.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
 
     # --- Main content area ---
     content = tk.Frame(body, bg="black")
