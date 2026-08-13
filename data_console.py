@@ -1,20 +1,13 @@
 import tkinter as tk
 from tkinter import ttk
 
-def main():
-    root = tk.Tk()
-    root.title("Test Data Console")
-    root.geometry("1350x860")
-    
+def render(parent):
     bg_color = "#081014" # Dark cyan-tinted background from image
     border_color = "#182c35" # slightly lighter cyan/teal for borders
     text_color = "white"
     teal_text = "#489fb5" # cyan/teal color for INFAC INDIA
     
-    root.configure(bg="black")
-    
     style = ttk.Style()
-    style.theme_use("clam")
     
     # Custom styles
     style.configure("Treeview.Heading", background="#0a1920", foreground=text_color, font=('Arial', 9, 'bold'), bordercolor=border_color, lightcolor=border_color, darkcolor=border_color)
@@ -23,49 +16,9 @@ def main():
     
     style.configure("TCombobox", fieldbackground="#111", background="#111", foreground="white", bordercolor=border_color)
 
-    # --- Body ---
-    body = tk.Frame(root, bg="black")
-    body.pack(fill="both", expand=True)
-
-    # --- Sidebar ---
-    sidebar_w = 90
-    sidebar = tk.Frame(body, bg="black", width=sidebar_w)
-    sidebar.pack(side="left", fill="y")
-    sidebar.pack_propagate(False)
-
-    sidebar_buttons = [
-        ("👤", "Admin", "test_console.py"),
-        ("⚙", "Settings", "model_settings.py"),
-        ("⚖", "Comparator", ""),
-        ("📋", "Test Data", "data_console.py"),
-        ("🔧", "COM Setting", "comport_settings.py"),
-    ]
-    
-    import subprocess
-    import sys
-    import os
-    
-    def on_btn_click(script):
-        if script and os.path.exists(script):
-            subprocess.Popen([sys.executable, script])
-            root.destroy()
-            
-    for icon, text, script in sidebar_buttons:
-        f = tk.Frame(sidebar, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1, cursor="hand2" if script else "arrow")
-        f.pack(fill="x", padx=4, pady=3)
-        lbl_icon = tk.Label(f, text=icon, bg="#111", fg="white", font=('Arial', 18), cursor="hand2" if script else "arrow")
-        lbl_icon.pack(pady=(6, 0))
-        lbl_text = tk.Label(f, text=text, bg="#111", fg="white", font=('Arial', 8), cursor="hand2" if script else "arrow")
-        lbl_text.pack(pady=(0, 6))
-        
-        if script:
-            f.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-            lbl_icon.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-            lbl_text.bind("<Button-1>", lambda e, s=script: on_btn_click(s))
-
     # --- Main Content ---
-    content = tk.Frame(body, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
-    content.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+    content = tk.Frame(parent, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    content.pack(fill="both", expand=True, padx=5, pady=5)
     
     # --- Top Header ---
     header = tk.Frame(content, bg=bg_color, height=80, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
@@ -156,7 +109,4 @@ def main():
         tree.heading(col, text=col)
         tree.column(col, width=col_widths.get(col, 80), anchor="center")
 
-    root.mainloop()
 
-if __name__ == "__main__":
-    main()
