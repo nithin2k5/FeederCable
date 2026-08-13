@@ -18,6 +18,15 @@ class App:
         style = ttk.Style()
         style.theme_use("clam")
         
+        # Global Combobox Styling (match the dark tk.Entry styles)
+        style.configure("TCombobox", fieldbackground="#111", background="#111", foreground="white", bordercolor="#444", arrowcolor="white", lightcolor="#111", darkcolor="#111")
+        style.map("TCombobox", 
+            fieldbackground=[("readonly", "#111"), ("disabled", "#111")],
+            selectbackground=[("readonly", "#2196f3")],
+            selectforeground=[("readonly", "white")],
+            foreground=[("readonly", "white")]
+        )
+        
         self.build_header()
         self.build_body()
         
