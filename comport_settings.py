@@ -76,10 +76,12 @@ def render(parent):
     log_text.insert("end", "!007F00\n")
     log_text.config(state="disabled")
 
-    # Bottom button
+    # Bottom buttons
     bottom_bar = tk.Frame(panel, bg="#12151b")
     bottom_bar.pack(fill="x", padx=20, pady=(0, 20))
     
-    tk.Button(bottom_bar, text="Complete", bg="#e0e0e0", fg="black", font=('Arial', 11, 'bold'), width=15, bd=0, pady=5).pack(side="right")
+    tk.Button(bottom_bar, text="Complete", bg="#e0e0e0", fg="black", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=(5, 0))
+    tk.Button(bottom_bar, text="Update", bg="#2196f3", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
+    tk.Button(bottom_bar, text="Save", bg="#4caf50", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
 
 
