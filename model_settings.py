@@ -108,10 +108,18 @@ def render(parent):
         
         cb_frame = tk.Frame(table_frame, bg="#0a0a0a", bd=1, relief="solid")
         cb_frame.grid(row=r+1, column=3, sticky="nsew")
-        # Custom checkbox look
-        tk.Label(cb_frame, text="☐", bg="#0a0a0a", fg="#4ba3e3", font=('Arial', 14)).pack(expand=True)
+        # Actual Checkbox
+        var = tk.BooleanVar()
+        tk.Checkbutton(cb_frame, variable=var, bg="#0a0a0a", activebackground="#0a0a0a", selectcolor="#222").pack(expand=True)
         
-        for c_idx, val in enumerate([ttype, ttime, freq, volts, rmin, rmax, ref, offset], start=4):
+        # TEST TYPE Combobox
+        combo_frame = tk.Frame(table_frame, bg="#0a0a0a", bd=1, relief="solid")
+        combo_frame.grid(row=r+1, column=4, sticky="nsew")
+        combo = ttk.Combobox(combo_frame, values=["All/Single", "Combined"], state="readonly", width=12, font=('Arial', 9))
+        combo.set(ttype if ttype in ["All/Single", "Combined"] else "All/Single")
+        combo.pack(expand=True, pady=4)
+        
+        for c_idx, val in enumerate([ttime, freq, volts, rmin, rmax, ref, offset], start=5):
             tk.Label(table_frame, text=val, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid").grid(row=r+1, column=c_idx, sticky="nsew")
 
     # --- Bottom Section ---
