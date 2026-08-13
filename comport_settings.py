@@ -67,21 +67,21 @@ def render(parent):
         # TEST Button
         tk.Button(table_frame, text="TEST", bg="#e0e0e0", fg="black", font=('Arial', 10, 'bold'), width=10, bd=0).grid(row=r, column=5, padx=15)
 
-    # Text Area
-    text_frame = tk.Frame(panel, bg="#12151b", bd=1, relief="solid", highlightbackground="#333", highlightthickness=1)
-    text_frame.pack(fill="both", expand=True, padx=20, pady=(10, 20))
-    
-    log_text = tk.Text(text_frame, bg="#12151b", fg="white", font=('Consolas', 11), bd=0)
-    log_text.pack(fill="both", expand=True, padx=10, pady=10)
-    log_text.insert("end", "!007F00\n")
-    log_text.config(state="disabled")
-
     # Bottom buttons
     bottom_bar = tk.Frame(panel, bg="#12151b")
-    bottom_bar.pack(fill="x", padx=20, pady=(0, 20))
+    bottom_bar.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
     
     tk.Button(bottom_bar, text="Complete", bg="#e0e0e0", fg="black", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=(5, 0))
     tk.Button(bottom_bar, text="Update", bg="#2196f3", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
     tk.Button(bottom_bar, text="Save", bg="#4caf50", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
+
+    # Text Area
+    text_frame = tk.Frame(panel, bg="#12151b", bd=1, relief="solid", highlightbackground="#333", highlightthickness=1)
+    text_frame.pack(side="top", fill="both", expand=True, padx=20, pady=(10, 20))
+    
+    log_text = tk.Text(text_frame, bg="#12151b", fg="white", font=('Consolas', 11), bd=0, height=8)
+    log_text.pack(fill="both", expand=True, padx=10, pady=10)
+    log_text.insert("end", "!007F00\n")
+    log_text.config(state="disabled")
 
 
