@@ -103,12 +103,12 @@ def render(parent):
                         client = ModbusSerialClient(framer='rtu', port=port, baudrate=baud_val, bytesize=8, parity='N', stopbits=1, timeout=1.5)
                         
                     if client.connect():
-                        res = client.read_coils(0, count=1, device_id=sid_val)
+                        res = client.read_discrete_inputs(0, count=1, device_id=sid_val)
                         if res.isError():
                             log_msg(f"{dev} Error: Connected but no valid response.")
                             _update_btn("FAIL", "#f44336")
                         else:
-                            log_msg(f"{dev} Success: Read coil value {res.bits[0]} from {port}.")
+                            log_msg(f"{dev} Success: Read input value {res.bits[0]} from {port}.")
                             _update_btn("PASS", "#4caf50")
                         client.close()
                     else:
