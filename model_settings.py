@@ -77,7 +77,7 @@ def render(parent):
     tab_bar = tk.Frame(mid_frame, bg="black", pady=5, padx=5)
     tab_bar.pack(fill="x")
     
-    mk_combo(tab_bar, ["WIRE / CHANNEL #"], width=25).pack(side="left", padx=(0, 10))
+    mk_combo(tab_bar, ["WIRE / CHANNEL #", "COMBINED"], width=25).pack(side="left", padx=(0, 10))
     
     for i in range(1, 11):
         bg_c = "#111" if i > 1 else "#222"
@@ -86,21 +86,21 @@ def render(parent):
     table_frame = tk.Frame(mid_frame, bg="black")
     table_frame.pack(fill="x")
     
-    headers = ["#", "TEST", "Unit", "SKIP", "TEST TYPE", "TEST TIME (SEC)", "Freq (kHz/MHz)", "Applied Volts (V)", "Result - Min", "Result - Max", "REF", "Offset"]
+    headers = ["#", "TEST", "Unit", "SKIP", "TEST TYPE", "TEST TIME (SEC)", "Freq (kHz/MHz)", "Applied Volts (V)", "Result - Min", "Result - Max"]
     for i, h in enumerate(headers):
         table_frame.columnconfigure(i, weight=1)
         tk.Label(table_frame, text=h, bg="#111", fg="white", font=('Arial', 9, 'bold'), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
 
     test_data = [
-        ("1", "Insulation Test", "Volts", "All/Single", "1", "", "500", "100", "999", "0", "0"),
-        ("2", "With Stand (mA)", "mA", "All/Single", "3", "", "1000", "0", "10", "0", "0"),
-        ("3", "Contact", "-", "All/Single", "-", "-", "-", "-", "-", "-", "-"),
+        ("1", "Insulation Test", "Volts", "All/Single", "1", "", "500", "100", "999"),
+        ("2", "With Stand (mA)", "mA", "All/Single", "3", "", "1000", "0", "10"),
+        ("3", "Contact", "-", "All/Single", "-", "-", "-", "-", "-"),
     ]
     
     style.configure("Dark.TCheckbutton", background="#0a0a0a")
     
     for r, row in enumerate(test_data):
-        idx, test_name, unit, ttype, ttime, freq, volts, rmin, rmax, ref, offset = row
+        idx, test_name, unit, ttype, ttime, freq, volts, rmin, rmax = row
         
         tk.Label(table_frame, text=idx, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid", pady=6).grid(row=r+1, column=0, sticky="nsew")
         tk.Label(table_frame, text=test_name, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid").grid(row=r+1, column=1, sticky="nsew")
@@ -119,7 +119,7 @@ def render(parent):
         combo.set(ttype if ttype in ["All/Single", "Combined"] else "All/Single")
         combo.pack(expand=True, pady=4)
         
-        for c_idx, val in enumerate([ttime, freq, volts, rmin, rmax, ref, offset], start=5):
+        for c_idx, val in enumerate([ttime, freq, volts, rmin, rmax], start=5):
             entry = tk.Entry(table_frame, bg="#0a0a0a", fg="white", font=('Arial', 9), bd=1, relief="solid", justify="center", insertbackground="white")
             entry.insert(0, val)
             entry.grid(row=r+1, column=c_idx, sticky="nsew", ipady=4)
