@@ -67,6 +67,7 @@ class App:
         sidebar.pack_propagate(False)
 
         sidebar_buttons = [
+            ("🏠", "Home", "test_console"),
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
             ("⚖", "Comparator", ""),
