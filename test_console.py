@@ -288,14 +288,9 @@ def render(parent):
         lbl = com_labels.get(dev)
         if lbl: lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
 
-    blink_frame = tk.Frame(right_panel, bg="black")
-    blink_frame.grid(row=2, column=0, sticky="ew", pady=(0, 3))
-    blink_lbl = tk.Label(blink_frame, text="  SYSTEM  ", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), pady=6, bd=1, relief="solid")
-    blink_lbl.pack(fill="x", padx=2)
-    
     # Image placeholders
     img_frame = tk.Frame(right_panel, bg="black")
-    img_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
+    img_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
     try:
         from PIL import Image, ImageTk
         # First Image
@@ -322,21 +317,8 @@ def render(parent):
     except Exception:
         tk.Label(img_frame, text="[ Image Frame ]\n(Requires Pillow)", bg="#1a1a1a", fg="#444", width=28, height=12, bd=1, relief="solid").pack(pady=2)
 
-    _blink_state = {"on": False, "active": True}
-    def _blink_toggle():
-        if not blink_lbl.winfo_exists(): return
-        if not _blink_state["active"]: return
-        _blink_state["on"] = not _blink_state["on"]
-        blink_lbl.config(bg="#003399" if _blink_state["on"] else "#1a1a1a", fg="white" if _blink_state["on"] else "#555")
-        parent.after(500, _blink_toggle)
-    def blink_start():
-        if not blink_lbl.winfo_exists(): return
-        _blink_state["active"] = True
-        _blink_toggle()
-    def blink_stop():
-        _blink_state["active"] = False
-        blink_lbl.config(bg="#1a1a1a", fg="#555")
-    parent.after(200, blink_start)
+    def blink_start(): pass
+    def blink_stop(): pass
 
     row0 = tk.Frame(left_area, bg="black")
     row0.pack(fill="x", pady=(0, 3))
