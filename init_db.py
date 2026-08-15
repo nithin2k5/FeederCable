@@ -83,10 +83,12 @@ def init_db():
             dept VARCHAR(100)
         )''')
         
-        print("Inserting default 'nice' admin user...")
+        print("Inserting default admin users...")
         cur.execute('''
         INSERT IGNORE INTO admin (eno, ename, pwd, desig, dept) 
-        VALUES ('nice', 'System Admin', 'nice1234', 'Administrator', 'IT')
+        VALUES 
+            ('nice', 'System Admin', 'nice1234', 'Administrator', 'IT'),
+            ('123', 'Test User', '123', 'Tester', 'QA')
         ''')
 
         conn.commit()
