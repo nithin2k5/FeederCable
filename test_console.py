@@ -1,4 +1,4 @@
-﻿"""
+"""
 test_console.py
 ===============
 Main EOL test console page for Feeder Cable tester.
@@ -294,11 +294,13 @@ def render(parent):
     blink_lbl.pack(fill="x", padx=2)
     _blink_state = {"on": False, "active": True}
     def _blink_toggle():
+        if not blink_lbl.winfo_exists(): return
         if not _blink_state["active"]: return
         _blink_state["on"] = not _blink_state["on"]
         blink_lbl.config(bg="#003399" if _blink_state["on"] else "#1a1a1a", fg="white" if _blink_state["on"] else "#555")
         parent.after(500, _blink_toggle)
     def blink_start():
+        if not blink_lbl.winfo_exists(): return
         _blink_state["active"] = True
         _blink_toggle()
     def blink_stop():
