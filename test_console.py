@@ -298,7 +298,8 @@ def render(parent):
     img_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
     try:
         from PIL import Image, ImageTk
-        op_path = os.path.join(os.path.dirname(__file__), "operator_instructions.jpeg")
+        # First Image
+        op_path = os.path.join(os.path.dirname(__file__), "image1.jpeg")
         if os.path.exists(op_path):
             img = Image.open(op_path).resize((210, 150), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(img)
@@ -306,9 +307,10 @@ def render(parent):
             lbl.image = photo
             lbl.pack(pady=2)
         else:
-            tk.Label(img_frame, text="[ Operator\nInstructions ]", bg="#1a1a1a", fg="#444", width=28, height=8, bd=1, relief="solid").pack(pady=2)
+            tk.Label(img_frame, text="[ Image 1 ]", bg="#1a1a1a", fg="#444", width=28, height=8, bd=1, relief="solid").pack(pady=2)
             
-        logo_path = os.path.join(os.path.dirname(__file__), "nice.jpeg")
+        # Second Image
+        logo_path = os.path.join(os.path.dirname(__file__), "image_frame2.jpeg")
         if os.path.exists(logo_path):
             limg = Image.open(logo_path).resize((210, 80), Image.Resampling.LANCZOS)
             lphoto = ImageTk.PhotoImage(limg)
@@ -316,7 +318,7 @@ def render(parent):
             llbl.image = lphoto
             llbl.pack(pady=2)
         else:
-            tk.Label(img_frame, text="[ Logo ]", bg="#1a1a1a", fg="#444", width=28, height=4, bd=1, relief="solid").pack(pady=2)
+            tk.Label(img_frame, text="[ Image Frame 2 ]", bg="#1a1a1a", fg="#444", width=28, height=4, bd=1, relief="solid").pack(pady=2)
     except Exception:
         tk.Label(img_frame, text="[ Image Frame ]\n(Requires Pillow)", bg="#1a1a1a", fg="#444", width=28, height=12, bd=1, relief="solid").pack(pady=2)
 
