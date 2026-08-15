@@ -1,0 +1,6 @@
+# Legacy C# codebase (reference only)
+Feeder Cable (2)/
+
+# Python
+__pycache__/
+*.pyc
