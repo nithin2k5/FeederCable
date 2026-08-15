@@ -292,6 +292,34 @@ def render(parent):
     blink_frame.grid(row=2, column=0, sticky="ew", pady=(0, 3))
     blink_lbl = tk.Label(blink_frame, text="  SYSTEM  ", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), pady=6, bd=1, relief="solid")
     blink_lbl.pack(fill="x", padx=2)
+    
+    # Image placeholders
+    img_frame = tk.Frame(right_panel, bg="black")
+    img_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
+    try:
+        from PIL import Image, ImageTk
+        op_path = os.path.join(os.path.dirname(__file__), "operator_instructions.jpeg")
+        if os.path.exists(op_path):
+            img = Image.open(op_path).resize((210, 150), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            lbl = tk.Label(img_frame, image=photo, bg="black", bd=1, relief="solid")
+            lbl.image = photo
+            lbl.pack(pady=2)
+        else:
+            tk.Label(img_frame, text="[ Operator\nInstructions ]", bg="#1a1a1a", fg="#444", width=28, height=8, bd=1, relief="solid").pack(pady=2)
+            
+        logo_path = os.path.join(os.path.dirname(__file__), "nice.jpeg")
+        if os.path.exists(logo_path):
+            limg = Image.open(logo_path).resize((210, 80), Image.Resampling.LANCZOS)
+            lphoto = ImageTk.PhotoImage(limg)
+            llbl = tk.Label(img_frame, image=lphoto, bg="black", bd=1, relief="solid")
+            llbl.image = lphoto
+            llbl.pack(pady=2)
+        else:
+            tk.Label(img_frame, text="[ Logo ]", bg="#1a1a1a", fg="#444", width=28, height=4, bd=1, relief="solid").pack(pady=2)
+    except Exception:
+        tk.Label(img_frame, text="[ Image Frame ]\n(Requires Pillow)", bg="#1a1a1a", fg="#444", width=28, height=12, bd=1, relief="solid").pack(pady=2)
+
     _blink_state = {"on": False, "active": True}
     def _blink_toggle():
         if not blink_lbl.winfo_exists(): return
