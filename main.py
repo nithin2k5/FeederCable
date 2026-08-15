@@ -6,6 +6,8 @@ import test_console
 import model_settings
 import data_console
 import comport_settings
+import admin
+import auth
 
 class App:
     def __init__(self, root):
@@ -29,6 +31,9 @@ class App:
         
         self.build_header()
         self.build_body()
+        
+        # Show disclaimer before starting
+        self.root.after(100, lambda: auth.show_disclaimer(self.root))
         
         # Start on the default page
         self.load_page('test_console')
@@ -62,7 +67,7 @@ class App:
         sidebar.pack_propagate(False)
 
         sidebar_buttons = [
-            ("👤", "Admin", "test_console"),
+            ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
             ("⚖", "Comparator", ""),
             ("📋", "Test Data", "data_console"),
@@ -95,6 +100,12 @@ class App:
         self.content_area.pack(side="left", fill="both", expand=True)
         
     def load_page(self, page_name):
+        # Authentication check
+        if page_name in ["admin", "model_settings"]:
+            title_str = "Admin Login" if page_name == "admin" else "Settings Login"
+            if not auth.show_login(self.root, title=title_str):
+                return
+                
         # 1. Clear the current content area
         for widget in self.content_area.winfo_children():
             widget.destroy()
@@ -107,6 +118,10 @@ class App:
         elif page_name == "model_settings":
             self.lbl_title.config(text="Model Settings", fg="#e8a000")
             model_settings.render(self.content_area)
+            
+        elif page_name == "admin":
+            self.lbl_title.config(text="Admin Settings", fg="#e8a000")
+            admin.render(self.content_area)
             
         elif page_name == "comport_settings":
             self.lbl_title.config(text="COM Settings", fg="#e8a000")
