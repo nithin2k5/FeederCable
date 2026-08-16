@@ -11,7 +11,13 @@ def show_disclaimer(parent_root):
     # Modal dialog that blocks the main window
     dialog = tk.Toplevel(parent_root)
     dialog.title("Disclaimer")
-    dialog.geometry("600x400")
+    
+    w, h = 600, 400
+    sw = dialog.winfo_screenwidth()
+    sh = dialog.winfo_screenheight()
+    x = int((sw/2) - (w/2))
+    y = int((sh/2) - (h/2))
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
     dialog.configure(bg="black")
     dialog.transient(parent_root)
     dialog.grab_set()
@@ -64,7 +70,13 @@ def show_login(parent_root, title="Login"):
     """
     dialog = tk.Toplevel(parent_root)
     dialog.title(title)
-    dialog.geometry("400x300")
+    
+    w, h = 400, 300
+    sw = dialog.winfo_screenwidth()
+    sh = dialog.winfo_screenheight()
+    x = int((sw/2) - (w/2))
+    y = int((sh/2) - (h/2))
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
     dialog.configure(bg="#111")
     dialog.transient(parent_root)
     dialog.grab_set()
