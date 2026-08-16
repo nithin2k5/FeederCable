@@ -294,7 +294,7 @@ def render(parent):
     try:
         from PIL import Image, ImageTk
         # First Image
-        op_path = os.path.join(os.path.dirname(__file__), "image1.jpeg")
+        op_path = os.path.join(os.path.dirname(__file__), "operator_instructions.jpeg")
         if os.path.exists(op_path):
             img = Image.open(op_path).resize((210, 150), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(img)
@@ -305,7 +305,7 @@ def render(parent):
             tk.Label(img_frame, text="[ Image 1 ]", bg="#1a1a1a", fg="#444", width=28, height=8, bd=1, relief="solid").pack(pady=2)
             
         # Second Image
-        logo_path = os.path.join(os.path.dirname(__file__), "image_frame2.jpeg")
+        logo_path = os.path.join(os.path.dirname(__file__), "nice.jpeg")
         if os.path.exists(logo_path):
             limg = Image.open(logo_path).resize((210, 80), Image.Resampling.LANCZOS)
             lphoto = ImageTk.PhotoImage(limg)
