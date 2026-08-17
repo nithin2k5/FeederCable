@@ -70,7 +70,7 @@ class App:
             ("🏠", "Home", "test_console"),
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
-            ("⚖", "Comparator", ""),
+            ("📷", "Camera Settings", ""),
             ("📋", "Test Data", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
         ]
