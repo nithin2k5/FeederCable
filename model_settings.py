@@ -8,7 +8,7 @@ def get_connection():
         host="localhost",
         database="fceol",
         user="root",
-        password="root"
+        password="12345"
     )
 
 # ─── Load available PRN label templates (mirrors Settings.cs display()) ───────
@@ -282,21 +282,21 @@ def render(parent):
             (ent_pno,   row_dict.get("pno", "")),
             (ent_pname, row_dict.get("pname", "")),
             (ent_cname, row_dict.get("cname", "")),
-            (ent_model, row_dict.get("model", "")),
-            (ent_vcode, row_dict.get("vcode", "")),
-            (ent_eon,   row_dict.get("eon", "")),
+            (ent_model, row_dict.get("mname", "")),
+            (ent_vcode, row_dict.get("vendorcode", "")),
+            (ent_eon,   row_dict.get("eocode", "")),
             (ent_alc,   row_dict.get("alc", "")),
         ]
         for entry, val in fields:
             entry.delete(0, "end")
             entry.insert(0, val or "")
 
-        ch_val = str(row_dict.get("channel", "1"))
+        ch_val = str(row_dict.get("chsel", "1"))
         ch_list = [str(i) for i in range(1, 11)]
         cb_channels.config(values=ch_list)
         cb_channels.set(ch_val if ch_val in ch_list else "1")
 
-        lbl_val = row_dict.get("label", "")
+        lbl_val = row_dict.get("lblsel", "")
         if lbl_val and lbl_val in cb_label["values"]:
             cb_label.set(lbl_val)
 
@@ -310,7 +310,7 @@ def render(parent):
         try:
             conn = get_connection()
             cur = conn.cursor()
-            cur.execute("SELECT pno, pname, cname, model, alc, channel, machine FROM settingmaster ORDER BY pno")
+            cur.execute("SELECT pno, pname, cname, mname, alc, chsel, machine FROM settingmaster ORDER BY pno")
             for idx, row in enumerate(cur.fetchall(), start=1):
                 pno, pname, cname, model, alc, channel, machine = row
                 tree_bot.insert("", "end", iid=pno,
@@ -332,7 +332,7 @@ def render(parent):
             conn = get_connection()
             cur = conn.cursor()
             cur.execute(
-                "SELECT testname, channel, appvol, testtime, min, max "
+                "SELECT testname, chsel, appvol, testtime, min, max "
                 "FROM settingspec WHERE pno=%s", (pno,))
             for row in cur.fetchall():
                 testname, ch_str, appvol, testtime, vmin, vmax = row
@@ -372,7 +372,7 @@ def render(parent):
 
             # Insert settingmaster
             cur.execute(
-                "INSERT INTO settingmaster (pno, pname, cname, model, vcode, eon, alc, channel, label, machine) "
+                "INSERT INTO settingmaster (pno, pname, cname, mname, vendorcode, eocode, alc, chsel, lblsel, machine) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (pno, ent_pname.get().strip(), ent_cname.get().strip(),
                  ent_model.get().strip(), ent_vcode.get().strip(),
@@ -385,7 +385,7 @@ def render(parent):
                 for test_name in ("IR", "ACW"):
                     vals = spec_data[ch][test_name]
                     cur.execute(
-                        "INSERT INTO settingspec (pno, testname, channel, appvol, testtime, min, max) "
+                        "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                         (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
 
@@ -412,8 +412,8 @@ def render(parent):
             cur = conn.cursor()
 
             cur.execute(
-                "UPDATE settingmaster SET pname=%s, cname=%s, model=%s, vcode=%s, "
-                "eon=%s, alc=%s, channel=%s, label=%s, machine=%s WHERE pno=%s",
+                "UPDATE settingmaster SET pname=%s, cname=%s, mname=%s, vendorcode=%s, "
+                "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s WHERE pno=%s",
                 (ent_pname.get().strip(), ent_cname.get().strip(),
                  ent_model.get().strip(), ent_vcode.get().strip(),
                  ent_eon.get().strip(), ent_alc.get().strip(),
@@ -426,7 +426,7 @@ def render(parent):
                 for test_name in ("IR", "ACW"):
                     vals = spec_data[ch][test_name]
                     cur.execute(
-                        "INSERT INTO settingspec (pno, testname, channel, appvol, testtime, min, max) "
+                        "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                         (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
 

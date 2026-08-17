@@ -35,7 +35,7 @@ except ImportError:
 
 def _get_conn():
     return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="root"
+        host="localhost", database="fceol", user="root", password="12345"
     )
 
 _CFG_PATH = os.path.join(os.path.dirname(__file__), "comport_cfg.ini")

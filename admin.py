@@ -4,7 +4,7 @@ import mysql.connector
 
 def _get_conn():
     return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="root"
+        host="localhost", database="fceol", user="root", password="12345"
     )
 
 def render(parent):
