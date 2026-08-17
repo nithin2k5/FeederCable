@@ -288,34 +288,19 @@ def render(parent):
         lbl = com_labels.get(dev)
         if lbl: lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
 
-    # Image placeholders
-    img_frame = tk.Frame(right_panel, bg="black")
-    img_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
-    try:
-        from PIL import Image, ImageTk
-        # First Image
-        op_path = os.path.join(os.path.dirname(__file__), "operator_instructions.jpeg")
-        if os.path.exists(op_path):
-            img = Image.open(op_path).resize((210, 150), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            lbl = tk.Label(img_frame, image=photo, bg="black", bd=1, relief="solid")
-            lbl.image = photo
-            lbl.pack(pady=2)
-        else:
-            tk.Label(img_frame, text="[ Image 1 ]", bg="#1a1a1a", fg="#444", width=28, height=8, bd=1, relief="solid").pack(pady=2)
-            
-        # Second Image
-        logo_path = os.path.join(os.path.dirname(__file__), "nice.jpeg")
-        if os.path.exists(logo_path):
-            limg = Image.open(logo_path).resize((210, 80), Image.Resampling.LANCZOS)
-            lphoto = ImageTk.PhotoImage(limg)
-            llbl = tk.Label(img_frame, image=lphoto, bg="black", bd=1, relief="solid")
-            llbl.image = lphoto
-            llbl.pack(pady=2)
-        else:
-            tk.Label(img_frame, text="[ Image Frame 2 ]", bg="#1a1a1a", fg="#444", width=28, height=4, bd=1, relief="solid").pack(pady=2)
-    except Exception:
-        tk.Label(img_frame, text="[ Image Frame ]\n(Requires Pillow)", bg="#1a1a1a", fg="#444", width=28, height=12, bd=1, relief="solid").pack(pady=2)
+    # Camera frames
+    cam_frame = tk.Frame(right_panel, bg="black")
+    cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
+    
+    cam1_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115)
+    cam1_container.pack_propagate(False)
+    cam1_container.pack(pady=(0, 4))
+    tk.Label(cam1_container, text="[ CAMERA 1 ]", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold")).pack(expand=True)
+    
+    cam2_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115)
+    cam2_container.pack_propagate(False)
+    cam2_container.pack(pady=(0, 2))
+    tk.Label(cam2_container, text="[ CAMERA 2 ]", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold")).pack(expand=True)
 
     def blink_start(): pass
     def blink_stop(): pass
