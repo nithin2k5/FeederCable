@@ -33,6 +33,18 @@ try:
 except ImportError:
     _print_ok = False
 
+try:
+    import cv2
+    _cv2_ok = True
+except ImportError:
+    _cv2_ok = False
+
+try:
+    from PIL import Image, ImageTk
+    _pil_ok = True
+except ImportError:
+    _pil_ok = False
+
 def _get_conn():
     return mysql.connector.connect(
         host="localhost", database="fceol", user="root", password="12345"
@@ -223,6 +235,78 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
     except Exception: pass
+
+_CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
+def _load_cam_cfg() -> dict:
+    cfg = configparser.ConfigParser()
+    cfg.read(_CAM_CFG_PATH)
+    return {
+        "cam1_index":   cfg.getint("CAMERA", "cam1_index",   fallback=-1),
+        "cam2_index":   cfg.getint("CAMERA", "cam2_index",   fallback=-1),
+        "cam1_width":   cfg.getint("CAMERA", "cam1_width",   fallback=640),
+        "cam1_height":  cfg.getint("CAMERA", "cam1_height",  fallback=480),
+        "cam2_width":   cfg.getint("CAMERA", "cam2_width",   fallback=640),
+        "cam2_height":  cfg.getint("CAMERA", "cam2_height",  fallback=480),
+        "cam1_enabled": cfg.getboolean("CAMERA", "cam1_enabled", fallback=False),
+        "cam2_enabled": cfg.getboolean("CAMERA", "cam2_enabled", fallback=False),
+    }
+
+class CameraFeed:
+    """Streams a live camera feed into a tkinter Label widget."""
+    def __init__(self, label, cam_index, display_w=200, display_h=110):
+        self._label = label
+        self._cam_index = cam_index
+        self._display_w = display_w
+        self._display_h = display_h
+        self._cap = None
+        self._running = False
+        self._photo = None
+
+    def start(self):
+        if not _cv2_ok or not _pil_ok or self._cam_index < 0:
+            return
+        self._running = True
+        threading.Thread(target=self._open_camera, daemon=True).start()
+
+    def _open_camera(self):
+        self._cap = cv2.VideoCapture(self._cam_index, cv2.CAP_DSHOW)
+        if not self._cap.isOpened():
+            self._running = False
+            try:
+                self._label.after(0, lambda: self._label.config(
+                    text="Camera\nunavailable", fg="#ff5555"))
+            except Exception:
+                pass
+            return
+        self._stream()
+
+    def _stream(self):
+        if not self._running or self._cap is None or not self._cap.isOpened():
+            return
+        ret, frame = self._cap.read()
+        if ret:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.resize(frame, (self._display_w, self._display_h))
+            img = Image.fromarray(frame)
+            self._photo = ImageTk.PhotoImage(img)
+            try:
+                self._label.config(image=self._photo, text="")
+                self._label.image = self._photo
+            except Exception:
+                self.stop()
+                return
+        if self._running:
+            try:
+                self._label.after(33, self._stream)  # ~30fps
+            except Exception:
+                self.stop()
+
+    def stop(self):
+        self._running = False
+        if self._cap and self._cap.isOpened():
+            self._cap.release()
+        self._cap = None
+
 def render(parent):
     cfg = _load_cfg()
     style = ttk.Style()
@@ -288,29 +372,48 @@ def render(parent):
         lbl = com_labels.get(dev)
         if lbl: lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
 
-    # Camera frames
+    # Camera frames — live feed from OpenCV
+    cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
     cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
-    
+    _cam_feeds = []  # track for cleanup
+
     def nav_camera(e):
+        # Stop feeds before navigating away
+        for feed in _cam_feeds:
+            feed.stop()
         try: parent.winfo_toplevel().event_generate("<<NavigateCameraSettings>>")
         except: pass
 
-    cam1_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115, cursor="hand2")
-    cam1_container.pack_propagate(False)
-    cam1_container.pack(pady=(0, 4))
-    lbl_cam1 = tk.Label(cam1_container, text="[ CAMERA 1 ]\n(Click to configure)", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
-    lbl_cam1.pack(expand=True)
-    cam1_container.bind("<Button-1>", nav_camera)
-    lbl_cam1.bind("<Button-1>", nav_camera)
-    
-    cam2_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115, cursor="hand2")
-    cam2_container.pack_propagate(False)
-    cam2_container.pack(pady=(0, 2))
-    lbl_cam2 = tk.Label(cam2_container, text="[ CAMERA 2 ]\n(Click to configure)", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
-    lbl_cam2.pack(expand=True)
-    cam2_container.bind("<Button-1>", nav_camera)
-    lbl_cam2.bind("<Button-1>", nav_camera)
+    def _make_cam_widget(container_parent, cam_label, cam_index, enabled):
+        """Create a camera frame — live feed if configured, placeholder otherwise."""
+        container = tk.Frame(container_parent, bg="#1a1a1a", bd=1, relief="solid",
+                             width=210, height=115)
+        container.pack_propagate(False)
+        container.pack(pady=(0, 4))
+
+        lbl = tk.Label(container, text=f"[ {cam_label} ]\n(Click to configure)",
+                       bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
+        lbl.pack(fill="both", expand=True)
+        container.bind("<Button-1>", nav_camera)
+        lbl.bind("<Button-1>", nav_camera)
+
+        if enabled and cam_index >= 0 and _cv2_ok and _pil_ok:
+            feed = CameraFeed(lbl, cam_index, display_w=208, display_h=113)
+            feed.start()
+            _cam_feeds.append(feed)
+
+        return container, lbl
+
+    _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"])
+    _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"])
+
+    # Cleanup camera feeds when page is destroyed
+    def _on_page_destroy(e):
+        if e.widget == content:
+            for feed in _cam_feeds:
+                feed.stop()
+    content.bind("<Destroy>", _on_page_destroy)
 
     def blink_start(): pass
     def blink_stop(): pass
