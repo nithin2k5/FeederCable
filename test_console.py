@@ -292,15 +292,25 @@ def render(parent):
     cam_frame = tk.Frame(right_panel, bg="black")
     cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
     
-    cam1_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115)
+    def nav_camera(e):
+        try: parent.winfo_toplevel().event_generate("<<NavigateCameraSettings>>")
+        except: pass
+
+    cam1_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115, cursor="hand2")
     cam1_container.pack_propagate(False)
     cam1_container.pack(pady=(0, 4))
-    tk.Label(cam1_container, text="[ CAMERA 1 ]", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold")).pack(expand=True)
+    lbl_cam1 = tk.Label(cam1_container, text="[ CAMERA 1 ]\n(Click to configure)", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
+    lbl_cam1.pack(expand=True)
+    cam1_container.bind("<Button-1>", nav_camera)
+    lbl_cam1.bind("<Button-1>", nav_camera)
     
-    cam2_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115)
+    cam2_container = tk.Frame(cam_frame, bg="#1a1a1a", bd=1, relief="solid", width=210, height=115, cursor="hand2")
     cam2_container.pack_propagate(False)
     cam2_container.pack(pady=(0, 2))
-    tk.Label(cam2_container, text="[ CAMERA 2 ]", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold")).pack(expand=True)
+    lbl_cam2 = tk.Label(cam2_container, text="[ CAMERA 2 ]\n(Click to configure)", bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
+    lbl_cam2.pack(expand=True)
+    cam2_container.bind("<Button-1>", nav_camera)
+    lbl_cam2.bind("<Button-1>", nav_camera)
 
     def blink_start(): pass
     def blink_stop(): pass

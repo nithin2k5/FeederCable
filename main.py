@@ -8,11 +8,13 @@ import data_console
 import comport_settings
 import admin
 import auth
+import camera_settings
 
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Feeder Cable App")
+        self.root.bind("<<NavigateCameraSettings>>", lambda e: self.load_page("camera_settings"))
         self.root.geometry("1350x860")
         self.root.configure(bg="black")
         
@@ -70,7 +72,7 @@ class App:
             ("🏠", "Home", "test_console"),
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
-            ("📷", "Camera Settings", ""),
+            ("📷", "Camera Settings", "camera_settings"),
             ("📋", "Test Data", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
         ]
@@ -127,6 +129,10 @@ class App:
         elif page_name == "comport_settings":
             self.lbl_title.config(text="COM Settings", fg="#e8a000")
             comport_settings.render(self.content_area)
+            
+        elif page_name == "camera_settings":
+            self.lbl_title.config(text="Camera Settings", fg="#e8a000")
+            camera_settings.render(self.content_area)
             
         elif page_name == "data_console":
             # data_console has its own specific title header built-in, so hide the universal one
