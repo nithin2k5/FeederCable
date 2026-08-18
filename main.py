@@ -10,6 +10,7 @@ import admin
 import auth
 import camera_settings
 import help_page
+import contact_page
 
 class App:
     def __init__(self, root):
@@ -77,6 +78,7 @@ class App:
             ("📋", "Test Data", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
             ("❓", "Help", "help"),
+            ("📞", "Contact", "contact"),
         ]
         
         for icon, text, page in sidebar_buttons:
@@ -144,6 +146,10 @@ class App:
         elif page_name == "help":
             self.lbl_title.config(text="Help", fg="#e8a000")
             help_page.render(self.content_area)
+            
+        elif page_name == "contact":
+            self.lbl_title.config(text="Contact", fg="#e8a000")
+            contact_page.render(self.content_area)
 
 if __name__ == "__main__":
     root = tk.Tk()
