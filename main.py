@@ -9,6 +9,7 @@ import comport_settings
 import admin
 import auth
 import camera_settings
+import help_page
 
 class App:
     def __init__(self, root):
@@ -75,6 +76,7 @@ class App:
             ("📷", "Camera Settings", "camera_settings"),
             ("📋", "Test Data", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
+            ("❓", "Help", "help"),
         ]
         
         for icon, text, page in sidebar_buttons:
@@ -138,6 +140,10 @@ class App:
             # data_console has its own specific title header built-in, so hide the universal one
             self.lbl_title.config(text="") 
             data_console.render(self.content_area)
+            
+        elif page_name == "help":
+            self.lbl_title.config(text="Help", fg="#e8a000")
+            help_page.render(self.content_area)
 
 if __name__ == "__main__":
     root = tk.Tk()
