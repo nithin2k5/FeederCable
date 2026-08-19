@@ -66,6 +66,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
 
     def start_camera(self):
         self.running = True
+        self.show_live_feed = True
         threading.Thread(target=self.update_frame, daemon=True).start()
 
     def _update_display_frame(self):
@@ -102,7 +103,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         
         while self.running:
             ret, frame = self.cap.read()
-            if ret:
+            if ret and self.show_live_feed:
                 self.current_frame = frame.copy()
                 self._update_display_frame()
             time.sleep(0.03)
@@ -146,8 +147,9 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             
         if added > 0:
             messagebox.showinfo("Upload", f"Successfully uploaded {added} image(s).")
-            # If there's no live feed, show the first uploaded image so they can draw ROI
-            if self.current_frame is None and self.captured_images:
+            # Stop the live feed and show the first uploaded image so they can draw ROI
+            self.show_live_feed = False
+            if self.captured_images:
                 self.current_frame = self.captured_images[0].copy()
                 self._update_display_frame()
 
