@@ -99,6 +99,10 @@ def render(parent):
     ent_eon   = mk_entry(f2); ent_eon.grid(row=1, column=1, sticky="ew", padx=10)
     ent_alc   = mk_entry(f2); ent_alc.grid(row=2, column=1, sticky="ew", padx=10)
 
+    tk.Label(f2, text="TEST MODE", bg="black", fg="white", font=('Arial', 9, 'bold')).grid(row=3, column=0, sticky="w", pady=5)
+    cb_testmode = mk_combo(f2, ["Combined", "Single"], width=20)
+    cb_testmode.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+
     # Column-3: Channels, Label Template, Machine ID
     f3 = tk.Frame(top_frame, bg="black", padx=15, pady=10)
     f3.pack(side="left", fill="both", expand=True)
@@ -218,7 +222,24 @@ def render(parent):
     for i, lbl in enumerate(ch_labels):
         lbl.bind("<Button-1>", lambda e, c=i+1: switch_channel(c))
 
+    def update_channel_visibility(*args):
+        try:
+            num_ch = int(cb_channels.get())
+        except ValueError:
+            num_ch = 1
+        for i, lbl in enumerate(ch_labels):
+            if i < num_ch:
+                lbl.pack(side="left", padx=1)
+            else:
+                lbl.pack_forget()
+        if active_ch["value"] > num_ch:
+            switch_channel(num_ch)
+
+    cb_channels.bind("<<ComboboxSelected>>", update_channel_visibility)
+    cb_channels.bind("<KeyRelease>", update_channel_visibility)
+
     switch_channel(1)   # initial render
+    update_channel_visibility()
 
     # ─────────────────────────────────────────────────────────────────────────
     # BOTTOM  — Parts list (settingmaster)
@@ -256,7 +277,9 @@ def render(parent):
         cb_channels.current(0)
         cb_label.current(0)
         cb_machine.current(0)
+        cb_testmode.current(0)
         selected_pno["value"] = None
+        update_channel_visibility()
         # Reset spec data
         for ch in range(1, 11):
             spec_data[ch] = {
@@ -272,7 +295,7 @@ def render(parent):
                   ent_vcode, ent_eon, ent_alc):
             e.config(state=st)
         cb_state = "disabled" if locked else "readonly"
-        for cb in (cb_channels, cb_label, cb_machine):
+        for cb in (cb_channels, cb_label, cb_machine, cb_testmode):
             cb.config(state=cb_state)
 
     def set_form(row_dict):
@@ -303,6 +326,12 @@ def render(parent):
         mach_val = row_dict.get("machine", "PB1")
         if mach_val in list(cb_machine["values"]):
             cb_machine.set(mach_val)
+
+        tmode_val = row_dict.get("testmode", "Combined")
+        if tmode_val in list(cb_testmode["values"]):
+            cb_testmode.set(tmode_val)
+        
+        update_channel_visibility()
 
     def refresh_parts_list():
         """Reload the bottom treeview from settingmaster."""
@@ -372,12 +401,13 @@ def render(parent):
 
             # Insert settingmaster
             cur.execute(
-                "INSERT INTO settingmaster (pno, pname, cname, mname, vendorcode, eocode, alc, chsel, lblsel, machine) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO settingmaster (pno, pname, cname, mname, vendorcode, eocode, alc, chsel, lblsel, machine, testmode) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (pno, ent_pname.get().strip(), ent_cname.get().strip(),
                  ent_model.get().strip(), ent_vcode.get().strip(),
                  ent_eon.get().strip(), ent_alc.get().strip(),
-                 cb_channels.get(), cb_label.get(), cb_machine.get()))
+                 cb_channels.get(), cb_label.get(), cb_machine.get(),
+                 cb_testmode.get()))
 
             # Insert settingspec for each channel and test type
             num_channels = int(cb_channels.get())
@@ -413,11 +443,12 @@ def render(parent):
 
             cur.execute(
                 "UPDATE settingmaster SET pname=%s, cname=%s, mname=%s, vendorcode=%s, "
-                "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s WHERE pno=%s",
+                "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s, testmode=%s WHERE pno=%s",
                 (ent_pname.get().strip(), ent_cname.get().strip(),
                  ent_model.get().strip(), ent_vcode.get().strip(),
                  ent_eon.get().strip(), ent_alc.get().strip(),
-                 cb_channels.get(), cb_label.get(), cb_machine.get(), pno))
+                 cb_channels.get(), cb_label.get(), cb_machine.get(),
+                 cb_testmode.get(), pno))
 
             # Delete old specs and re-insert
             cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))

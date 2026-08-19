@@ -22,6 +22,12 @@ except ImportError:
     _serial_ok = False
 
 try:
+    from pymodbus.client import ModbusSerialClient
+    _modbus_ok = True
+except ImportError:
+    _modbus_ok = False
+
+try:
     import winsound
     _audio_ok = True
 except ImportError:
@@ -95,36 +101,186 @@ def _print_raw(printer_name: str, filename: str):
         finally:
             win32print.ClosePrinter(hPrinter)
     except Exception: pass
-class AdamIO:
-    def __init__(self, port: str, baud: int = 9600):
+# ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
+# Memory Coils (M):      base 0x0800  (write via FC05/FC15)
+# Discrete Inputs (X):   base 0x0400  (read via FC02, octal numbering)
+# Safety Relay:           M26 = 0x081A (switches Contact Test ↔ IR/ACW mode)
+#
+# Channel mapping (from hardware reference):
+#   CH1: M0  → X20    CH5: M20 → X24
+#   CH2: M1  → X21    CH6: M21 → X25
+#   CH3: M2  → X22    CH7: M22 → X26
+#   CH4: M3  → X23    CH8: M23 → X27
+# ──────────────────────────────────────────────────────────────────────────────
+
+_PLC_CH_COILS = {
+    1: 0x0800,  # M0
+    2: 0x0801,  # M1
+    3: 0x0802,  # M2
+    4: 0x0803,  # M3
+    5: 0x0814,  # M20
+    6: 0x0815,  # M21
+    7: 0x0816,  # M22
+    8: 0x0817,  # M23
+}
+
+_PLC_CH_INPUTS = {
+    1: 0x0410,  # X20
+    2: 0x0411,  # X21
+    3: 0x0412,  # X22
+    4: 0x0413,  # X23
+    5: 0x0414,  # X24
+    6: 0x0415,  # X25
+    7: 0x0416,  # X26
+    8: 0x0417,  # X27
+}
+
+_PLC_SAFETY_RELAY = 0x081A   # M26 — Contact Test ↔ IR/ACW mode switch
+_PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
+
+# Cable connection detection & start button (adjust if on different X addresses)
+_PLC_CABLE_INPUT  = 0x0400   # X0  — cable connected to jig
+_PLC_START_INPUT  = 0x0401   # X1  — physical START button
+
+
+class DeltaPLC:
+    """Delta DVP PLC communication via Modbus RTU (RS-485/RS-232)."""
+
+    def __init__(self, port: str, baud: int = 9600, slave_id: int = 1):
         self._port = port
         self._baud = baud
-        self._ser = None
-    def open(self):
-        if not _serial_ok: return False
+        self._slave_id = slave_id
+        self._client = None
+
+    def open(self) -> bool:
+        if not _modbus_ok:
+            return False
         try:
-            if self._ser and self._ser.is_open: self._ser.close()
-            self._ser = serial.Serial(self._port, self._baud, timeout=1.5, write_timeout=0.5)
-            return True
-        except Exception: return False
+            self.close()
+            self._client = ModbusSerialClient(
+                port=self._port,
+                baudrate=self._baud,
+                parity='N',
+                stopbits=1,
+                bytesize=8,
+                timeout=1.5,
+            )
+            return self._client.connect()
+        except Exception:
+            return False
+
     def close(self):
         try:
-            if self._ser and self._ser.is_open: self._ser.close()
-        except Exception: pass
+            if self._client:
+                self._client.close()
+        except Exception:
+            pass
+
     @property
-    def is_open(self): return self._ser is not None and self._ser.is_open
-    def send(self, cmd: str) -> str:
-        if not self.is_open: return ""
+    def is_open(self):
+        return self._client is not None and self._client.is_socket_open()
+
+    # ── Low-level Modbus helpers ─────────────────────────────────────────
+
+    def write_coil(self, address: int, value: bool) -> bool:
+        """Write a single coil (FC05)."""
+        if not self.is_open:
+            return False
         try:
-            self._ser.reset_input_buffer()
-            self._ser.reset_output_buffer()
-            self._ser.write((cmd + "\r").encode("ascii"))
-            time.sleep(0.05)
-            raw = self._ser.read_all()
-            return raw.decode("ascii", errors="ignore").strip()
-        except Exception: return ""
-    def read_inputs(self) -> str:
-        return self.send("$016")
+            result = self._client.write_coil(address, value, slave=self._slave_id)
+            return not result.isError()
+        except Exception:
+            return False
+
+    def read_input(self, address: int) -> bool:
+        """Read a single discrete input (FC02)."""
+        if not self.is_open:
+            return False
+        try:
+            result = self._client.read_discrete_inputs(address, 1, slave=self._slave_id)
+            if result.isError():
+                return False
+            return result.bits[0]
+        except Exception:
+            return False
+
+    def read_inputs_bulk(self, address: int, count: int) -> list:
+        """Read multiple consecutive discrete inputs (FC02)."""
+        if not self.is_open:
+            return [False] * count
+        try:
+            result = self._client.read_discrete_inputs(address, count, slave=self._slave_id)
+            if result.isError():
+                return [False] * count
+            return list(result.bits[:count])
+        except Exception:
+            return [False] * count
+
+    # ── Channel relay control ────────────────────────────────────────────
+
+    def set_channel(self, ch: int, on: bool) -> bool:
+        """Turn a channel relay ON or OFF via its memory coil."""
+        addr = _PLC_CH_COILS.get(ch)
+        if addr is None:
+            return False
+        return self.write_coil(addr, on)
+
+    def set_all_channels(self, n_ch: int, on: bool) -> bool:
+        """Turn ON/OFF all channel relays (M0~M3, M20~M23)."""
+        ok = True
+        for ch in range(1, min(n_ch, 8) + 1):
+            if not self.set_channel(ch, on):
+                ok = False
+            time.sleep(0.02)
+        return ok
+
+    def reset_all_channels(self) -> bool:
+        """Turn OFF all 8 channel relays."""
+        return self.set_all_channels(8, False)
+
+    # ── Acknowledge / confirmation inputs ────────────────────────────────
+
+    def read_channel_ack(self, ch: int) -> bool:
+        """Read acknowledgment input for one channel (X20~X27)."""
+        addr = _PLC_CH_INPUTS.get(ch)
+        if addr is None:
+            return False
+        return self.read_input(addr)
+
+    def read_all_acks(self, n_ch: int) -> dict:
+        """Read all channel acknowledgment inputs X20~X27 in one shot."""
+        bits = self.read_inputs_bulk(_PLC_ACK_BASE, 8)
+        return {ch: bits[ch - 1] for ch in range(1, min(n_ch, 8) + 1)}
+
+    def confirm_channels_on(self, n_ch: int, retries: int = 5, delay: float = 0.2) -> bool:
+        """Verify all channel relays confirmed ON via X20~X27 with retries."""
+        for _ in range(retries):
+            acks = self.read_all_acks(n_ch)
+            if all(acks.values()):
+                return True
+            time.sleep(delay)
+        return False
+
+    # ── Safety relay (CRITICAL — prevents HV short circuit) ──────────────
+
+    def safety_relay_to_hv(self) -> bool:
+        """Switch to IR/ACW (high-voltage) mode. MUST call before HV tests."""
+        return self.write_coil(_PLC_SAFETY_RELAY, True)
+
+    def safety_relay_to_contact(self) -> bool:
+        """Switch to Contact Test mode. MUST call after HV tests."""
+        return self.write_coil(_PLC_SAFETY_RELAY, False)
+
+    # ── Cable / Start button inputs ──────────────────────────────────────
+
+    def is_cable_connected(self) -> bool:
+        """Check if cable is connected to the jig (X0)."""
+        return self.read_input(_PLC_CABLE_INPUT)
+
+    def is_start_pressed(self) -> bool:
+        """Check if physical START button is pressed (X1)."""
+        return self.read_input(_PLC_START_INPUT)
+
 
 class HiPotSerial:
     def __init__(self, port: str, baud: int = 9600):
@@ -327,7 +483,7 @@ def render(parent):
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
     }
-    adam = AdamIO(cfg["io_port"], cfg["io_baud"])
+    plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
 
     content = tk.Frame(parent, bg="black")
@@ -482,7 +638,7 @@ def render(parent):
     tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(8, 2))
     test_frame = tk.Frame(left_area, bg="black")
     test_frame.pack(fill="x")
-    MAX_CH = 6
+    MAX_CH = 8
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
     for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
@@ -556,22 +712,27 @@ def render(parent):
     io_lf = ttk.LabelFrame(bottom, text="IO Channel State", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
     io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=3); io_inner.pack(fill="both", expand=True)
-    tk.Label(io_inner, text="INPUT", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    tk.Label(io_inner, text="INPUT (X20~X27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
     in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 4))
     io_in_labels = []
     for i in range(1, 9):
         lbl = tk.Label(in_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
-    tk.Label(io_inner, text="OUTPUT", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    tk.Label(io_inner, text="OUTPUT (M0~M23)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w")
     io_out_labels = []
-    for i in range(1, 7):
+    for i in range(1, 9):
         lbl = tk.Label(out_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_out_labels.append(lbl)
+    # Safety relay indicator (M26)
+    safety_lbl = tk.Label(out_row, text="M26", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    safety_lbl.pack(side="left", padx=(4, 1))
     def _set_io(io_list, ch_idx, active):
         if ch_idx < len(io_list): io_list[ch_idx].config(bg="#1b5e20" if active else "#0a1a0a", fg="#76ff03" if active else "#2e7d32")
+    def _set_safety_indicator(active):
+        safety_lbl.config(bg="#b71c1c" if active else "#1a0a0a", fg="#ff5555" if active else "#7d2e2e")
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=1, sticky="nsew")
     log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
@@ -671,51 +832,87 @@ def render(parent):
         try: return empno in open(emp_file).read()
         except FileNotFoundError: return True
 
-    _IO_CH_CMDS = ["#011001", "#011101", "#011201", "#011301", "#011401", "#011501"]
-    _IO_CONT_CMDS = ["#021001", "#021101", "#021201", "#021301", "#021401", "#021501"]
-    def _adam_open() -> bool:
-        if not _serial_ok: return False
-        if adam.is_open: adam.close(); time.sleep(0.015)
-        ok = adam.open()
-        if not ok: _log("IO Ctrl: could not open port"); set_com_status("IO Ctrl", False)
+    def _plc_open() -> bool:
+        """Open PLC Modbus RTU connection."""
+        if not _modbus_ok: return False
+        if plc.is_open: plc.close(); time.sleep(0.015)
+        ok = plc.open()
+        if not ok: _log("PLC: could not open Modbus RTU port"); set_com_status("IO Ctrl", False)
         else: set_com_status("IO Ctrl", True)
         return ok
 
-    def _adam_reset(): adam.send("#010000"); time.sleep(0.015); adam.send("#020000"); time.sleep(0.015); adam.send("#030000"); time.sleep(0.015)
-    def _adam_read_inputs() -> str:
-        if not _adam_open(): return ""
-        resp = adam.read_inputs(); adam.close(); return resp
-    def _cable_connected(resp: str) -> bool:
-        try:
-            trimmed = resp.strip()
-            if len(trimmed) < 5: return False
-            return trimmed[3:5] in ("6A", "6E", "6B", "6F")
-        except Exception: return False
-    def _start_button_pressed(resp: str) -> bool:
-        try:
-            trimmed = resp.strip()
-            if len(trimmed) < 5: return False
-            return trimmed[4] in ("E", "A")
-        except Exception: return False
-
     def _run_contact_test(n_ch: int) -> tuple:
-        _log("Contact Test â†’ ADAM IO (#02xxxx / $016)")
-        if not _adam_open():
-            _log("IO Ctrl not available â€” simulating Contact PASS")
+        """Contact test via PLC — set each channel coil, read acknowledge input."""
+        _log("Contact Test → PLC Modbus (M coils / X inputs)")
+        if not _plc_open():
+            _log("PLC not available — simulating Contact PASS")
             for ch in range(1, n_ch + 1): parent.after(0, lambda c=ch-1: _set_cell("Contact", c, "OK", True))
             parent.after(0, lambda: _set_row_result("Contact", True))
             return True, {ch: {"result": "PASS"} for ch in range(1, n_ch + 1)}
+        # Ensure safety relay is in Contact Test mode
+        plc.safety_relay_to_contact()
+        parent.after(0, lambda: _set_safety_indicator(False))
+        time.sleep(0.1)
         contact_res = {}; all_pass = True
-        adam.send("#031401"); time.sleep(0.2)
         for ch in range(1, n_ch + 1):
-            time.sleep(0.1); adam.send(_IO_CONT_CMDS[ch - 1]); time.sleep(0.1)
-            raw = adam.read_inputs(); time.sleep(0.5); adam.send("#020000")
-            passed = (raw.strip() == "!006F00" or raw.strip() == "!006B00")
+            # Turn ON channel coil
+            plc.set_channel(ch, True)
+            parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
+            time.sleep(0.3)
+            # Read acknowledge input for this channel
+            passed = plc.read_channel_ack(ch)
+            parent.after(0, lambda c=ch-1, a=passed: _set_io(io_in_labels, c, a))
             contact_res[ch] = {"result": "PASS" if passed else "FAIL"}
             if not passed: all_pass = False
             parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
-        adam.close(); parent.after(0, lambda p=all_pass: _set_row_result("Contact", p))
+            # Turn OFF channel coil before next
+            plc.set_channel(ch, False)
+            parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, False))
+            time.sleep(0.1)
+        plc.close()
+        parent.after(0, lambda p=all_pass: _set_row_result("Contact", p))
         _log(f"Contact: {'PASS' if all_pass else 'FAIL'}"); return all_pass, contact_res
+
+    def _run_contact_ch1_check() -> bool:
+        """Quick contact check on CH1 only — verifies cable is in jig."""
+        _log("Contact CH1 check → cable in jig?")
+        if not _plc_open():
+            _log("PLC not available — assuming cable connected")
+            return True
+        plc.safety_relay_to_contact()
+        time.sleep(0.1)
+        plc.set_channel(1, True)
+        parent.after(0, lambda: _set_io(io_out_labels, 0, True))
+        time.sleep(0.3)
+        passed = plc.read_channel_ack(1)
+        parent.after(0, lambda a=passed: _set_io(io_in_labels, 0, a))
+        plc.set_channel(1, False)
+        parent.after(0, lambda: _set_io(io_out_labels, 0, False))
+        plc.close()
+        _log(f"CH1 contact: {'OK — cable in jig' if passed else 'NG — cable not detected'}")
+        return passed
+
+    def _plc_reset():
+        """Reset all channel coils and safety relay to OFF."""
+        plc.reset_all_channels()
+        plc.safety_relay_to_contact()
+        time.sleep(0.05)
+
+    def _check_cable_connected() -> bool:
+        """Check if cable is connected via PLC input."""
+        if not _plc_open(): return False
+        connected = plc.is_cable_connected()
+        plc.close()
+        return connected
+
+    def _check_start_pressed() -> bool:
+        """Check if physical START button is pressed via PLC input."""
+        if not _plc_open(): return False
+        pressed = plc.is_start_pressed()
+        plc.close()
+        return pressed
+
+
 
     def _run_ir_test(n_ch: int) -> tuple:
         _log("IR Test â†’ MANU:EDIT:MODE IR | FUNC:TEST ON | MEAS?")
@@ -731,10 +928,15 @@ def render(parent):
             parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
             return all_pass, ir_res
         set_com_status("HiPot", True); time.sleep(0.3)
-        if _adam_open():
-            _adam_reset()
-            for ch in range(1, n_ch + 1): adam.send(_IO_CH_CMDS[ch - 1]); time.sleep(0.015)
-            adam.close()
+        # Switch safety relay to HV mode and turn all channel coils ON
+        if _plc_open():
+            plc.safety_relay_to_hv()
+            parent.after(0, lambda: _set_safety_indicator(True))
+            time.sleep(0.1)
+            plc.set_all_channels(n_ch, True)
+            for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+            time.sleep(0.15)
+            plc.close()
         s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
         _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max); hipot.close()
         all_pass = True; ir_res = {}
@@ -743,7 +945,11 @@ def render(parent):
             if not passed: all_pass = False
             ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
             parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
-        parent.after(0, lambda p=all_pass: _set_row_result("IR", p)); _log(f"IR: {ir_val:.0f} MÎ© â€” {'PASS' if all_pass else 'FAIL'}"); return all_pass, ir_res
+        parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
+        # Reset channel coils (safety relay stays HV for ACW test which follows)
+        if _plc_open(): plc.set_all_channels(n_ch, False); plc.close()
+        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+        _log(f"IR: {ir_val:.0f} MÎ© â€” {'PASS' if all_pass else 'FAIL'}"); return all_pass, ir_res
 
     def _run_acw_test(n_ch: int) -> tuple:
         _log("ACW Test â†’ MANU:EDIT:MODE ACW | FUNC:TEST ON | MEAS?")
@@ -759,10 +965,15 @@ def render(parent):
             parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
             return all_pass, acw_res
         time.sleep(0.1)
-        if _adam_open():
-            adam.send("#010000"); time.sleep(0.1)
-            for ch in range(1, n_ch + 1): adam.send(_IO_CH_CMDS[ch - 1]); time.sleep(0.015)
-            adam.close()
+        # Safety relay should already be in HV mode from IR test; re-enable all channels
+        if _plc_open():
+            plc.safety_relay_to_hv()   # ensure HV mode (M26 ON)
+            parent.after(0, lambda: _set_safety_indicator(True))
+            time.sleep(0.1)
+            plc.set_all_channels(n_ch, True)
+            for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+            time.sleep(0.15)
+            plc.close()
         s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
         _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max); hipot.close()
         all_pass = True; acw_res = {}
@@ -771,7 +982,15 @@ def render(parent):
             if not passed: all_pass = False
             acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
             parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
-        parent.after(0, lambda p=all_pass: _set_row_result("ACW", p)); _log(f"ACW: {acw_val:.2f} mA â€” {'PASS' if all_pass else 'FAIL'}"); return all_pass, acw_res
+        parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
+        # Reset: turn all coils OFF, switch safety relay back to Contact mode
+        if _plc_open():
+            plc.set_all_channels(n_ch, False)
+            plc.safety_relay_to_contact()
+            plc.close()
+        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+        parent.after(0, lambda: _set_safety_indicator(False))
+        _log(f"ACW: {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}"); return all_pass, acw_res
 
     def _run_test_sequence():
         if not state["pno"]: parent.after(0, lambda: _log("No part loaded.")); return
@@ -780,13 +999,13 @@ def render(parent):
         if not _validate_employee(emp): parent.after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True
-        parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTINGâ€¦")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTINGâ€¦", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="â³  Test in progressâ€¦", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
+        parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTINGâ€¦")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTINGâ€¦", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="â ³  Test in progressâ€¦", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
         n_ch = state["num_channels"]; _log("â”€â”€ Test Started â”€â”€")
         parent.after(0, lambda: scan_lbl.config(text="ðŸ”Œ  Checking cable connectionâ€¦", bg="#001830", fg="#e8a000"))
-        if _serial_ok:
-            if not _cable_connected(_adam_read_inputs()):
-                _log("Cable not connected to jig â€” aborting"); parent.after(0, lambda: messagebox.showwarning("Cable", "Please connect the cable to the Jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="âŒ  Cable not connected â€” reconnect and retry", bg="#220000", fg="#ff5555"))
-                state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="â–¶  START TEST")); parent.after(0, _input_poll_start); return
+        if _modbus_ok:
+            if not _check_cable_connected():
+                _log("Cable not connected to jig — aborting"); parent.after(0, lambda: messagebox.showwarning("Cable", "Please connect the cable to the Jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Cable not connected — reconnect and retry", bg="#220000", fg="#ff5555"))
+                state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); parent.after(0, _input_poll_start); return
         parent.after(0, lambda: scan_lbl.config(text="âš¡  IR Testing (Insulation Resistance)â€¦", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
         parent.after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
@@ -824,21 +1043,23 @@ def render(parent):
         if not state.get("input_polling"): return
         if state["test_running"] or not state["pno"]: parent.after(500, _input_poll_once); return
         def _poll():
-            resp = _adam_read_inputs(); pressed = _start_button_pressed(resp)
-            if pressed: _update_io_display(resp); _log("START button pressed (IO)"); parent.after(0, _trigger_test)
-            else: _update_io_display(resp); parent.after(500, _input_poll_once)
+            pressed = _check_start_pressed()
+            _update_io_display()
+            if pressed: _log("START button pressed (PLC X1)"); parent.after(0, _trigger_test)
+            else: parent.after(500, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
     def _input_poll_start():
-        if not _serial_ok or state.get("input_polling"): return
+        if not _modbus_ok or state.get("input_polling"): return
         state["input_polling"] = True; _input_poll_once()
     def _input_poll_stop(): state["input_polling"] = False
-    def _update_io_display(resp: str):
+    def _update_io_display():
+        """Refresh IO input indicators from PLC acknowledge inputs X20~X27."""
+        if not _plc_open(): return
         try:
-            trimmed = resp.strip()
-            if len(trimmed) >= 5:
-                bits = int(trimmed[3:5], 16) if trimmed[3:5].strip() else 0
-                for i in range(8): parent.after(0, lambda idx=i, a=(bits >> idx & 1) == 1: _set_io(io_in_labels, idx, a))
+            bits = plc.read_inputs_bulk(0x0410, 8)   # X20~X27
+            for i in range(8): parent.after(0, lambda idx=i, a=bits[idx]: _set_io(io_in_labels, idx, a))
         except Exception: pass
+        finally: plc.close()
 
     def _trigger_test():
         if state["test_running"]: return

@@ -22,7 +22,8 @@ def init_db():
             eocode VARCHAR(50),
             chsel VARCHAR(10),
             lblsel VARCHAR(100),
-            machine VARCHAR(50)
+            machine VARCHAR(50),
+            testmode VARCHAR(20) DEFAULT 'Combined'
         )''')
 
         print("Creating settingspec table...")
