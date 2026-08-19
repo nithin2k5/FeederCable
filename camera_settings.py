@@ -292,9 +292,6 @@ def render(parent):
             d1_sel = cam1_panel["cmb_dev"].current()
             r1_sel = cam1_panel["cmb_res"].current()
             ci = cam_indices[d1_sel] if d1_sel > 0 else -1
-            if ci < 0:
-                messagebox.showerror("Error", "Please select and enable a camera first.")
-                return
             w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
             open_builder_ui(parent, ci, w, h)
             
