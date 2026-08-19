@@ -286,6 +286,25 @@ def render(parent):
                          cursor="hand2", activebackground="#1565c0", command=_save)
     btn_save.pack(side="right")
 
+    try:
+        from vision_engine_ui import open_builder_ui
+        def _open_builder():
+            d1_sel = cam1_panel["cmb_dev"].current()
+            r1_sel = cam1_panel["cmb_res"].current()
+            ci = cam_indices[d1_sel] if d1_sel > 0 else -1
+            if ci < 0:
+                messagebox.showerror("Error", "Please select and enable a camera first.")
+                return
+            w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
+            open_builder_ui(parent, ci, w, h)
+            
+        btn_build = tk.Button(bottom, text="📷  Build Reference Model", bg="#4a148c", fg="white",
+                              font=("Arial", 11, "bold"), bd=0, padx=20, pady=8,
+                              cursor="hand2", activebackground="#7b1fa2", command=_open_builder)
+        btn_build.pack(side="right", padx=10)
+    except ImportError:
+        pass
+
     # Cleanup when leaving page
     def _on_destroy(e):
         if e.widget == content:
