@@ -307,7 +307,10 @@ def render(parent):
             ci = cam_indices[d1_sel] if d1_sel > 0 else -1
             w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
             
-            model_path = filedialog.askdirectory(title="Select Reference Model to Test")
+            model_path = filedialog.askopenfilename(
+                title="Select Reference Model to Test",
+                filetypes=[("IV Model Files", "*.ivmodel"), ("All Files", "*.*")]
+            )
             if not model_path:
                 return
                 

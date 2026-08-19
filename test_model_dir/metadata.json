@@ -1,0 +1,12 @@
+{
+    "version": "1.0",
+    "num_original_images": 2,
+    "num_usable_images": 2,
+    "feature_extractor": "SIFT",
+    "feature_statistics": {
+        "consistency_score": 0.0,
+        "min_features": 484,
+        "max_features": 495,
+        "avg_features": 489.5
+    }
+}

@@ -243,7 +243,11 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         try:
             model = build_reference_model(self.captured_images, roi)
             
-            save_path = filedialog.askdirectory(title="Select directory to save Reference Model")
+            save_path = filedialog.asksaveasfilename(
+                title="Save Reference Model",
+                defaultextension=".ivmodel",
+                filetypes=[("IV Model Files", "*.ivmodel"), ("All Files", "*.*")]
+            )
             if save_path:
                 model.save(save_path)
                 messagebox.showinfo("Success", f"Model saved successfully to {save_path}\n\n"
