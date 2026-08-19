@@ -68,8 +68,35 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         self.running = True
         threading.Thread(target=self.update_frame, daemon=True).start()
 
+    def _update_display_frame(self):
+        if self.current_frame is None:
+            return
+        disp_frame = self.current_frame.copy()
+        
+        if self.roi:
+            cv2.rectangle(disp_frame, (self.roi['x'], self.roi['y']), 
+                          (self.roi['x']+self.roi['width'], self.roi['y']+self.roi['height']), 
+                          (0, 255, 0), 2)
+        elif self.rect_start and self.rect_end and self.roi_mode:
+            cv2.rectangle(disp_frame, self.rect_start, self.rect_end, (255, 0, 0), 2)
+        
+        disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(disp_frame)
+        
+        # Scale to fit window while keeping aspect ratio
+        lbl_w, lbl_h = self.lbl_video.winfo_width(), self.lbl_video.winfo_height()
+        if lbl_w > 10 and lbl_h > 10:
+            img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
+        
+        self.photo = ImageTk.PhotoImage(img)
+        self.lbl_video.config(image=self.photo)
+
     def update_frame(self):
         self.cap = cv2.VideoCapture(self.cam_index, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.running = False
+            return
+            
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_height)
         
@@ -77,25 +104,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             ret, frame = self.cap.read()
             if ret:
                 self.current_frame = frame.copy()
-                disp_frame = frame.copy()
-                
-                if self.roi:
-                    cv2.rectangle(disp_frame, (self.roi['x'], self.roi['y']), 
-                                  (self.roi['x']+self.roi['width'], self.roi['y']+self.roi['height']), 
-                                  (0, 255, 0), 2)
-                elif self.rect_start and self.rect_end and self.roi_mode:
-                    cv2.rectangle(disp_frame, self.rect_start, self.rect_end, (255, 0, 0), 2)
-                
-                disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(disp_frame)
-                
-                # Scale to fit window while keeping aspect ratio
-                lbl_w, lbl_h = self.lbl_video.winfo_width(), self.lbl_video.winfo_height()
-                if lbl_w > 10 and lbl_h > 10:
-                    img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
-                
-                self.photo = ImageTk.PhotoImage(img)
-                self.lbl_video.config(image=self.photo)
+                self._update_display_frame()
             time.sleep(0.03)
 
     def capture_image(self):
@@ -137,6 +146,10 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             
         if added > 0:
             messagebox.showinfo("Upload", f"Successfully uploaded {added} image(s).")
+            # If there's no live feed, show the first uploaded image so they can draw ROI
+            if self.current_frame is None and self.captured_images:
+                self.current_frame = self.captured_images[0].copy()
+                self._update_display_frame()
 
     def toggle_roi_mode(self):
         self.roi_mode = not self.roi_mode
@@ -146,6 +159,9 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         else:
             self.btn_set_roi.config(text="Set ROI (Full Image)", bg="#0d47a1")
             self.roi = None
+            self.rect_start = None
+            self.rect_end = None
+        self._update_display_frame()
 
     def on_mouse_down(self, event):
         if self.roi_mode:
@@ -166,6 +182,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
                 ry = int((event.y - oy) / scale)
                 self.rect_start = (rx, ry)
                 self.rect_end = (rx, ry)
+                self._update_display_frame()
 
     def on_mouse_drag(self, event):
         if self.roi_mode and self.rect_start:
@@ -182,6 +199,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             rx = int((ex - ox) / scale)
             ry = int((ey - oy) / scale)
             self.rect_end = (rx, ry)
+            self._update_display_frame()
 
     def on_mouse_up(self, event):
         if self.roi_mode and self.rect_start and self.rect_end:
@@ -195,6 +213,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
                 self.btn_set_roi.config(text="Clear ROI", bg="#0d47a1")
             self.rect_start = None
             self.rect_end = None
+            self._update_display_frame()
 
     def build_model(self):
         if len(self.captured_images) < 6:
