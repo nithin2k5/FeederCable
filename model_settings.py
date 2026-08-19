@@ -170,8 +170,8 @@ def render(parent):
     spec_data = {}
     for ch in range(1, 9):
         spec_data[ch] = {
-            "IR":  ["0", "0", "0", "0"],
-            "ACW": ["0", "0", "0", "0"],
+            "IR":  ["", "", "", ""],
+            "ACW": ["", "", "", ""],
         }
 
     active_ch = {"value": 1}
@@ -283,8 +283,8 @@ def render(parent):
         # Reset spec data
         for ch in range(1, 9):
             spec_data[ch] = {
-                "IR":  ["0", "0", "0", "0"],
-                "ACW": ["0", "0", "0", "0"],
+                "IR":  ["", "", "", ""],
+                "ACW": ["", "", "", ""],
             }
         switch_channel(1)
 
@@ -354,8 +354,8 @@ def render(parent):
         """Load settingspec rows into spec_data for all channels."""
         for ch in range(1, 9):
             spec_data[ch] = {
-                "IR":  ["0", "0", "0", "0"],
-                "ACW": ["0", "0", "0", "0"],
+                "IR":  ["", "", "", ""],
+                "ACW": ["", "", "", ""],
             }
         try:
             conn = get_connection()
@@ -389,12 +389,24 @@ def render(parent):
         btn_update.config(state="disabled")
         btn_delete.config(state="disabled")
 
+    def validate_channel_data():
+        num_channels = int(cb_channels.get())
+        for ch in range(1, num_channels + 1):
+            for test_name in ("IR", "ACW"):
+                vals = spec_data[ch][test_name]
+                if any(str(v).strip() == "" for v in vals):
+                    messagebox.showwarning("Validation", f"Please fill all {test_name} values for CH#{ch}.")
+                    return False
+        return True
+
     def on_save():
         pno = ent_pno.get().strip().upper()
         if not pno:
             messagebox.showwarning("Validation", "PART NUMBER is required.")
             return
         save_spec_ui()   # capture current channel spec before saving
+        if not validate_channel_data():
+            return
         try:
             conn = get_connection()
             cur = conn.cursor()
@@ -437,6 +449,8 @@ def render(parent):
             messagebox.showwarning("Validation", "Select a part first.")
             return
         save_spec_ui()
+        if not validate_channel_data():
+            return
         try:
             conn = get_connection()
             cur = conn.cursor()
