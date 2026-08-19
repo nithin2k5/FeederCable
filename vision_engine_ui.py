@@ -43,6 +43,9 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         self.btn_capture = tk.Button(self.right_frame, text="Capture Image", bg="#1b5e20", fg="white", font=("Arial", 10, "bold"), command=self.capture_image)
         self.btn_capture.pack(fill="x", padx=10, pady=5)
         
+        self.btn_upload = tk.Button(self.right_frame, text="Upload Dataset", bg="#4a148c", fg="white", font=("Arial", 10, "bold"), command=self.upload_dataset)
+        self.btn_upload.pack(fill="x", padx=10, pady=5)
+        
         self.btn_set_roi = tk.Button(self.right_frame, text="Set ROI (Full Image)", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), command=self.toggle_roi_mode)
         self.btn_set_roi.pack(fill="x", padx=10, pady=5)
         
@@ -108,6 +111,32 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             # Flash effect
             self.lbl_video.config(bg="white")
             self.after(50, lambda: self.lbl_video.config(bg="black"))
+
+    def upload_dataset(self):
+        file_paths = filedialog.askopenfilenames(
+            title="Select Images for Dataset",
+            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+        )
+        if not file_paths:
+            return
+            
+        added = 0
+        for path in file_paths:
+            if len(self.captured_images) >= 10:
+                messagebox.showwarning("Limit Reached", "Maximum of 10 reference images reached.")
+                break
+                
+            img = cv2.imread(path)
+            if img is not None:
+                self.captured_images.append(img)
+                added += 1
+                
+        self.lbl_status.config(text=f"Images: {len(self.captured_images)} / 10")
+        if len(self.captured_images) >= 6:
+            self.btn_build.config(state="normal")
+            
+        if added > 0:
+            messagebox.showinfo("Upload", f"Successfully uploaded {added} image(s).")
 
     def toggle_roi_mode(self):
         self.roi_mode = not self.roi_mode
@@ -177,6 +206,9 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             if self.current_frame is not None:
                 h, w = self.current_frame.shape[:2]
                 roi = {"x": 0, "y": 0, "width": w, "height": h}
+            elif self.captured_images:
+                h, w = self.captured_images[0].shape[:2]
+                roi = {"x": 0, "y": 0, "width": w, "height": h}
             else:
                 messagebox.showerror("Error", "No frame available to determine size.")
                 return
@@ -202,8 +234,5 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         self.destroy()
 
 def open_builder_ui(parent, cam_index, width, height):
-    if cam_index < 0:
-        messagebox.showerror("Error", "Please select a valid camera first.")
-        return
     ui = ReferenceModelBuilderUI(parent, cam_index, width, height)
     ui.grab_set()
