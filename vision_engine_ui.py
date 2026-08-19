@@ -89,8 +89,14 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         if lbl_w > 10 and lbl_h > 10:
             img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
         
-        self.photo = ImageTk.PhotoImage(img)
-        self.lbl_video.config(image=self.photo)
+        def _set_ui(pil_img=img):
+            try:
+                self.photo = ImageTk.PhotoImage(pil_img)
+                self.lbl_video.config(image=self.photo)
+            except:
+                pass
+        
+        self.after(0, _set_ui)
 
     def update_frame(self):
         self.cap = cv2.VideoCapture(self.cam_index, cv2.CAP_DSHOW)
@@ -371,12 +377,6 @@ class ReferenceModelTesterUI(tk.Toplevel):
                     status_text = "NO MATCH"
                     status_fg = "#FF0000"
                     
-                try:
-                    self.lbl_status.config(text=status_text, fg=status_fg)
-                    self.lbl_matches.config(text=f"Matches: {good_matches}")
-                except:
-                    break
-                
                 disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(disp_frame)
                 
@@ -384,11 +384,17 @@ class ReferenceModelTesterUI(tk.Toplevel):
                 if lbl_w > 10 and lbl_h > 10:
                     img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
                 
-                self.photo = ImageTk.PhotoImage(img)
-                try:
-                    self.lbl_video.config(image=self.photo)
-                except:
-                    break
+                # Update UI safely from main thread
+                def _update_ui(st_text=status_text, st_fg=status_fg, matches=good_matches, pil_img=img):
+                    try:
+                        self.lbl_status.config(text=st_text, fg=st_fg)
+                        self.lbl_matches.config(text=f"Matches: {matches}")
+                        self.photo = ImageTk.PhotoImage(pil_img)
+                        self.lbl_video.config(image=self.photo)
+                    except:
+                        pass
+                
+                self.after(0, _update_ui)
                     
             time.sleep(0.05)
 
