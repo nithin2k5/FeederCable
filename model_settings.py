@@ -164,7 +164,7 @@ def render(parent):
     table_frame = tk.Frame(mid_frame, bg="black")
     table_frame.pack(fill="x", padx=5, pady=(0, 5))
 
-    spec_headers = ["TEST", "APPLIED VOLTS (V)", "TEST TIME (SEC)", "RESULT MIN", "RESULT MAX"]
+    spec_headers = ["TEST", "APPLIED VOLTS (V)", "TEST TIME (SEC)", "SPEC MIN", "SPEC MAX"]
 
     # Per-channel spec data: {ch: {"IR": [appvol, testtime, min, max], "ACW": [...]}}
     spec_data = {}
