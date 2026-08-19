@@ -168,10 +168,10 @@ def render(parent):
 
     # Per-channel spec data: {ch: {"IR": [appvol, testtime, min, max], "ACW": [...]}}
     spec_data = {}
-    for ch in range(1, 11):
+    for ch in range(1, 9):
         spec_data[ch] = {
-            "IR":  ["500", "1", "100", "999"],
-            "ACW": ["1000", "3", "0", "10"],
+            "IR":  ["0", "0", "0", "0"],
+            "ACW": ["0", "0", "0", "0"],
         }
 
     active_ch = {"value": 1}
@@ -281,10 +281,10 @@ def render(parent):
         selected_pno["value"] = None
         update_channel_visibility()
         # Reset spec data
-        for ch in range(1, 11):
+        for ch in range(1, 9):
             spec_data[ch] = {
-                "IR":  ["500", "1", "100", "999"],
-                "ACW": ["1000", "3", "0", "10"],
+                "IR":  ["0", "0", "0", "0"],
+                "ACW": ["0", "0", "0", "0"],
             }
         switch_channel(1)
 
@@ -352,10 +352,10 @@ def render(parent):
 
     def load_specs_from_db(pno):
         """Load settingspec rows into spec_data for all channels."""
-        for ch in range(1, 11):
+        for ch in range(1, 9):
             spec_data[ch] = {
-                "IR":  ["500", "1", "100", "999"],
-                "ACW": ["1000", "3", "0", "10"],
+                "IR":  ["0", "0", "0", "0"],
+                "ACW": ["0", "0", "0", "0"],
             }
         try:
             conn = get_connection()
