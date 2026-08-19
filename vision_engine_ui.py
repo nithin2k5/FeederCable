@@ -131,7 +131,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
     def upload_dataset(self):
         file_paths = filedialog.askopenfilenames(
             title="Select Images for Dataset",
-            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+            filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp"), ("All Files", "*.*")]
         )
         if not file_paths:
             return
