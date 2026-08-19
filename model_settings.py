@@ -112,7 +112,7 @@ def render(parent):
     tk.Label(f3, text="LABEL TEMPLATE",bg="black", fg="white", font=('Arial', 9, 'bold')).grid(row=1, column=0, sticky="w", pady=5)
     tk.Label(f3, text="MACHINE ID",    bg="black", fg="white", font=('Arial', 9, 'bold')).grid(row=2, column=0, sticky="w", pady=5)
 
-    cb_channels = mk_combo(f3, [str(i) for i in range(1, 11)], width=20)
+    cb_channels = mk_combo(f3, [str(i) for i in range(1, 9)], width=20)
     cb_channels.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
 
     cb_label = mk_combo(f3, load_prn_templates(), width=20)
@@ -154,7 +154,7 @@ def render(parent):
     ch_tab_frame = tk.Frame(tab_bar, bg="black")
     ch_tab_frame.pack(side="left")
     ch_labels = []
-    for i in range(1, 11):
+    for i in range(1, 9):
         lbl = tk.Label(ch_tab_frame, text=f"CH#{i}", bg="#111", fg="white",
                        font=('Arial', 9, 'bold'), width=7, bd=1,
                        relief="solid", cursor="hand2")
@@ -315,7 +315,7 @@ def render(parent):
             entry.insert(0, val or "")
 
         ch_val = str(row_dict.get("chsel", "1"))
-        ch_list = [str(i) for i in range(1, 11)]
+        ch_list = [str(i) for i in range(1, 9)]
         cb_channels.config(values=ch_list)
         cb_channels.set(ch_val if ch_val in ch_list else "1")
 
