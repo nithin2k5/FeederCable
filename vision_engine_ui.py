@@ -257,3 +257,147 @@ class ReferenceModelBuilderUI(tk.Toplevel):
 def open_builder_ui(parent, cam_index, width, height):
     ui = ReferenceModelBuilderUI(parent, cam_index, width, height)
     ui.grab_set()
+
+class ReferenceModelTesterUI(tk.Toplevel):
+    def __init__(self, parent, cam_index, width, height, model_path):
+        super().__init__(parent)
+        self.title(f"Test Reference Model - {model_path}")
+        self.geometry("800x600")
+        self.configure(bg="#222")
+        self.cam_index = cam_index
+        self.cam_width = width
+        self.cam_height = height
+        
+        from vision_engine.reference_model import ReferenceModel
+        self.model = ReferenceModel.load(model_path)
+        
+        self.sift = cv2.SIFT_create()
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)
+        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
+        
+        self.cap = None
+        self.running = False
+        
+        # UI Elements
+        self.left_frame = tk.Frame(self, bg="#222")
+        self.left_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        
+        self.lbl_video = tk.Label(self.left_frame, bg="black")
+        self.lbl_video.pack(fill="both", expand=True)
+        
+        self.right_frame = tk.Frame(self, bg="#333", width=250)
+        self.right_frame.pack(side="right", fill="y", padx=10, pady=10)
+        self.right_frame.pack_propagate(False)
+        
+        tk.Label(self.right_frame, text="Model Testing", bg="#333", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        self.lbl_status = tk.Label(self.right_frame, text="Waiting...", bg="#333", fg="#ccc", font=("Arial", 11))
+        self.lbl_status.pack(pady=10)
+        
+        self.lbl_matches = tk.Label(self.right_frame, text="Matches: 0", bg="#333", fg="#4caf50", font=("Arial", 14, "bold"))
+        self.lbl_matches.pack(pady=10)
+        
+        self.btn_close = tk.Button(self.right_frame, text="Close", bg="#b71c1c", fg="white", font=("Arial", 10, "bold"), command=self.on_close)
+        self.btn_close.pack(fill="x", side="bottom", padx=10, pady=20)
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        self.start_camera()
+
+    def start_camera(self):
+        self.running = True
+        threading.Thread(target=self.update_frame, daemon=True).start()
+
+    def _preprocess(self, image):
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return clahe.apply(blurred)
+
+    def update_frame(self):
+        self.cap = cv2.VideoCapture(self.cam_index, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.running = False
+            return
+            
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_height)
+        
+        # We will compare against the first reference descriptor for simplicity
+        ref_desc = self.model.descriptors_list[0] if self.model.descriptors_list else None
+        
+        while self.running:
+            ret, frame = self.cap.read()
+            if ret:
+                disp_frame = frame.copy()
+                
+                # Apply ROI mask if present
+                roi = self.model.roi
+                mask = None
+                if roi:
+                    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                    x, y, w, h = roi.get("x", 0), roi.get("y", 0), roi.get("width", frame.shape[1]), roi.get("height", frame.shape[0])
+                    mask[y:y+h, x:x+w] = 255
+                    cv2.rectangle(disp_frame, (x, y), (x+w, y+h), (255, 255, 0), 2)
+                
+                preprocessed = self._preprocess(frame)
+                kp, desc = self.sift.detectAndCompute(preprocessed, mask)
+                
+                good_matches = 0
+                if desc is not None and ref_desc is not None and len(desc) > 1 and len(ref_desc) > 1:
+                    try:
+                        matches = self.flann.knnMatch(ref_desc, desc, k=2)
+                        for m_n in matches:
+                            if len(m_n) == 2:
+                                m, n = m_n
+                                if m.distance < 0.7 * n.distance:
+                                    good_matches += 1
+                                    
+                        # Draw keypoints
+                        disp_frame = cv2.drawKeypoints(disp_frame, kp, None, color=(0,255,0), flags=0)
+                    except Exception as e:
+                        pass
+                
+                # Update UI
+                if good_matches > 15:
+                    status_text = "MATCH"
+                    status_fg = "#00FF00"
+                else:
+                    status_text = "NO MATCH"
+                    status_fg = "#FF0000"
+                    
+                try:
+                    self.lbl_status.config(text=status_text, fg=status_fg)
+                    self.lbl_matches.config(text=f"Matches: {good_matches}")
+                except:
+                    break
+                
+                disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(disp_frame)
+                
+                lbl_w, lbl_h = self.lbl_video.winfo_width(), self.lbl_video.winfo_height()
+                if lbl_w > 10 and lbl_h > 10:
+                    img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
+                
+                self.photo = ImageTk.PhotoImage(img)
+                try:
+                    self.lbl_video.config(image=self.photo)
+                except:
+                    break
+                    
+            time.sleep(0.05)
+
+    def on_close(self):
+        self.running = False
+        if self.cap:
+            self.cap.release()
+        self.destroy()
+
+def open_tester_ui(parent, cam_index, width, height, model_path):
+    ui = ReferenceModelTesterUI(parent, cam_index, width, height, model_path)
+    ui.grab_set()
