@@ -286,46 +286,7 @@ def render(parent):
                          cursor="hand2", activebackground="#1565c0", command=_save)
     btn_save.pack(side="right")
 
-    try:
-        from vision_engine_ui import open_builder_ui
-        def _open_builder():
-            d1_sel = cam1_panel["cmb_dev"].current()
-            r1_sel = cam1_panel["cmb_res"].current()
-            ci = cam_indices[d1_sel] if d1_sel > 0 else -1
-            w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
-            open_builder_ui(parent, ci, w, h)
-            
-        btn_build = tk.Button(bottom, text="📷  Build Reference Model", bg="#4a148c", fg="white",
-                              font=("Arial", 11, "bold"), bd=0, padx=20, pady=8,
-                              cursor="hand2", activebackground="#7b1fa2", command=_open_builder)
-        btn_build.pack(side="right", padx=10)
 
-        def _open_tester():
-            from tkinter import filedialog
-            d1_sel = cam1_panel["cmb_dev"].current()
-            r1_sel = cam1_panel["cmb_res"].current()
-            ci = cam_indices[d1_sel] if d1_sel > 0 else -1
-            w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
-            
-            model_path = filedialog.askopenfilename(
-                title="Select Reference Model to Test",
-                filetypes=[("IV Model Files", "*.ivmodel"), ("All Files", "*.*")]
-            )
-            if not model_path:
-                return
-                
-            try:
-                from vision_engine_ui import open_tester_ui
-                open_tester_ui(parent, ci, w, h, model_path)
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not open tester: {e}")
-
-        btn_test = tk.Button(bottom, text="🔍  Test Reference", bg="#e65100", fg="white",
-                             font=("Arial", 11, "bold"), bd=0, padx=20, pady=8,
-                             cursor="hand2", activebackground="#ff9800", command=_open_tester)
-        btn_test.pack(side="right", padx=10)
-    except ImportError:
-        pass
 
     # Cleanup when leaving page
     def _on_destroy(e):
