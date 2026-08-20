@@ -137,14 +137,8 @@ def render(parent):
                 return
             dlg.destroy()
             
-            # Resolve camera index directly from vision controller logic
-            ctrl = VisionController()
-            ci = ctrl._get_cam_index()
-            if ci < 0:
-                messagebox.showerror("Error", "Camera not configured or not found. Please configure in Test Console first.", parent=parent)
-                return
-            
-            _open_contour_builder(parent, pno, ci, 640, 480, _refresh_model_table)
+            # Open contour builder (offline mode, no camera needed)
+            _open_contour_builder(parent, pno, -1, 640, 480, _refresh_model_table)
 
         tk.Button(dlg, text="Continue →", bg="#1b5e20", fg="white",
                   font=("Arial", 11, "bold"), bd=0, padx=20, pady=6,
