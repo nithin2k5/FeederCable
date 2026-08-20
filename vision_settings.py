@@ -57,11 +57,7 @@ def render(parent):
     ent_threshold.insert(0, str(v_cfg.get("match_threshold", 0.15)))
     ent_threshold.pack(side="left", padx=(4, 16))
 
-    tk.Label(settings_row, text="Min Contour Area:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
-    ent_min_area = tk.Entry(settings_row, bg="#111", fg="white", font=("Arial", 10),
-                            insertbackground="white", width=6)
-    ent_min_area.insert(0, str(v_cfg.get("min_contour_area", 500)))
-    ent_min_area.pack(side="left", padx=(4, 16))
+    
 
     # Vision enabled checkbox
     vision_enabled_var = tk.BooleanVar(value=v_cfg.get("vision_enabled", True))
@@ -205,10 +201,10 @@ def render(parent):
         try:
             v_cfg["vision_enabled"] = vision_enabled_var.get()
             v_cfg["match_threshold"] = float(ent_threshold.get().strip())
-            v_cfg["min_contour_area"] = int(ent_min_area.get().strip())
+            
             save_vision_config(v_cfg)
         except ValueError:
-            messagebox.showerror("Validation", "Threshold must be a number, Min Area must be an integer.")
+            messagebox.showerror("Validation", "Threshold must be a number.")
             return
 
         messagebox.showinfo("Saved", "Vision settings saved successfully.\nChanges apply on next test run.")
@@ -227,9 +223,8 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     """
     Open a Toplevel window that lets the operator:
     1. Upload reference images (no camera required)
-    2. Draw an ROI on the first uploaded image
-    3. Adjust Canny thresholds until contour is clean
-    4. Save the contour model
+    2. Draw an ROI on the first uploaded image (this becomes the Template)
+    3. Save the vision model
     """
     if not _cv2_ok or not _pil_ok:
         messagebox.showerror("Error", "OpenCV and Pillow are required.", parent=parent)
@@ -262,34 +257,14 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     tk.Label(right, text=f"Part: {part_number}", bg="#333", fg="#e8a000",
              font=("Arial", 12, "bold")).pack(pady=(10, 5))
 
-    tk.Label(right, text="Offline Contour Builder", bg="#333", fg="white",
+    tk.Label(right, text="Template Match Builder", bg="#333", fg="white",
              font=("Arial", 10)).pack(pady=(0, 10))
 
-    # Preprocessing sliders
-    tk.Label(right, text="─── Preprocessing ───", bg="#333", fg="#888",
-             font=("Arial", 9)).pack(fill="x", pady=(5, 2))
-
-    tk.Label(right, text="Canny Low:", bg="#333", fg="#ccc", font=("Arial", 9)).pack(anchor="w", padx=10)
-    slider_canny_low = tk.Scale(right, from_=10, to=200, orient="horizontal",
-                                 bg="#333", fg="white", highlightbackground="#333",
-                                 troughcolor="#111", length=200)
-    slider_canny_low.set(50)
-    slider_canny_low.pack(padx=10)
-
-    tk.Label(right, text="Canny High:", bg="#333", fg="#ccc", font=("Arial", 9)).pack(anchor="w", padx=10)
-    slider_canny_high = tk.Scale(right, from_=50, to=400, orient="horizontal",
-                                  bg="#333", fg="white", highlightbackground="#333",
-                                  troughcolor="#111", length=200)
-    slider_canny_high.set(150)
-    slider_canny_high.pack(padx=10)
-
-    lbl_status = tk.Label(right, text="Images: 0", bg="#333", fg="#ccc",
-                          font=("Arial", 10))
-    lbl_status.pack(pady=8)
-
-    lbl_contour_info = tk.Label(right, text="Contour: ---", bg="#333", fg="#ccc",
-                                font=("Arial", 9))
-    lbl_contour_info.pack(pady=2)
+    lbl_status = tk.Label(right, text="Images: 0", bg="#333", fg="#ccc", font=("Arial", 10))
+    lbl_status.pack(pady=15)
+    
+    info_txt = "Draw a box closely around\nthe physical part.\nThis exact patch will be\nused to find the part\nduring live testing."
+    tk.Label(right, text=info_txt, bg="#333", fg="#aaa", font=("Arial", 9), justify="left").pack(pady=10)
 
     def _render_frame(*args):
         if current_frame["value"] is None:
@@ -303,39 +278,12 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             cv2.rectangle(disp, (roi["x"], roi["y"]),
                           (roi["x"] + roi["width"], roi["y"] + roi["height"]),
                           (0, 255, 0), 2)
-            region = frame[roi["y"]:roi["y"]+roi["height"], roi["x"]:roi["x"]+roi["width"]]
         elif roi_state["start"] and roi_state["end"] and roi_state["drawing"]:
             cv2.rectangle(disp, roi_state["start"], roi_state["end"], (255, 0, 0), 2)
-            region = None
-        else:
-            region = frame
-
-        if region is not None and region.size > 0:
-            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if len(region.shape) == 3 else region
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            edges = cv2.Canny(blurred, slider_canny_low.get(), slider_canny_high.get())
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            edges = cv2.dilate(edges, kernel, iterations=1)
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            valid = [c for c in contours if cv2.contourArea(c) >= 500]
-
-            if valid:
-                biggest = max(valid, key=cv2.contourArea)
-                area = cv2.contourArea(biggest)
-                offset_x = roi["x"] if roi else 0
-                offset_y = roi["y"] if roi else 0
-                shifted = biggest.copy()
-                shifted[:, :, 0] += offset_x
-                shifted[:, :, 1] += offset_y
-                cv2.drawContours(disp, [shifted], -1, (0, 255, 255), 2)
-                lbl_contour_info.config(text=f"Contour: area={int(area)}, pts={len(biggest)}", fg="#76ff03")
-            else:
-                lbl_contour_info.config(text="Contour: none detected", fg="#ff5555")
 
         disp_rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(disp_rgb)
         
-        # We need winfo_width/height but they might be 1 on first render
         lw = lbl_video.winfo_width()
         lh = lbl_video.winfo_height()
         if lw > 10 and lh > 10:
@@ -344,13 +292,10 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
         photo_ref["photo"] = ImageTk.PhotoImage(img)
         lbl_video.config(image=photo_ref["photo"], text="")
 
-    slider_canny_low.config(command=_render_frame)
-    slider_canny_high.config(command=_render_frame)
-
     # ROI Button
     btn_roi = tk.Button(right, text="Draw ROI (click & drag)", bg="#0d47a1", fg="white",
                         font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2")
-    btn_roi.pack(fill="x", padx=10, pady=4)
+    btn_roi.pack(fill="x", padx=10, pady=10)
 
     def _toggle_roi():
         if current_frame["value"] is None:
@@ -372,7 +317,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     # Upload button
     btn_upload = tk.Button(right, text="📁  Upload Images", bg="#0277bd", fg="white",
                             font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
-    btn_upload.pack(fill="x", padx=10, pady=4)
+    btn_upload.pack(fill="x", padx=10, pady=10)
 
     def _upload():
         from tkinter import filedialog
@@ -395,8 +340,6 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             lbl_status.config(text=f"Images: {len(captured_images)}")
             if len(captured_images) >= 3:
                 btn_save.config(state="normal")
-            
-            # Force layout update so _render_frame gets correct label sizes
             win.update_idletasks()
             _render_frame()
 
@@ -406,7 +349,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     btn_save = tk.Button(right, text="💾  Save Dataset", bg="#b71c1c", fg="white",
                          font=("Arial", 10, "bold"), bd=0, padx=10, pady=6,
                          cursor="hand2", state="disabled")
-    btn_save.pack(fill="x", padx=10, pady=(10, 4))
+    btn_save.pack(fill="x", padx=10, pady=(15, 4))
 
     def _save_model():
         if len(captured_images) < 3:
@@ -417,12 +360,10 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
         if not roi:
             h, w = captured_images[0].shape[:2]
             roi = {"x": 0, "y": 0, "width": w, "height": h}
-
-        preprocessing = {
-            "blur_kernel": 5,
-            "canny_low": slider_canny_low.get(),
-            "canny_high": slider_canny_high.get()
-        }
+            
+        if roi["width"] < 10 or roi["height"] < 10:
+            messagebox.showerror("ROI Error", "ROI is too small for matching.", parent=win)
+            return
 
         try:
             from vision_engine.vision_controller import VisionController
@@ -431,9 +372,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
                 part_number=part_number,
                 images=captured_images,
                 roi=roi,
-                preprocessing=preprocessing,
-                match_threshold=float(ctrl.config.get("match_threshold", 0.15)),
-                min_contour_area=int(ctrl.config.get("min_contour_area", 500)),
+                match_threshold=float(ctrl.config.get("match_threshold", 0.75))
             )
             messagebox.showinfo("Success",
                 f"Dataset saved for '{part_number}'\n" \
@@ -486,7 +425,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             x2, y2 = roi_state["end"]
             x, y = min(x1, x2), min(y1, y2)
             w, h = abs(x2 - x1), abs(y2 - y1)
-            if w > 20 and h > 20:
+            if w > 10 and h > 10:
                 roi_state["roi"] = {"x": x, "y": y, "width": w, "height": h}
                 roi_state["drawing"] = False
                 btn_roi.config(text=f"ROI: {w}x{h} @ ({x},{y})", bg="#0d47a1")
