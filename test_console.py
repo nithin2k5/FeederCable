@@ -567,7 +567,7 @@ def render(parent):
         # Stop feeds before navigating away
         for feed in _cam_feeds:
             feed.stop()
-        try: parent.winfo_toplevel().event_generate("<<NavigateCameraSettings>>")
+        try: parent.winfo_toplevel().event_generate("<<NavigateVisionSettings>>")
         except: pass
 
     def _make_cam_widget(container_parent, cam_label, cam_index, enabled):

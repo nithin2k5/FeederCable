@@ -1,5 +1,5 @@
 """
-camera_settings.py
+vision_settings.py
 ===================
 Camera Settings configuration page.
 Allows selecting camera devices for Camera 1 and Camera 2,
