@@ -564,10 +564,10 @@ def render(parent):
     _cam_feeds = []  # track for cleanup
 
 
-    def _open_camera_popup(e):
+    def _open_camera_popup(e, cam_id):
         dlg = tk.Toplevel(parent)
-        dlg.title("Camera Configuration")
-        dlg.geometry("400x450")
+        dlg.title(f"Camera {cam_id} Configuration")
+        dlg.geometry("400x320")
         dlg.configure(bg="#222")
         dlg.transient(parent)
         dlg.grab_set()
@@ -595,49 +595,31 @@ def render(parent):
         resolutions = [("320x240", 320, 240), ("640x480", 640, 480), ("800x600", 800, 600), ("1280x720", 1280, 720)]
         res_options = [r[0] for r in resolutions]
 
-        # Camera 1 config
-        lf1 = tk.LabelFrame(dlg, text="Camera 1", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
-        lf1.pack(fill="x", padx=10, pady=5)
+        # Camera Config
+        lf = tk.LabelFrame(dlg, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
+        lf.pack(fill="x", padx=10, pady=5)
         
-        tk.Label(lf1, text="Device:", bg="#222", fg="white").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        cmb_c1 = ttk.Combobox(lf1, values=cam_options, state="readonly", width=25)
-        try:
-            c1_idx = cam_indices.index(cfg["cam1_index"]) if cfg["cam1_enabled"] else 0
-        except ValueError:
-            c1_idx = 0
-        cmb_c1.current(c1_idx)
-        cmb_c1.grid(row=0, column=1, padx=5, pady=5)
-
-        tk.Label(lf1, text="Resolution:", bg="#222", fg="white").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        cmb_r1 = ttk.Combobox(lf1, values=res_options, state="readonly", width=25)
-        try:
-            r1_idx = res_options.index(f"{cfg['cam1_width']}x{cfg['cam1_height']}")
-        except ValueError:
-            r1_idx = 1
-        cmb_r1.current(r1_idx)
-        cmb_r1.grid(row=1, column=1, padx=5, pady=5)
-
-        # Camera 2 config
-        lf2 = tk.LabelFrame(dlg, text="Camera 2", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
-        lf2.pack(fill="x", padx=10, pady=5)
+        tk.Label(lf, text="Device:", bg="#222", fg="white").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        cmb_c = ttk.Combobox(lf, values=cam_options, state="readonly", width=25)
         
-        tk.Label(lf2, text="Device:", bg="#222", fg="white").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        cmb_c2 = ttk.Combobox(lf2, values=cam_options, state="readonly", width=25)
+        c_idx_key = f"cam{cam_id}_index"
+        c_en_key = f"cam{cam_id}_enabled"
         try:
-            c2_idx = cam_indices.index(cfg["cam2_index"]) if cfg["cam2_enabled"] else 0
+            c_idx = cam_indices.index(cfg[c_idx_key]) if cfg[c_en_key] else 0
         except ValueError:
-            c2_idx = 0
-        cmb_c2.current(c2_idx)
-        cmb_c2.grid(row=0, column=1, padx=5, pady=5)
+            c_idx = 0
+        cmb_c.current(c_idx)
+        cmb_c.grid(row=0, column=1, padx=5, pady=5)
 
-        tk.Label(lf2, text="Resolution:", bg="#222", fg="white").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        cmb_r2 = ttk.Combobox(lf2, values=res_options, state="readonly", width=25)
+        tk.Label(lf, text="Resolution:", bg="#222", fg="white").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        cmb_r = ttk.Combobox(lf, values=res_options, state="readonly", width=25)
         try:
-            r2_idx = res_options.index(f"{cfg['cam2_width']}x{cfg['cam2_height']}")
+            w_key, h_key = f"cam{cam_id}_width", f"cam{cam_id}_height"
+            r_idx = res_options.index(f"{cfg[w_key]}x{cfg[h_key]}")
         except ValueError:
-            r2_idx = 1
-        cmb_r2.current(r2_idx)
-        cmb_r2.grid(row=1, column=1, padx=5, pady=5)
+            r_idx = 1
+        cmb_r.current(r_idx)
+        cmb_r.grid(row=1, column=1, padx=5, pady=5)
 
         # Active Dataset config (vision_config.json)
         lf3 = tk.LabelFrame(dlg, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
@@ -665,25 +647,18 @@ def render(parent):
         cmb_dataset.grid(row=1, column=1, padx=5, pady=5)
 
         def _save():
-            # Save Camera settings
-            d1_sel = cmb_c1.current()
-            r1_sel = cmb_r1.current()
-            d2_sel = cmb_c2.current()
-            r2_sel = cmb_r2.current()
+            d_sel = cmb_c.current()
+            r_sel = cmb_r.current()
+            
+            # Update only this camera's settings
+            cfg[f"cam{cam_id}_index"] = cam_indices[d_sel] if d_sel > 0 else -1
+            cfg[f"cam{cam_id}_enabled"] = d_sel > 0
+            cfg[f"cam{cam_id}_width"] = resolutions[r_sel][1]
+            cfg[f"cam{cam_id}_height"] = resolutions[r_sel][2]
             
             import configparser
             new_cam = configparser.ConfigParser()
-            new_cam["CAMERA"] = {
-                "cam1_index": str(cam_indices[d1_sel] if d1_sel > 0 else -1),
-                "cam1_enabled": str(d1_sel > 0),
-                "cam1_width": str(resolutions[r1_sel][1]),
-                "cam1_height": str(resolutions[r1_sel][2]),
-                
-                "cam2_index": str(cam_indices[d2_sel] if d2_sel > 0 else -1),
-                "cam2_enabled": str(d2_sel > 0),
-                "cam2_width": str(resolutions[r2_sel][1]),
-                "cam2_height": str(resolutions[r2_sel][2])
-            }
+            new_cam["CAMERA"] = {k: str(v) for k, v in cfg.items()}
             with open(_CAM_CFG_PATH, "w") as f:
                 new_cam.write(f)
                 
@@ -706,14 +681,14 @@ def render(parent):
 
         tk.Button(dlg, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, command=_save).pack(pady=15)
 
-    def nav_camera(e):
+    def nav_camera(e, cam_id):
         # Stop feeds before popup
         for feed in _cam_feeds:
             feed.stop()
-        _open_camera_popup(e)
+        _open_camera_popup(e, cam_id)
 
 
-    def _make_cam_widget(container_parent, cam_label, cam_index, enabled):
+    def _make_cam_widget(container_parent, cam_label, cam_index, enabled, cam_id):
         """Create a camera frame — live feed if configured, placeholder otherwise."""
         container = tk.Frame(container_parent, bg="#1a1a1a", bd=1, relief="solid",
                              width=210, height=115)
@@ -723,8 +698,8 @@ def render(parent):
         lbl = tk.Label(container, text=f"[ {cam_label} ]\n(Click to configure)",
                        bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
         lbl.pack(fill="both", expand=True)
-        container.bind("<Button-1>", nav_camera)
-        lbl.bind("<Button-1>", nav_camera)
+        container.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
+        lbl.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
 
         if enabled and cam_index >= 0 and _cv2_ok and _pil_ok:
             feed = CameraFeed(lbl, cam_index, display_w=208, display_h=113)
@@ -733,8 +708,8 @@ def render(parent):
 
         return container, lbl
 
-    _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"])
-    _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"])
+    _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"], 1)
+    _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"], 2)
 
     # Cleanup camera feeds when page is destroyed
     def _on_page_destroy(e):
