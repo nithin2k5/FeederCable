@@ -17,6 +17,7 @@ class App:
         self.root = root
         self.root.title("Feeder Cable App")
         self.root.bind("<<NavigateVisionSettings>>", lambda e: self.load_page("vision_settings"))
+        self.root.bind("<<NavigateHome>>", lambda e: self.load_page("test_console"))
         self.root.geometry("1350x860")
         self.root.configure(bg="black")
         
@@ -74,6 +75,7 @@ class App:
             ("🏠", "Home", "test_console"),
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
+            ("👁", "Vision Settings", "vision_settings"),
             ("📋", "Test Data", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
             ("❓", "Help", "help"),
@@ -135,7 +137,7 @@ class App:
             
         elif page_name == "vision_settings":
             self.lbl_title.config(text="Vision Settings", fg="#e8a000")
-            camera_settings.render(self.content_area)
+            vision_settings.render(self.content_area)
             
         elif page_name == "data_console":
             # data_console has its own specific title header built-in, so hide the universal one
