@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import configparser
 import os
+import json
 import threading
 
 try:
@@ -25,6 +26,30 @@ except ImportError:
     _pil_ok = False
 
 _CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
+
+
+_KEYENCE_CFG_PATH = os.path.join(os.path.dirname(__file__), "keyence_config.json")
+
+def _load_keyence_cfg():
+    if os.path.exists(_KEYENCE_CFG_PATH):
+        try:
+            with open(_KEYENCE_CFG_PATH, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {
+        "device_type": "KEYENCE_IV4",
+        "ip_address": "192.168.0.10",
+        "port": 8500,
+        "communication_mode": "TCP/IP Non-Procedural",
+        "timeout_ms": 1000,
+        "program_mapping": {}
+    }
+
+def _save_keyence_cfg(cfg):
+    with open(_KEYENCE_CFG_PATH, "w") as f:
+        json.dump(cfg, f, indent=4)
+
 
 def _load_cfg() -> dict:
     cfg = configparser.ConfigParser()
@@ -251,6 +276,64 @@ def render(parent):
     cam1_panel = _make_cam_panel(top, 0, "📷  Camera 1", "cam1", cfg["cam1_index"], cfg["cam1_width"], cfg["cam1_height"], cfg["cam1_enabled"])
     cam2_panel = _make_cam_panel(top, 1, "📷  Camera 2", "cam2", cfg["cam2_index"], cfg["cam2_width"], cfg["cam2_height"], cfg["cam2_enabled"])
 
+
+    # --- Middle: Keyence Vision Configuration ---
+    mid = tk.Frame(content, bg="black")
+    mid.pack(fill="x", pady=(10, 0))
+
+    k_cfg = _load_keyence_cfg()
+
+    klf = ttk.LabelFrame(mid, text="🔧  KEYENCE Vision Sensor Configuration", style="CS.TLabelframe")
+    klf.pack(fill="x", padx=6, pady=4)
+
+    k_inner = tk.Frame(klf, bg="black", padx=10, pady=8)
+    k_inner.pack(fill="x", expand=True)
+
+    tk.Label(k_inner, text="IP Address:", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=0, sticky="w", pady=4, padx=4)
+    ent_ip = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=15)
+    ent_ip.insert(0, k_cfg.get("ip_address", ""))
+    ent_ip.grid(row=0, column=1, sticky="w", pady=4, padx=4)
+
+    tk.Label(k_inner, text="Port:", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=2, sticky="w", pady=4, padx=(20, 4))
+    ent_port = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=10)
+    ent_port.insert(0, str(k_cfg.get("port", "")))
+    ent_port.grid(row=0, column=3, sticky="w", pady=4, padx=4)
+
+    tk.Label(k_inner, text="Timeout (ms):", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=4, sticky="w", pady=4, padx=(20, 4))
+    ent_timeout = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=10)
+    ent_timeout.insert(0, str(k_cfg.get("timeout_ms", "")))
+    ent_timeout.grid(row=0, column=5, sticky="w", pady=4, padx=4)
+
+    def _test_keyence_connection():
+        from vision_engine.keyence_controller import KeyenceVisionController
+        temp_cfg = {
+            "ip_address": ent_ip.get().strip(),
+            "port": int(ent_port.get().strip()) if ent_port.get().strip().isdigit() else 8500,
+            "timeout_ms": int(ent_timeout.get().strip()) if ent_timeout.get().strip().isdigit() else 1000
+        }
+        _save_keyence_cfg(temp_cfg) # Save temporarily to test
+        
+        btn_test_conn.config(text="Testing...", state="disabled")
+        content.update()
+        
+        ctrl = KeyenceVisionController(_KEYENCE_CFG_PATH)
+        if ctrl.connect():
+            status = ctrl.get_status()
+            ctrl.disconnect()
+            if status == "CONNECTED":
+                messagebox.showinfo("Success", f"Successfully connected to Keyence device at {temp_cfg['ip_address']}:{temp_cfg['port']}")
+            else:
+                messagebox.showwarning("Warning", f"Connected, but device returned status: {status}")
+        else:
+            messagebox.showerror("Error", f"Failed to connect to Keyence device at {temp_cfg['ip_address']}:{temp_cfg['port']}")
+            
+        btn_test_conn.config(text="🔌  Test Connection", state="normal")
+
+    btn_test_conn = tk.Button(k_inner, text="🔌  Test Connection", bg="#4a148c", fg="white",
+                             font=("Arial", 9, "bold"), bd=0, padx=12, pady=4,
+                             cursor="hand2", activebackground="#7b1fa2", command=_test_keyence_connection)
+    btn_test_conn.grid(row=0, column=6, sticky="w", pady=4, padx=(20, 4))
+
     # --- Bottom: Save / Detected info ---
     bottom = tk.Frame(content, bg="black")
     bottom.pack(fill="x", pady=(10, 0))
@@ -279,6 +362,16 @@ def render(parent):
             "cam2_enabled": d2_sel > 0,
         }
         _save_cfg(new_cfg)
+
+        # Save Keyence config
+        try:
+            k_cfg["ip_address"] = ent_ip.get().strip()
+            k_cfg["port"] = int(ent_port.get().strip())
+            k_cfg["timeout_ms"] = int(ent_timeout.get().strip())
+            _save_keyence_cfg(k_cfg)
+        except ValueError:
+            messagebox.showerror("Validation Error", "Port and Timeout must be integers.")
+            return
         messagebox.showinfo("Saved", "Camera settings saved successfully.\nChanges will apply on next test console load.")
 
     btn_save = tk.Button(bottom, text="💾  Save Settings", bg="#0d47a1", fg="white",
