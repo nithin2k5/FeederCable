@@ -1,0 +1,12 @@
+{
+    "vision_enabled": true,
+    "camera_source": "cam1",
+    "match_threshold": 0.15,
+    "min_contour_area": 500,
+    "preprocessing": {
+        "blur_kernel": 5,
+        "canny_low": 50,
+        "canny_high": 150
+    },
+    "part_mapping": {}
+}
