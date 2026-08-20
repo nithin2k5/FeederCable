@@ -113,33 +113,8 @@ def render(parent):
     btn_row.pack(fill="x")
 
     def _build_model():
-        """Open a teaching dialog to build a contour reference model for a part number."""
-        dlg = tk.Toplevel(parent)
-        dlg.title("Add New Part Dataset")
-        dlg.geometry("350x120")
-        dlg.configure(bg="#222")
-        dlg.transient(parent)
-        dlg.grab_set()
-
-        tk.Label(dlg, text="Part Number:", bg="#222", fg="white", font=("Arial", 11)).pack(pady=(15, 5))
-        ent_pno = tk.Entry(dlg, bg="#111", fg="white", font=("Arial", 12), insertbackground="white", width=25)
-        ent_pno.pack(pady=5)
-        ent_pno.focus_set()
-
-        def _proceed():
-            pno = ent_pno.get().strip().upper()
-            if not pno:
-                messagebox.showwarning("Validation", "Enter a Part Number.", parent=dlg)
-                return
-            dlg.destroy()
-            
-            # Open contour builder (offline mode, no camera needed)
-            _open_contour_builder(parent, pno, -1, 640, 480, _refresh_model_table)
-
-        tk.Button(dlg, text="Continue →", bg="#1b5e20", fg="white",
-                  font=("Arial", 11, "bold"), bd=0, padx=20, pady=6,
-                  command=_proceed).pack(pady=5)
-        ent_pno.bind("<Return>", lambda e: _proceed())
+        """Open the unified dataset builder window."""
+        _open_template_builder(parent, 640, 480, _refresh_model_table)
 
     def _delete_model():
         sel = tree.selection()
@@ -219,19 +194,21 @@ def render(parent):
 # Contour Model Builder Dialog
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _open_contour_builder(parent, part_number, cam_index, width, height, on_done_callback):
+def _open_template_builder(parent, width, height, on_done_callback):
     """
-    Open a Toplevel window that lets the operator:
-    1. Upload reference images (no camera required)
-    2. Draw an ROI on the first uploaded image (this becomes the Template)
-    3. Save the vision model
+    Unified Template Match Builder UI.
+    Flow:
+      1. Enter Part Number
+      2. Upload Images
+      3. Draw Box
+      4. Save
     """
     if not _cv2_ok or not _pil_ok:
         messagebox.showerror("Error", "OpenCV and Pillow are required.", parent=parent)
         return
 
     win = tk.Toplevel(parent)
-    win.title(f"Teach Part Dataset — {part_number}")
+    win.title("Create Vision Dataset")
     win.geometry("900x620")
     win.configure(bg="#222")
     win.transient(parent)
@@ -242,29 +219,56 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     roi_state = {"roi": None, "drawing": False, "start": None, "end": None}
     photo_ref = {"photo": None}
 
-    # --- Left: Video ---
+    # --- Left: Video / Image Display ---
     left = tk.Frame(win, bg="#222")
     left.pack(side="left", fill="both", expand=True, padx=8, pady=8)
 
-    lbl_video = tk.Label(left, bg="black", text="[ Please Upload Images ]", fg="#666", font=("Arial", 14))
+    lbl_video = tk.Label(left, bg="black", text="[ No Image Loaded ]", fg="#666", font=("Arial", 14), cursor="crosshair")
     lbl_video.pack(fill="both", expand=True)
 
-    # --- Right: Controls ---
-    right = tk.Frame(win, bg="#333", width=250)
+    # --- Right: Controls & Workflow Steps ---
+    right = tk.Frame(win, bg="#333", width=260)
     right.pack(side="right", fill="y", padx=8, pady=8)
     right.pack_propagate(False)
 
-    tk.Label(right, text=f"Part: {part_number}", bg="#333", fg="#e8a000",
-             font=("Arial", 12, "bold")).pack(pady=(10, 5))
+    tk.Label(right, text="Template Builder", bg="#333", fg="#e8a000",
+             font=("Arial", 14, "bold")).pack(pady=(15, 15))
 
-    tk.Label(right, text="Template Match Builder", bg="#333", fg="white",
-             font=("Arial", 10)).pack(pady=(0, 10))
-
-    lbl_status = tk.Label(right, text="Images: 0", bg="#333", fg="#ccc", font=("Arial", 10))
-    lbl_status.pack(pady=15)
+    # STEP 1: Part Number
+    step1_lf = tk.LabelFrame(right, text=" Step 1: Part Number ", bg="#333", fg="white", font=("Arial", 10, "bold"))
+    step1_lf.pack(fill="x", padx=10, pady=5)
     
-    info_txt = "Draw a box closely around\nthe physical part.\nThis exact patch will be\nused to find the part\nduring live testing."
-    tk.Label(right, text=info_txt, bg="#333", fg="#aaa", font=("Arial", 9), justify="left").pack(pady=10)
+    ent_pno = tk.Entry(step1_lf, bg="#111", fg="white", font=("Arial", 12), insertbackground="white", width=20)
+    ent_pno.pack(padx=10, pady=10)
+    ent_pno.focus_set()
+
+    # STEP 2: Upload Images
+    step2_lf = tk.LabelFrame(right, text=" Step 2: Upload Images ", bg="#333", fg="white", font=("Arial", 10, "bold"))
+    step2_lf.pack(fill="x", padx=10, pady=5)
+    
+    btn_upload = tk.Button(step2_lf, text="📁  Select Images", bg="#0277bd", fg="white",
+                            font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
+    btn_upload.pack(fill="x", padx=10, pady=8)
+    lbl_status = tk.Label(step2_lf, text="0 images loaded", bg="#333", fg="#ccc", font=("Arial", 9))
+    lbl_status.pack(pady=(0, 8))
+
+    # STEP 3: Draw ROI
+    step3_lf = tk.LabelFrame(right, text=" Step 3: Draw Target Box ", bg="#333", fg="white", font=("Arial", 10, "bold"))
+    step3_lf.pack(fill="x", padx=10, pady=5)
+    
+    info_txt = "Click and drag directly on\nthe image to highlight\nthe physical part."
+    tk.Label(step3_lf, text=info_txt, bg="#333", fg="#aaa", font=("Arial", 9)).pack(pady=10)
+    lbl_roi_info = tk.Label(step3_lf, text="ROI: Not Drawn", bg="#333", fg="#ff9800", font=("Arial", 9, "bold"))
+    lbl_roi_info.pack(pady=(0, 10))
+
+    # STEP 4: Save
+    step4_lf = tk.Frame(right, bg="#333")
+    step4_lf.pack(fill="x", padx=10, pady=15)
+    
+    btn_save = tk.Button(step4_lf, text="💾  Save Dataset", bg="#1b5e20", fg="white",
+                         font=("Arial", 11, "bold"), bd=0, padx=10, pady=8,
+                         cursor="hand2", state="disabled")
+    btn_save.pack(fill="x")
 
     def _render_frame(*args):
         if current_frame["value"] is None:
@@ -292,33 +296,6 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
         photo_ref["photo"] = ImageTk.PhotoImage(img)
         lbl_video.config(image=photo_ref["photo"], text="")
 
-    # ROI Button
-    btn_roi = tk.Button(right, text="Draw ROI (click & drag)", bg="#0d47a1", fg="white",
-                        font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2")
-    btn_roi.pack(fill="x", padx=10, pady=10)
-
-    def _toggle_roi():
-        if current_frame["value"] is None:
-            messagebox.showwarning("Upload First", "Please upload images before drawing an ROI.", parent=win)
-            return
-            
-        if roi_state["drawing"]:
-            roi_state["drawing"] = False
-            btn_roi.config(text="Draw ROI (click & drag)", bg="#0d47a1")
-        else:
-            roi_state["drawing"] = True
-            roi_state["roi"] = None
-            roi_state["start"] = None
-            roi_state["end"] = None
-            btn_roi.config(text="Drawing... drag on image", bg="#ff9800")
-            _render_frame()
-    btn_roi.config(command=_toggle_roi)
-
-    # Upload button
-    btn_upload = tk.Button(right, text="📁  Upload Images", bg="#0277bd", fg="white",
-                            font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
-    btn_upload.pack(fill="x", padx=10, pady=10)
-
     def _upload():
         from tkinter import filedialog
         filepaths = filedialog.askopenfilenames(
@@ -337,29 +314,28 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
                 
         if added > 0:
             current_frame["value"] = captured_images[0]
-            lbl_status.config(text=f"Images: {len(captured_images)}")
-            if len(captured_images) >= 3:
+            lbl_status.config(text=f"{len(captured_images)} images loaded", fg="#76ff03")
+            if len(captured_images) >= 3 and roi_state["roi"] is not None:
                 btn_save.config(state="normal")
             win.update_idletasks()
             _render_frame()
 
     btn_upload.config(command=_upload)
 
-    # Save button
-    btn_save = tk.Button(right, text="💾  Save Dataset", bg="#b71c1c", fg="white",
-                         font=("Arial", 10, "bold"), bd=0, padx=10, pady=6,
-                         cursor="hand2", state="disabled")
-    btn_save.pack(fill="x", padx=10, pady=(15, 4))
-
     def _save_model():
+        pno = ent_pno.get().strip().upper()
+        if not pno:
+            messagebox.showwarning("Validation", "Please enter a Part Number in Step 1.", parent=win)
+            return
+            
         if len(captured_images) < 3:
-            messagebox.showwarning("Need More", "Please upload at least 3 reference images.", parent=win)
+            messagebox.showwarning("Validation", "Please upload at least 3 reference images.", parent=win)
             return
 
         roi = roi_state["roi"]
         if not roi:
-            h, w = captured_images[0].shape[:2]
-            roi = {"x": 0, "y": 0, "width": w, "height": h}
+            messagebox.showwarning("Validation", "Please draw a target box on the image.", parent=win)
+            return
             
         if roi["width"] < 10 or roi["height"] < 10:
             messagebox.showerror("ROI Error", "ROI is too small for matching.", parent=win)
@@ -369,15 +345,13 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             from vision_engine.vision_controller import VisionController
             ctrl = VisionController()
             path = ctrl.build_and_save_model(
-                part_number=part_number,
+                part_number=pno,
                 images=captured_images,
                 roi=roi,
                 match_threshold=float(ctrl.config.get("match_threshold", 0.75))
             )
             messagebox.showinfo("Success",
-                f"Dataset saved for '{part_number}'\n" \
-                f"References: {len(captured_images)}\n" \
-                f"File: {os.path.basename(path)}", parent=win)
+                f"Dataset saved successfully!\n\n" f"Part: {pno}\n" f"References: {len(captured_images)}\n" f"File: {os.path.basename(path)}", parent=win)
             win.destroy()
             if on_done_callback:
                 on_done_callback()
@@ -386,7 +360,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
 
     btn_save.config(command=_save_model)
 
-    # --- Mouse events for ROI drawing ---
+    # --- Mouse events for seamless ROI drawing ---
     def _scale_coords(event):
         if current_frame["value"] is None:
             return None, None
@@ -405,33 +379,43 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
         return rx, ry
 
     def _mouse_down(event):
-        if roi_state["drawing"]:
-            rx, ry = _scale_coords(event)
-            if rx is not None:
-                roi_state["start"] = (rx, ry)
-                roi_state["end"] = (rx, ry)
-                _render_frame()
+        if current_frame["value"] is None: return
+        rx, ry = _scale_coords(event)
+        if rx is not None:
+            roi_state["drawing"] = True
+            roi_state["start"] = (rx, ry)
+            roi_state["end"] = (rx, ry)
+            _render_frame()
 
     def _mouse_drag(event):
-        if roi_state["drawing"] and roi_state["start"]:
-            rx, ry = _scale_coords(event)
-            if rx is not None:
-                roi_state["end"] = (rx, ry)
-                _render_frame()
+        if not roi_state["drawing"]: return
+        rx, ry = _scale_coords(event)
+        if rx is not None:
+            roi_state["end"] = (rx, ry)
+            _render_frame()
 
     def _mouse_up(event):
-        if roi_state["drawing"] and roi_state["start"] and roi_state["end"]:
+        if not roi_state["drawing"]: return
+        roi_state["drawing"] = False
+        
+        if roi_state["start"] and roi_state["end"]:
             x1, y1 = roi_state["start"]
             x2, y2 = roi_state["end"]
             x, y = min(x1, x2), min(y1, y2)
             w, h = abs(x2 - x1), abs(y2 - y1)
             if w > 10 and h > 10:
                 roi_state["roi"] = {"x": x, "y": y, "width": w, "height": h}
-                roi_state["drawing"] = False
-                btn_roi.config(text=f"ROI: {w}x{h} @ ({x},{y})", bg="#0d47a1")
-            roi_state["start"] = None
-            roi_state["end"] = None
-            _render_frame()
+                lbl_roi_info.config(text=f"ROI Set: {w}x{h} px", fg="#76ff03")
+                if len(captured_images) >= 3:
+                    btn_save.config(state="normal")
+            else:
+                roi_state["roi"] = None
+                lbl_roi_info.config(text="Box too small, try again", fg="#ff5555")
+                btn_save.config(state="disabled")
+                
+        roi_state["start"] = None
+        roi_state["end"] = None
+        _render_frame()
 
     lbl_video.bind("<ButtonPress-1>", _mouse_down)
     lbl_video.bind("<B1-Motion>", _mouse_drag)
