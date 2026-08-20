@@ -327,17 +327,54 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     btn_capture = tk.Button(right, text="📷  Capture Reference", bg="#1b5e20", fg="white",
                             font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
     btn_capture.pack(fill="x", padx=10, pady=4)
+    
+    # NEW: Upload button
+    btn_upload = tk.Button(right, text="📁  Upload Images", bg="#0277bd", fg="white",
+                            font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
+    btn_upload.pack(fill="x", padx=10, pady=4)
 
     def _capture():
         if current_frame["value"] is not None and len(captured_images) < 5:
             captured_images.append(current_frame["value"].copy())
             lbl_status.config(text=f"Images: {len(captured_images)} / 5")
-            # Flash
             lbl_video.config(bg="white")
             win.after(80, lambda: lbl_video.config(bg="black"))
             if len(captured_images) >= 3:
                 btn_save.config(state="normal")
     btn_capture.config(command=_capture)
+    
+    def _upload():
+        from tkinter import filedialog
+        import cv2
+        import numpy as np
+        
+        filepaths = filedialog.askopenfilenames(
+            parent=win,
+            title="Select Reference Images",
+            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+        )
+        
+        added = 0
+        for fp in filepaths:
+            if len(captured_images) >= 5:
+                break
+            # Read image
+            # Ensure it works with unicode paths (though cv2.imread is usually fine on macOS)
+            img = cv2.imread(fp)
+            if img is not None:
+                # Resize if necessary to match camera resolution (width x height)
+                # But actually contour extraction will adapt to ROI. It's best if we resize to the exact width/height of the configured camera.
+                img_resized = cv2.resize(img, (width, height))
+                captured_images.append(img_resized)
+                added += 1
+                
+        if added > 0:
+            lbl_status.config(text=f"Images: {len(captured_images)} / 5")
+            if len(captured_images) >= 3:
+                btn_save.config(state="normal")
+            messagebox.showinfo("Uploaded", f"Added {added} images from disk.", parent=win)
+
+    btn_upload.config(command=_upload)
 
     # Save button
     btn_save = tk.Button(right, text="💾  Save Dataset", bg="#b71c1c", fg="white",
