@@ -516,34 +516,16 @@ def render(parent):
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
     
-    # --- Vision Status UI ---
-    vision_lf = ttk.LabelFrame(right_panel, text="VISION STATUS", style="TC.TLabelframe")
-    vision_lf.grid(row=1, column=0, sticky="ew", pady=(0, 3))
-    vision_inner = tk.Frame(vision_lf, bg="black", padx=4, pady=4)
-    vision_inner.pack(fill="both")
-    
-    lbl_vision_dev = tk.Label(vision_inner, text="Camera: ---", bg="black", fg="#999", font=("Arial", 9))
-    lbl_vision_dev.pack(anchor="w")
-    lbl_vision_prog = tk.Label(vision_inner, text="Model: ---", bg="black", fg="#999", font=("Arial", 9))
-    lbl_vision_prog.pack(anchor="w")
-    lbl_vision_res = tk.Label(vision_inner, text="Result: PENDING", bg="black", fg="#999", font=("Arial", 9))
-    lbl_vision_res.pack(anchor="w")
-    
-    # Initialize local vision controller (webcam + contour matching)
+    # Initialize local vision controller (headless, no UI panel)
     try:
         vision_ctrl = VisionController()
-        cam_status = vision_ctrl.get_status()
-        if cam_status == "READY":
-            parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
-        else:
-            parent.after(0, lambda s=cam_status: lbl_vision_dev.config(text=f"Camera: {s}", fg="#ff9800"))
     except Exception as e:
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
 
     # Move COM status down to row 2, and Camera down to row 3
 
-    com_lf.grid(row=2, column=0, sticky="ew", pady=(0, 3))
+    com_lf.grid(row=1, column=0, sticky="ew", pady=(0, 3))
     com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
     com_inner.pack(fill="both")
     com_labels = {}
@@ -560,7 +542,7 @@ def render(parent):
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
-    cam_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
+    cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
     _cam_feeds = []  # track for cleanup
 
 
@@ -1152,29 +1134,29 @@ def render(parent):
         # --- VISION VERIFICATION (Contour Matching) ---
         parent.after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
-            parent.after(0, lambda: lbl_vision_res.config(text="Result: CHECKING", fg="#e8a000"))
+            
             vision_ctrl.reload_config()
 
             # Check if a model exists for this part
             if not vision_ctrl.has_model(state["pno"]):
-                parent.after(0, lambda: lbl_vision_prog.config(text="Model: NOT CONFIGURED", fg="#ff5555"))
-                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (No model)", fg="#ff5555"))
+                
+                
                 _log(f"Vision ERROR: No vision model configured for part '{state['pno']}'")
                 state["test_running"] = False
                 parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
                 parent.after(0, _input_poll_start)
                 return
 
-            parent.after(0, lambda: lbl_vision_prog.config(text=f"Model: {state['pno']}", fg="white"))
+            
 
             # Run inspection (capture frame + contour match)
             vision_result = vision_ctrl.inspect(state["pno"])
             state["vision_result"] = vision_result.judgement
 
             if vision_result.judgement == "ERROR":
-                parent.after(0, lambda: lbl_vision_dev.config(text=f"Camera: ERROR", fg="#ff5555"))
+                
                 err_text = f"Result: ERROR ({vision_result.error or 'Unknown'})"
-                parent.after(0, lambda: lbl_vision_res.config(text=err_text, fg="#ff5555"))
+                
                 _log(f"Vision ERROR: {vision_result.error}")
                 state["test_running"] = False
                 parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
@@ -1182,21 +1164,21 @@ def render(parent):
                 return
 
             if not vision_result.ok:
-                parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
+                
                 err_text = f"Result: NG ({vision_result.error or 'Part not detected'})"
-                parent.after(0, lambda: lbl_vision_res.config(text=err_text, fg="#ff5555"))
+                
                 _log(f"Vision NG: {vision_result.error} (score={vision_result.match_score:.4f})")
                 _finish_test("FAIL", {}, {}, {})
                 return
 
             # Vision OK
-            parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
+            
             ok_text = f"Result: OK (score={vision_result.match_score:.4f}, {vision_result.processing_time_ms}ms)"
-            parent.after(0, lambda: lbl_vision_res.config(text=ok_text, fg="#76ff03"))
+            
             _log(f"Vision OK: score={vision_result.match_score:.4f} in {vision_result.processing_time_ms}ms")
         else:
             _log("Vision Controller not initialized — FAIL-SAFE: blocking test")
-            parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Controller not loaded)", fg="#ff5555"))
+            
             state["test_running"] = False
             parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
             parent.after(0, _input_poll_start)
