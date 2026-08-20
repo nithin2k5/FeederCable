@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 import mysql.connector
 import threading
 import datetime
+from vision_engine.keyence_controller import KeyenceVisionController, VisionResult
 import time
 import os
 import configparser
@@ -514,7 +515,31 @@ def render(parent):
     elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
-    com_lf.grid(row=1, column=0, sticky="ew", pady=(0, 3))
+    
+    # --- Vision Status UI ---
+    vision_lf = ttk.LabelFrame(right_panel, text="VISION STATUS", style="TC.TLabelframe")
+    vision_lf.grid(row=1, column=0, sticky="ew", pady=(0, 3))
+    vision_inner = tk.Frame(vision_lf, bg="black", padx=4, pady=4)
+    vision_inner.pack(fill="both")
+    
+    lbl_vision_dev = tk.Label(vision_inner, text="Device: OFFLINE", bg="black", fg="#999", font=("Arial", 9))
+    lbl_vision_dev.pack(anchor="w")
+    lbl_vision_prog = tk.Label(vision_inner, text="Program: ---", bg="black", fg="#999", font=("Arial", 9))
+    lbl_vision_prog.pack(anchor="w")
+    lbl_vision_res = tk.Label(vision_inner, text="Result: PENDING", bg="black", fg="#999", font=("Arial", 9))
+    lbl_vision_res.pack(anchor="w")
+    
+    # Initialize controller
+    try:
+        vision_ctrl = KeyenceVisionController(os.path.join(os.path.dirname(__file__), "keyence_config.json"))
+        # We don't connect yet, we connect during test or just check status
+    except Exception as e:
+        vision_ctrl = None
+        print(f"Vision controller init error: {e}")
+
+    # Move COM status down to row 2, and Camera down to row 3
+
+    com_lf.grid(row=2, column=0, sticky="ew", pady=(0, 3))
     com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
     com_inner.pack(fill="both")
     com_labels = {}
@@ -531,7 +556,7 @@ def render(parent):
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
-    cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
+    cam_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
     _cam_feeds = []  # track for cleanup
 
     def nav_camera(e):
@@ -999,14 +1024,58 @@ def render(parent):
         if not _validate_employee(emp): parent.after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True
-        parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTINGâ€¦")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTINGâ€¦", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="â ³  Test in progressâ€¦", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
-        n_ch = state["num_channels"]; _log("â”€â”€ Test Started â”€â”€")
-        parent.after(0, lambda: scan_lbl.config(text="ðŸ”Œ  Checking cable connectionâ€¦", bg="#001830", fg="#e8a000"))
+        parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
+        n_ch = state["num_channels"]; _log("── Test Started ──")
+        
+        # --- VISION VERIFICATION ---
+        parent.after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
+        if vision_ctrl:
+            parent.after(0, lambda: lbl_vision_res.config(text="Result: CHECKING", fg="#e8a000"))
+            vision_ctrl.load_config()
+            if not vision_ctrl.connect():
+                parent.after(0, lambda: lbl_vision_dev.config(text="Device: OFFLINE", fg="#ff5555"))
+                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Comm timeout)", fg="#ff5555"))
+                _log("Vision ERROR: Could not connect to Keyence device")
+                _finish_test("FAIL", {}, {}, {})
+                return
+            
+            parent.after(0, lambda: lbl_vision_dev.config(text="Device: CONNECTED", fg="#76ff03"))
+            prog_str = vision_ctrl.program_mapping.get(state["pno"], "???")
+            parent.after(0, lambda: lbl_vision_prog.config(text=f"Program: {prog_str}", fg="white"))
+            
+            if not vision_ctrl.select_program(state["pno"]):
+                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Invalid Program)", fg="#ff5555"))
+                _log("Vision ERROR: Invalid program or mapping missing")
+                vision_ctrl.disconnect()
+                _finish_test("FAIL", {}, {}, {})
+                return
+                
+            time.sleep(0.5) # Wait for program to switch
+            vision_result = vision_ctrl.trigger_inspection(state["pno"], prog_str)
+            vision_ctrl.disconnect()
+            
+            state["vision_result"] = vision_result.judgement
+            if not vision_result.ok:
+                err_text = f"Result: NG ({vision_result.error or 'Part not detected'})"
+                parent.after(0, lambda: lbl_vision_res.config(text=err_text, fg="#ff5555"))
+                _log(f"Vision NG: {vision_result.error}")
+                _finish_test("FAIL", {}, {}, {})
+                return
+                
+            parent.after(0, lambda: lbl_vision_res.config(text="Result: OK", fg="#76ff03"))
+            _log(f"Vision OK: {prog_str} in {vision_result.processing_time_ms}ms")
+        else:
+            _log("Vision Controller not initialized, skipping vision check (FAIL-SAFE ERROR)")
+            _finish_test("FAIL", {}, {}, {})
+            return
+        # --- END VISION VERIFICATION ---
+
+        parent.after(0, lambda: scan_lbl.config(text="🔌  Checking cable connection...", bg="#001830", fg="#e8a000"))
         if _modbus_ok:
             if not _check_cable_connected():
                 _log("Cable not connected to jig — aborting"); parent.after(0, lambda: messagebox.showwarning("Cable", "Please connect the cable to the Jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Cable not connected — reconnect and retry", bg="#220000", fg="#ff5555"))
                 state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); parent.after(0, _input_poll_start); return
-        parent.after(0, lambda: scan_lbl.config(text="âš¡  IR Testing (Insulation Resistance)â€¦", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
+        parent.after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
         parent.after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return

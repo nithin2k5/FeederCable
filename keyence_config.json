@@ -1,0 +1,11 @@
+{
+    "device_type": "KEYENCE_IV4",
+    "ip_address": "192.168.0.10",
+    "port": 8500,
+    "communication_mode": "TCP/IP Non-Procedural",
+    "timeout_ms": 1000,
+    "program_mapping": {
+        "CABLE-1001": "01",
+        "CABLE-1002": "02"
+    }
+}
