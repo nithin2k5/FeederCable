@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox
 import mysql.connector
 import threading
 import datetime
-from vision_engine.keyence_controller import KeyenceVisionController, VisionResult
+from vision_engine.vision_controller import VisionController, VisionResult
 import time
 import os
 import configparser
@@ -522,17 +522,21 @@ def render(parent):
     vision_inner = tk.Frame(vision_lf, bg="black", padx=4, pady=4)
     vision_inner.pack(fill="both")
     
-    lbl_vision_dev = tk.Label(vision_inner, text="Device: OFFLINE", bg="black", fg="#999", font=("Arial", 9))
+    lbl_vision_dev = tk.Label(vision_inner, text="Camera: ---", bg="black", fg="#999", font=("Arial", 9))
     lbl_vision_dev.pack(anchor="w")
-    lbl_vision_prog = tk.Label(vision_inner, text="Program: ---", bg="black", fg="#999", font=("Arial", 9))
+    lbl_vision_prog = tk.Label(vision_inner, text="Model: ---", bg="black", fg="#999", font=("Arial", 9))
     lbl_vision_prog.pack(anchor="w")
     lbl_vision_res = tk.Label(vision_inner, text="Result: PENDING", bg="black", fg="#999", font=("Arial", 9))
     lbl_vision_res.pack(anchor="w")
     
-    # Initialize controller
+    # Initialize local vision controller (webcam + contour matching)
     try:
-        vision_ctrl = KeyenceVisionController(os.path.join(os.path.dirname(__file__), "keyence_config.json"))
-        # We don't connect yet, we connect during test or just check status
+        vision_ctrl = VisionController()
+        cam_status = vision_ctrl.get_status()
+        if cam_status == "READY":
+            parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
+        else:
+            parent.after(0, lambda s=cam_status: lbl_vision_dev.config(text=f"Camera: {s}", fg="#ff9800"))
     except Exception as e:
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
@@ -1027,46 +1031,57 @@ def render(parent):
         parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
         n_ch = state["num_channels"]; _log("── Test Started ──")
         
-        # --- VISION VERIFICATION ---
+        # --- VISION VERIFICATION (Contour Matching) ---
         parent.after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
             parent.after(0, lambda: lbl_vision_res.config(text="Result: CHECKING", fg="#e8a000"))
-            vision_ctrl.load_config()
-            if not vision_ctrl.connect():
-                parent.after(0, lambda: lbl_vision_dev.config(text="Device: OFFLINE", fg="#ff5555"))
-                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Comm timeout)", fg="#ff5555"))
-                _log("Vision ERROR: Could not connect to Keyence device")
-                _finish_test("FAIL", {}, {}, {})
+            vision_ctrl.reload_config()
+
+            # Check if a model exists for this part
+            if not vision_ctrl.has_model(state["pno"]):
+                parent.after(0, lambda: lbl_vision_prog.config(text="Model: NOT CONFIGURED", fg="#ff5555"))
+                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (No model)", fg="#ff5555"))
+                _log(f"Vision ERROR: No vision model configured for part '{state['pno']}'")
+                state["test_running"] = False
+                parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
+                parent.after(0, _input_poll_start)
                 return
-            
-            parent.after(0, lambda: lbl_vision_dev.config(text="Device: CONNECTED", fg="#76ff03"))
-            prog_str = vision_ctrl.program_mapping.get(state["pno"], "???")
-            parent.after(0, lambda: lbl_vision_prog.config(text=f"Program: {prog_str}", fg="white"))
-            
-            if not vision_ctrl.select_program(state["pno"]):
-                parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Invalid Program)", fg="#ff5555"))
-                _log("Vision ERROR: Invalid program or mapping missing")
-                vision_ctrl.disconnect()
-                _finish_test("FAIL", {}, {}, {})
-                return
-                
-            time.sleep(0.5) # Wait for program to switch
-            vision_result = vision_ctrl.trigger_inspection(state["pno"], prog_str)
-            vision_ctrl.disconnect()
-            
+
+            parent.after(0, lambda: lbl_vision_prog.config(text=f"Model: {state['pno']}", fg="white"))
+
+            # Run inspection (capture frame + contour match)
+            vision_result = vision_ctrl.inspect(state["pno"])
             state["vision_result"] = vision_result.judgement
+
+            if vision_result.judgement == "ERROR":
+                parent.after(0, lambda: lbl_vision_dev.config(text=f"Camera: ERROR", fg="#ff5555"))
+                err_text = f"Result: ERROR ({vision_result.error or 'Unknown'})"
+                parent.after(0, lambda: lbl_vision_res.config(text=err_text, fg="#ff5555"))
+                _log(f"Vision ERROR: {vision_result.error}")
+                state["test_running"] = False
+                parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
+                parent.after(0, _input_poll_start)
+                return
+
             if not vision_result.ok:
+                parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
                 err_text = f"Result: NG ({vision_result.error or 'Part not detected'})"
                 parent.after(0, lambda: lbl_vision_res.config(text=err_text, fg="#ff5555"))
-                _log(f"Vision NG: {vision_result.error}")
+                _log(f"Vision NG: {vision_result.error} (score={vision_result.match_score:.4f})")
                 _finish_test("FAIL", {}, {}, {})
                 return
-                
-            parent.after(0, lambda: lbl_vision_res.config(text="Result: OK", fg="#76ff03"))
-            _log(f"Vision OK: {prog_str} in {vision_result.processing_time_ms}ms")
+
+            # Vision OK
+            parent.after(0, lambda: lbl_vision_dev.config(text="Camera: READY", fg="#76ff03"))
+            ok_text = f"Result: OK (score={vision_result.match_score:.4f}, {vision_result.processing_time_ms}ms)"
+            parent.after(0, lambda: lbl_vision_res.config(text=ok_text, fg="#76ff03"))
+            _log(f"Vision OK: score={vision_result.match_score:.4f} in {vision_result.processing_time_ms}ms")
         else:
-            _log("Vision Controller not initialized, skipping vision check (FAIL-SAFE ERROR)")
-            _finish_test("FAIL", {}, {}, {})
+            _log("Vision Controller not initialized — FAIL-SAFE: blocking test")
+            parent.after(0, lambda: lbl_vision_res.config(text="Result: ERROR (Controller not loaded)", fg="#ff5555"))
+            state["test_running"] = False
+            parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
+            parent.after(0, _input_poll_start)
             return
         # --- END VISION VERIFICATION ---
 

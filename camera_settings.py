@@ -4,7 +4,8 @@ camera_settings.py
 Camera Settings configuration page.
 Allows selecting camera devices for Camera 1 and Camera 2,
 adjusting resolution, and previewing live feeds.
-Settings are persisted to camera_cfg.ini.
+Includes Vision Model management for contour-based part verification.
+Settings are persisted to camera_cfg.ini and vision_config.json.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -26,30 +27,6 @@ except ImportError:
     _pil_ok = False
 
 _CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
-
-
-_KEYENCE_CFG_PATH = os.path.join(os.path.dirname(__file__), "keyence_config.json")
-
-def _load_keyence_cfg():
-    if os.path.exists(_KEYENCE_CFG_PATH):
-        try:
-            with open(_KEYENCE_CFG_PATH, "r") as f:
-                return json.load(f)
-        except:
-            pass
-    return {
-        "device_type": "KEYENCE_IV4",
-        "ip_address": "192.168.0.10",
-        "port": 8500,
-        "communication_mode": "TCP/IP Non-Procedural",
-        "timeout_ms": 1000,
-        "program_mapping": {}
-    }
-
-def _save_keyence_cfg(cfg):
-    with open(_KEYENCE_CFG_PATH, "w") as f:
-        json.dump(cfg, f, indent=4)
-
 
 def _load_cfg() -> dict:
     cfg = configparser.ConfigParser()
@@ -183,7 +160,7 @@ def render(parent):
 
     # --- Top frame: two camera config panels side by side ---
     top = tk.Frame(content, bg="black")
-    top.pack(fill="both", expand=True)
+    top.pack(fill="x")
     top.columnconfigure(0, weight=1)
     top.columnconfigure(1, weight=1)
 
@@ -224,7 +201,7 @@ def render(parent):
         inner.columnconfigure(1, weight=1)
 
         # Preview area
-        preview_container = tk.Frame(inner, bg="#111", bd=1, relief="solid", width=320, height=240)
+        preview_container = tk.Frame(inner, bg="#111", bd=1, relief="solid", width=320, height=180)
         preview_container.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(8, 4))
         preview_container.pack_propagate(False)
         inner.rowconfigure(2, weight=1)
@@ -250,7 +227,7 @@ def render(parent):
             res_i = cmb_res.current()
             rw, rh = RESOLUTIONS[res_i][1], RESOLUTIONS[res_i][2]
             # Scale preview to fit container
-            pw, ph = min(rw, 320), min(rh, 240)
+            pw, ph = min(rw, 320), min(rh, 180)
             preview_obj["instance"] = CameraPreview(preview_lbl, ci, pw, ph)
             preview_obj["instance"].start()
             previews.append(preview_obj["instance"])
@@ -276,63 +253,180 @@ def render(parent):
     cam1_panel = _make_cam_panel(top, 0, "📷  Camera 1", "cam1", cfg["cam1_index"], cfg["cam1_width"], cfg["cam1_height"], cfg["cam1_enabled"])
     cam2_panel = _make_cam_panel(top, 1, "📷  Camera 2", "cam2", cfg["cam2_index"], cfg["cam2_width"], cfg["cam2_height"], cfg["cam2_enabled"])
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Vision Model Management Section
+    # ─────────────────────────────────────────────────────────────────────────
+    from vision_engine.vision_controller import VisionController, load_vision_config, save_vision_config
 
-    # --- Middle: Keyence Vision Configuration ---
-    mid = tk.Frame(content, bg="black")
-    mid.pack(fill="x", pady=(10, 0))
+    v_cfg = load_vision_config()
 
-    k_cfg = _load_keyence_cfg()
+    vision_lf = ttk.LabelFrame(content, text="👁  Vision Model Management  (Contour Matching)", style="CS.TLabelframe")
+    vision_lf.pack(fill="both", expand=True, padx=6, pady=(10, 4))
 
-    klf = ttk.LabelFrame(mid, text="🔧  KEYENCE Vision Sensor Configuration", style="CS.TLabelframe")
-    klf.pack(fill="x", padx=6, pady=4)
+    v_inner = tk.Frame(vision_lf, bg="black", padx=10, pady=6)
+    v_inner.pack(fill="both", expand=True)
 
-    k_inner = tk.Frame(klf, bg="black", padx=10, pady=8)
-    k_inner.pack(fill="x", expand=True)
+    # --- Row 1: Settings ---
+    settings_row = tk.Frame(v_inner, bg="black")
+    settings_row.pack(fill="x", pady=(0, 6))
 
-    tk.Label(k_inner, text="IP Address:", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=0, sticky="w", pady=4, padx=4)
-    ent_ip = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=15)
-    ent_ip.insert(0, k_cfg.get("ip_address", ""))
-    ent_ip.grid(row=0, column=1, sticky="w", pady=4, padx=4)
+    tk.Label(settings_row, text="Camera Source:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
+    cmb_cam_src = ttk.Combobox(settings_row, values=["cam1", "cam2"], state="readonly", width=6)
+    cmb_cam_src.set(v_cfg.get("camera_source", "cam1"))
+    cmb_cam_src.pack(side="left", padx=(4, 16))
 
-    tk.Label(k_inner, text="Port:", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=2, sticky="w", pady=4, padx=(20, 4))
-    ent_port = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=10)
-    ent_port.insert(0, str(k_cfg.get("port", "")))
-    ent_port.grid(row=0, column=3, sticky="w", pady=4, padx=4)
+    tk.Label(settings_row, text="Match Threshold:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
+    ent_threshold = tk.Entry(settings_row, bg="#111", fg="white", font=("Arial", 10),
+                             insertbackground="white", width=6)
+    ent_threshold.insert(0, str(v_cfg.get("match_threshold", 0.15)))
+    ent_threshold.pack(side="left", padx=(4, 16))
 
-    tk.Label(k_inner, text="Timeout (ms):", bg="black", fg="#999", font=("Arial", 9)).grid(row=0, column=4, sticky="w", pady=4, padx=(20, 4))
-    ent_timeout = tk.Entry(k_inner, bg="#111", fg="white", font=("Arial", 10), insertbackground="white", width=10)
-    ent_timeout.insert(0, str(k_cfg.get("timeout_ms", "")))
-    ent_timeout.grid(row=0, column=5, sticky="w", pady=4, padx=4)
+    tk.Label(settings_row, text="Min Contour Area:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
+    ent_min_area = tk.Entry(settings_row, bg="#111", fg="white", font=("Arial", 10),
+                            insertbackground="white", width=6)
+    ent_min_area.insert(0, str(v_cfg.get("min_contour_area", 500)))
+    ent_min_area.pack(side="left", padx=(4, 16))
 
-    def _test_keyence_connection():
-        from vision_engine.keyence_controller import KeyenceVisionController
-        temp_cfg = {
-            "ip_address": ent_ip.get().strip(),
-            "port": int(ent_port.get().strip()) if ent_port.get().strip().isdigit() else 8500,
-            "timeout_ms": int(ent_timeout.get().strip()) if ent_timeout.get().strip().isdigit() else 1000
-        }
-        _save_keyence_cfg(temp_cfg) # Save temporarily to test
-        
-        btn_test_conn.config(text="Testing...", state="disabled")
-        content.update()
-        
-        ctrl = KeyenceVisionController(_KEYENCE_CFG_PATH)
-        if ctrl.connect():
-            status = ctrl.get_status()
-            ctrl.disconnect()
-            if status == "CONNECTED":
-                messagebox.showinfo("Success", f"Successfully connected to Keyence device at {temp_cfg['ip_address']}:{temp_cfg['port']}")
-            else:
-                messagebox.showwarning("Warning", f"Connected, but device returned status: {status}")
+    # Vision enabled checkbox
+    vision_enabled_var = tk.BooleanVar(value=v_cfg.get("vision_enabled", True))
+    chk_enabled = tk.Checkbutton(settings_row, text="Vision Enabled", variable=vision_enabled_var,
+                                  bg="black", fg="#76ff03", selectcolor="#111",
+                                  activebackground="black", activeforeground="#76ff03",
+                                  font=("Arial", 9, "bold"))
+    chk_enabled.pack(side="right")
+
+    # --- Row 2: Part → Model mapping table ---
+    table_frame = tk.Frame(v_inner, bg="black")
+    table_frame.pack(fill="both", expand=True, pady=(0, 6))
+
+    cols = ("PART NUMBER", "MODEL FILE", "REFERENCES", "CREATED")
+    tree = ttk.Treeview(table_frame, columns=cols, show="headings", height=4)
+    sb = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=sb.set)
+    sb.pack(side="right", fill="y")
+    tree.pack(fill="both", expand=True)
+
+    tree.heading("PART NUMBER", text="PART NUMBER")
+    tree.heading("MODEL FILE", text="MODEL FILE")
+    tree.heading("REFERENCES", text="REFS")
+    tree.heading("CREATED", text="CREATED")
+    tree.column("PART NUMBER", width=150, anchor="center")
+    tree.column("MODEL FILE", width=180, anchor="center")
+    tree.column("REFERENCES", width=60, anchor="center")
+    tree.column("CREATED", width=150, anchor="center")
+
+    def _refresh_model_table():
+        tree.delete(*tree.get_children())
+        v_cfg_now = load_vision_config()
+        import numpy as np
+        models_dir = os.path.join(os.path.dirname(__file__), "vision_models")
+        for pno, filename in v_cfg_now.get("part_mapping", {}).items():
+            refs = "?"
+            created = "?"
+            fpath = os.path.join(models_dir, filename)
+            if os.path.exists(fpath):
+                try:
+                    data = np.load(fpath, allow_pickle=True)
+                    mcfg = json.loads(str(data["config"]))
+                    refs = str(mcfg.get("num_references", "?"))
+                    created = mcfg.get("created", "?")
+                except Exception:
+                    pass
+            tree.insert("", "end", iid=pno, values=(pno, filename, refs, created))
+
+    _refresh_model_table()
+
+    # --- Row 3: Buttons ---
+    btn_row = tk.Frame(v_inner, bg="black")
+    btn_row.pack(fill="x")
+
+    def _build_model():
+        """Open a teaching dialog to build a contour reference model for a part number."""
+        # Ask for part number
+        dlg = tk.Toplevel(parent)
+        dlg.title("Build Vision Model — Enter Part Number")
+        dlg.geometry("350x120")
+        dlg.configure(bg="#222")
+        dlg.transient(parent)
+        dlg.grab_set()
+
+        tk.Label(dlg, text="Part Number:", bg="#222", fg="white", font=("Arial", 11)).pack(pady=(15, 5))
+        ent_pno = tk.Entry(dlg, bg="#111", fg="white", font=("Arial", 12), insertbackground="white", width=25)
+        ent_pno.pack(pady=5)
+        ent_pno.focus_set()
+
+        def _proceed():
+            pno = ent_pno.get().strip().upper()
+            if not pno:
+                messagebox.showwarning("Validation", "Enter a Part Number.", parent=dlg)
+                return
+            dlg.destroy()
+            # Get camera index from cam1 panel selection
+            d1_sel = cam1_panel["cmb_dev"].current()
+            r1_sel = cam1_panel["cmb_res"].current()
+            ci = cam_indices[d1_sel] if d1_sel > 0 else -1
+            w, h = RESOLUTIONS[r1_sel][1], RESOLUTIONS[r1_sel][2]
+            if ci < 0:
+                messagebox.showerror("Error", "Please select Camera 1 first.", parent=parent)
+                return
+            _open_contour_builder(parent, pno, ci, w, h, _refresh_model_table)
+
+        tk.Button(dlg, text="Continue →", bg="#1b5e20", fg="white",
+                  font=("Arial", 11, "bold"), bd=0, padx=20, pady=6,
+                  command=_proceed).pack(pady=5)
+        ent_pno.bind("<Return>", lambda e: _proceed())
+
+    def _delete_model():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Select", "Select a part from the table first.")
+            return
+        pno = sel[0]
+        if not messagebox.askyesno("Confirm", f"Delete vision model for '{pno}'?"):
+            return
+        ctrl = VisionController()
+        ctrl.delete_model(pno)
+        _refresh_model_table()
+        messagebox.showinfo("Deleted", f"Vision model for '{pno}' deleted.")
+
+    def _test_model():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Select", "Select a part from the table first.")
+            return
+        pno = sel[0]
+        ctrl = VisionController()
+        result = ctrl.inspect(pno)
+        if result.judgement == "OK":
+            messagebox.showinfo("Vision Test",
+                f"Part: {pno}\nResult: ✅ OK\n"
+                f"Match Score: {result.match_score:.4f} (threshold: {result.threshold})\n"
+                f"Time: {result.processing_time_ms}ms")
+        elif result.judgement == "NG":
+            messagebox.showwarning("Vision Test",
+                f"Part: {pno}\nResult: ❌ NG\n"
+                f"Match Score: {result.match_score:.4f} (threshold: {result.threshold})\n"
+                f"Reason: {result.error}\n"
+                f"Time: {result.processing_time_ms}ms")
         else:
-            messagebox.showerror("Error", f"Failed to connect to Keyence device at {temp_cfg['ip_address']}:{temp_cfg['port']}")
-            
-        btn_test_conn.config(text="🔌  Test Connection", state="normal")
+            messagebox.showerror("Vision Test",
+                f"Part: {pno}\nResult: ⚠ ERROR\n"
+                f"Error: {result.error}")
 
-    btn_test_conn = tk.Button(k_inner, text="🔌  Test Connection", bg="#4a148c", fg="white",
-                             font=("Arial", 9, "bold"), bd=0, padx=12, pady=4,
-                             cursor="hand2", activebackground="#7b1fa2", command=_test_keyence_connection)
-    btn_test_conn.grid(row=0, column=6, sticky="w", pady=4, padx=(20, 4))
+    btn_build = tk.Button(btn_row, text="📷  Build Model for Part", bg="#4a148c", fg="white",
+                          font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
+                          cursor="hand2", activebackground="#7b1fa2", command=_build_model)
+    btn_build.pack(side="left", padx=(0, 8))
+
+    btn_test = tk.Button(btn_row, text="🔍  Test Selected Model", bg="#e65100", fg="white",
+                         font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
+                         cursor="hand2", activebackground="#ff9800", command=_test_model)
+    btn_test.pack(side="left", padx=(0, 8))
+
+    btn_del = tk.Button(btn_row, text="🗑  Delete Selected", bg="#b71c1c", fg="white",
+                        font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
+                        cursor="hand2", activebackground="#d32f2f", command=_delete_model)
+    btn_del.pack(side="left")
 
     # --- Bottom: Save / Detected info ---
     bottom = tk.Frame(content, bg="black")
@@ -363,23 +457,23 @@ def render(parent):
         }
         _save_cfg(new_cfg)
 
-        # Save Keyence config
+        # Save vision config
         try:
-            k_cfg["ip_address"] = ent_ip.get().strip()
-            k_cfg["port"] = int(ent_port.get().strip())
-            k_cfg["timeout_ms"] = int(ent_timeout.get().strip())
-            _save_keyence_cfg(k_cfg)
+            v_cfg["vision_enabled"] = vision_enabled_var.get()
+            v_cfg["camera_source"] = cmb_cam_src.get()
+            v_cfg["match_threshold"] = float(ent_threshold.get().strip())
+            v_cfg["min_contour_area"] = int(ent_min_area.get().strip())
+            save_vision_config(v_cfg)
         except ValueError:
-            messagebox.showerror("Validation Error", "Port and Timeout must be integers.")
+            messagebox.showerror("Validation", "Threshold must be a number, Min Area must be an integer.")
             return
-        messagebox.showinfo("Saved", "Camera settings saved successfully.\nChanges will apply on next test console load.")
 
-    btn_save = tk.Button(bottom, text="💾  Save Settings", bg="#0d47a1", fg="white",
+        messagebox.showinfo("Saved", "Camera and vision settings saved successfully.\nChanges will apply on next test console load.")
+
+    btn_save = tk.Button(bottom, text="💾  Save All Settings", bg="#0d47a1", fg="white",
                          font=("Arial", 11, "bold"), bd=0, padx=20, pady=8,
                          cursor="hand2", activebackground="#1565c0", command=_save)
     btn_save.pack(side="right")
-
-
 
     # Cleanup when leaving page
     def _on_destroy(e):
@@ -387,3 +481,288 @@ def render(parent):
             for p in previews:
                 p.stop()
     content.bind("<Destroy>", _on_destroy)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Contour Model Builder Dialog
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _open_contour_builder(parent, part_number, cam_index, width, height, on_done_callback):
+    """
+    Open a Toplevel window that lets the operator:
+    1. See live camera feed with contour overlay
+    2. Draw an ROI
+    3. Adjust Canny thresholds until contour is clean
+    4. Capture 3-5 reference images
+    5. Save the contour model for the given part number
+    """
+    if not _cv2_ok or not _pil_ok:
+        messagebox.showerror("Error", "OpenCV and Pillow are required.", parent=parent)
+        return
+
+    win = tk.Toplevel(parent)
+    win.title(f"Build Contour Model — {part_number}")
+    win.geometry("900x620")
+    win.configure(bg="#222")
+    win.transient(parent)
+    win.grab_set()
+
+    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Could not open camera.", parent=win)
+        win.destroy()
+        return
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+    running = {"value": True}
+    current_frame = {"value": None}
+    captured_images = []
+    roi_state = {"roi": None, "drawing": False, "start": None, "end": None}
+
+    # --- Left: Video ---
+    left = tk.Frame(win, bg="#222")
+    left.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+
+    lbl_video = tk.Label(left, bg="black")
+    lbl_video.pack(fill="both", expand=True)
+
+    # --- Right: Controls ---
+    right = tk.Frame(win, bg="#333", width=250)
+    right.pack(side="right", fill="y", padx=8, pady=8)
+    right.pack_propagate(False)
+
+    tk.Label(right, text=f"Part: {part_number}", bg="#333", fg="#e8a000",
+             font=("Arial", 12, "bold")).pack(pady=(10, 5))
+
+    tk.Label(right, text="Contour Model Builder", bg="#333", fg="white",
+             font=("Arial", 10)).pack(pady=(0, 10))
+
+    # Preprocessing sliders
+    tk.Label(right, text="─── Preprocessing ───", bg="#333", fg="#888",
+             font=("Arial", 9)).pack(fill="x", pady=(5, 2))
+
+    tk.Label(right, text="Canny Low:", bg="#333", fg="#ccc", font=("Arial", 9)).pack(anchor="w", padx=10)
+    slider_canny_low = tk.Scale(right, from_=10, to=200, orient="horizontal",
+                                 bg="#333", fg="white", highlightbackground="#333",
+                                 troughcolor="#111", length=200)
+    slider_canny_low.set(50)
+    slider_canny_low.pack(padx=10)
+
+    tk.Label(right, text="Canny High:", bg="#333", fg="#ccc", font=("Arial", 9)).pack(anchor="w", padx=10)
+    slider_canny_high = tk.Scale(right, from_=50, to=400, orient="horizontal",
+                                  bg="#333", fg="white", highlightbackground="#333",
+                                  troughcolor="#111", length=200)
+    slider_canny_high.set(150)
+    slider_canny_high.pack(padx=10)
+
+    lbl_status = tk.Label(right, text="Images: 0 / 5", bg="#333", fg="#ccc",
+                          font=("Arial", 10))
+    lbl_status.pack(pady=8)
+
+    lbl_contour_info = tk.Label(right, text="Contour: ---", bg="#333", fg="#ccc",
+                                font=("Arial", 9))
+    lbl_contour_info.pack(pady=2)
+
+    # ROI Button
+    btn_roi = tk.Button(right, text="Draw ROI (click & drag)", bg="#0d47a1", fg="white",
+                        font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2")
+    btn_roi.pack(fill="x", padx=10, pady=4)
+
+    def _toggle_roi():
+        if roi_state["drawing"]:
+            roi_state["drawing"] = False
+            btn_roi.config(text="Draw ROI (click & drag)", bg="#0d47a1")
+        else:
+            roi_state["drawing"] = True
+            roi_state["roi"] = None
+            roi_state["start"] = None
+            roi_state["end"] = None
+            btn_roi.config(text="Drawing... drag on video", bg="#ff9800")
+    btn_roi.config(command=_toggle_roi)
+
+    # Capture button
+    btn_capture = tk.Button(right, text="📷  Capture Reference", bg="#1b5e20", fg="white",
+                            font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
+    btn_capture.pack(fill="x", padx=10, pady=4)
+
+    def _capture():
+        if current_frame["value"] is not None and len(captured_images) < 5:
+            captured_images.append(current_frame["value"].copy())
+            lbl_status.config(text=f"Images: {len(captured_images)} / 5")
+            # Flash
+            lbl_video.config(bg="white")
+            win.after(80, lambda: lbl_video.config(bg="black"))
+            if len(captured_images) >= 3:
+                btn_save.config(state="normal")
+    btn_capture.config(command=_capture)
+
+    # Save button
+    btn_save = tk.Button(right, text="💾  Save Model", bg="#b71c1c", fg="white",
+                         font=("Arial", 10, "bold"), bd=0, padx=10, pady=6,
+                         cursor="hand2", state="disabled")
+    btn_save.pack(fill="x", padx=10, pady=(10, 4))
+
+    def _save_model():
+        if len(captured_images) < 3:
+            messagebox.showwarning("Need More", "Capture at least 3 reference images.", parent=win)
+            return
+
+        roi = roi_state["roi"]
+        if not roi:
+            # Use full frame
+            h, w = captured_images[0].shape[:2]
+            roi = {"x": 0, "y": 0, "width": w, "height": h}
+
+        preprocessing = {
+            "blur_kernel": 5,
+            "canny_low": slider_canny_low.get(),
+            "canny_high": slider_canny_high.get()
+        }
+
+        try:
+            from vision_engine.vision_controller import VisionController
+            ctrl = VisionController()
+            path = ctrl.build_and_save_model(
+                part_number=part_number,
+                images=captured_images,
+                roi=roi,
+                preprocessing=preprocessing,
+                match_threshold=float(ctrl.config.get("match_threshold", 0.15)),
+                min_contour_area=int(ctrl.config.get("min_contour_area", 500)),
+            )
+            messagebox.showinfo("Success",
+                f"Model saved for '{part_number}'\n"
+                f"References: {len(captured_images)}\n"
+                f"File: {os.path.basename(path)}", parent=win)
+            running["value"] = False
+            cap.release()
+            win.destroy()
+            if on_done_callback:
+                on_done_callback()
+        except Exception as e:
+            messagebox.showerror("Error", str(e), parent=win)
+
+    btn_save.config(command=_save_model)
+
+    # --- Mouse events for ROI drawing ---
+    def _scale_coords(event):
+        """Convert label click coords back to original frame coords."""
+        if current_frame["value"] is None:
+            return None, None
+        fh, fw = current_frame["value"].shape[:2]
+        lw = lbl_video.winfo_width()
+        lh = lbl_video.winfo_height()
+        if lw < 10 or lh < 10:
+            return None, None
+        scale = min(lw / fw, lh / fh)
+        dw, dh = int(fw * scale), int(fh * scale)
+        ox, oy = (lw - dw) // 2, (lh - dh) // 2
+        if not (ox <= event.x <= ox + dw and oy <= event.y <= oy + dh):
+            return None, None
+        rx = int((event.x - ox) / scale)
+        ry = int((event.y - oy) / scale)
+        return rx, ry
+
+    def _mouse_down(event):
+        if roi_state["drawing"]:
+            rx, ry = _scale_coords(event)
+            if rx is not None:
+                roi_state["start"] = (rx, ry)
+                roi_state["end"] = (rx, ry)
+
+    def _mouse_drag(event):
+        if roi_state["drawing"] and roi_state["start"]:
+            rx, ry = _scale_coords(event)
+            if rx is not None:
+                roi_state["end"] = (rx, ry)
+
+    def _mouse_up(event):
+        if roi_state["drawing"] and roi_state["start"] and roi_state["end"]:
+            x1, y1 = roi_state["start"]
+            x2, y2 = roi_state["end"]
+            x, y = min(x1, x2), min(y1, y2)
+            w, h = abs(x2 - x1), abs(y2 - y1)
+            if w > 20 and h > 20:
+                roi_state["roi"] = {"x": x, "y": y, "width": w, "height": h}
+                roi_state["drawing"] = False
+                btn_roi.config(text=f"ROI: {w}x{h} @ ({x},{y})", bg="#0d47a1")
+            roi_state["start"] = None
+            roi_state["end"] = None
+
+    lbl_video.bind("<ButtonPress-1>", _mouse_down)
+    lbl_video.bind("<B1-Motion>", _mouse_drag)
+    lbl_video.bind("<ButtonRelease-1>", _mouse_up)
+
+    # --- Video loop with contour overlay ---
+    photo_ref = {"photo": None}
+
+    def _update():
+        if not running["value"]:
+            return
+        ret, frame = cap.read()
+        if not ret:
+            win.after(33, _update)
+            return
+
+        current_frame["value"] = frame.copy()
+        disp = frame.copy()
+
+        # Draw ROI
+        roi = roi_state["roi"]
+        if roi:
+            cv2.rectangle(disp, (roi["x"], roi["y"]),
+                          (roi["x"] + roi["width"], roi["y"] + roi["height"]),
+                          (0, 255, 0), 2)
+            # Extract and draw contour within ROI
+            region = frame[roi["y"]:roi["y"]+roi["height"], roi["x"]:roi["x"]+roi["width"]]
+        elif roi_state["start"] and roi_state["end"] and roi_state["drawing"]:
+            cv2.rectangle(disp, roi_state["start"], roi_state["end"], (255, 0, 0), 2)
+            region = None
+        else:
+            region = frame
+
+        # Contour detection overlay
+        if region is not None and region.size > 0:
+            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, slider_canny_low.get(), slider_canny_high.get())
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            edges = cv2.dilate(edges, kernel, iterations=1)
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            valid = [c for c in contours if cv2.contourArea(c) >= 500]
+
+            if valid:
+                biggest = max(valid, key=cv2.contourArea)
+                area = cv2.contourArea(biggest)
+                # Offset contours back to full-frame coords
+                offset_x = roi["x"] if roi else 0
+                offset_y = roi["y"] if roi else 0
+                shifted = biggest.copy()
+                shifted[:, :, 0] += offset_x
+                shifted[:, :, 1] += offset_y
+                cv2.drawContours(disp, [shifted], -1, (0, 255, 255), 2)
+                win.after(0, lambda a=area: lbl_contour_info.config(
+                    text=f"Contour: area={int(a)}, pts={len(biggest)}", fg="#76ff03"))
+            else:
+                win.after(0, lambda: lbl_contour_info.config(text="Contour: none detected", fg="#ff5555"))
+
+        # Display
+        disp_rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(disp_rgb)
+        lw, lh = lbl_video.winfo_width(), lbl_video.winfo_height()
+        if lw > 10 and lh > 10:
+            img.thumbnail((lw, lh), Image.Resampling.LANCZOS)
+        photo_ref["photo"] = ImageTk.PhotoImage(img)
+        lbl_video.config(image=photo_ref["photo"])
+
+        if running["value"]:
+            win.after(33, _update)
+
+    def _on_close():
+        running["value"] = False
+        cap.release()
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", _on_close)
+    win.after(100, _update)
