@@ -232,11 +232,10 @@ def render(parent):
 def _open_contour_builder(parent, part_number, cam_index, width, height, on_done_callback):
     """
     Open a Toplevel window that lets the operator:
-    1. See live camera feed with contour overlay
-    2. Draw an ROI
+    1. Upload reference images (no camera required)
+    2. Draw an ROI on the first uploaded image
     3. Adjust Canny thresholds until contour is clean
-    4. Capture 3-5 reference images
-    5. Save the contour model for the given part number
+    4. Save the contour model
     """
     if not _cv2_ok or not _pil_ok:
         messagebox.showerror("Error", "OpenCV and Pillow are required.", parent=parent)
@@ -249,24 +248,16 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     win.transient(parent)
     win.grab_set()
 
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        messagebox.showerror("Error", "Could not open camera.", parent=win)
-        win.destroy()
-        return
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
-    running = {"value": True}
     current_frame = {"value": None}
     captured_images = []
     roi_state = {"roi": None, "drawing": False, "start": None, "end": None}
+    photo_ref = {"photo": None}
 
     # --- Left: Video ---
     left = tk.Frame(win, bg="#222")
     left.pack(side="left", fill="both", expand=True, padx=8, pady=8)
 
-    lbl_video = tk.Label(left, bg="black")
+    lbl_video = tk.Label(left, bg="black", text="[ Please Upload Images ]", fg="#666", font=("Arial", 14))
     lbl_video.pack(fill="both", expand=True)
 
     # --- Right: Controls ---
@@ -277,7 +268,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     tk.Label(right, text=f"Part: {part_number}", bg="#333", fg="#e8a000",
              font=("Arial", 12, "bold")).pack(pady=(10, 5))
 
-    tk.Label(right, text="Contour Model Builder", bg="#333", fg="white",
+    tk.Label(right, text="Offline Contour Builder", bg="#333", fg="white",
              font=("Arial", 10)).pack(pady=(0, 10))
 
     # Preprocessing sliders
@@ -298,7 +289,7 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
     slider_canny_high.set(150)
     slider_canny_high.pack(padx=10)
 
-    lbl_status = tk.Label(right, text="Images: 0 / 5", bg="#333", fg="#ccc",
+    lbl_status = tk.Label(right, text="Images: 0", bg="#333", fg="#ccc",
                           font=("Arial", 10))
     lbl_status.pack(pady=8)
 
@@ -306,12 +297,72 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
                                 font=("Arial", 9))
     lbl_contour_info.pack(pady=2)
 
+    def _render_frame(*args):
+        if current_frame["value"] is None:
+            return
+
+        frame = current_frame["value"].copy()
+        disp = frame.copy()
+
+        roi = roi_state["roi"]
+        if roi:
+            cv2.rectangle(disp, (roi["x"], roi["y"]),
+                          (roi["x"] + roi["width"], roi["y"] + roi["height"]),
+                          (0, 255, 0), 2)
+            region = frame[roi["y"]:roi["y"]+roi["height"], roi["x"]:roi["x"]+roi["width"]]
+        elif roi_state["start"] and roi_state["end"] and roi_state["drawing"]:
+            cv2.rectangle(disp, roi_state["start"], roi_state["end"], (255, 0, 0), 2)
+            region = None
+        else:
+            region = frame
+
+        if region is not None and region.size > 0:
+            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if len(region.shape) == 3 else region
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, slider_canny_low.get(), slider_canny_high.get())
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            edges = cv2.dilate(edges, kernel, iterations=1)
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            valid = [c for c in contours if cv2.contourArea(c) >= 500]
+
+            if valid:
+                biggest = max(valid, key=cv2.contourArea)
+                area = cv2.contourArea(biggest)
+                offset_x = roi["x"] if roi else 0
+                offset_y = roi["y"] if roi else 0
+                shifted = biggest.copy()
+                shifted[:, :, 0] += offset_x
+                shifted[:, :, 1] += offset_y
+                cv2.drawContours(disp, [shifted], -1, (0, 255, 255), 2)
+                lbl_contour_info.config(text=f"Contour: area={int(area)}, pts={len(biggest)}", fg="#76ff03")
+            else:
+                lbl_contour_info.config(text="Contour: none detected", fg="#ff5555")
+
+        disp_rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(disp_rgb)
+        
+        # We need winfo_width/height but they might be 1 on first render
+        lw = lbl_video.winfo_width()
+        lh = lbl_video.winfo_height()
+        if lw > 10 and lh > 10:
+            img.thumbnail((lw, lh), Image.Resampling.LANCZOS)
+        
+        photo_ref["photo"] = ImageTk.PhotoImage(img)
+        lbl_video.config(image=photo_ref["photo"], text="")
+
+    slider_canny_low.config(command=_render_frame)
+    slider_canny_high.config(command=_render_frame)
+
     # ROI Button
     btn_roi = tk.Button(right, text="Draw ROI (click & drag)", bg="#0d47a1", fg="white",
                         font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2")
     btn_roi.pack(fill="x", padx=10, pady=4)
 
     def _toggle_roi():
+        if current_frame["value"] is None:
+            messagebox.showwarning("Upload First", "Please upload images before drawing an ROI.", parent=win)
+            return
+            
         if roi_state["drawing"]:
             roi_state["drawing"] = False
             btn_roi.config(text="Draw ROI (click & drag)", bg="#0d47a1")
@@ -320,34 +371,17 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             roi_state["roi"] = None
             roi_state["start"] = None
             roi_state["end"] = None
-            btn_roi.config(text="Drawing... drag on video", bg="#ff9800")
+            btn_roi.config(text="Drawing... drag on image", bg="#ff9800")
+            _render_frame()
     btn_roi.config(command=_toggle_roi)
 
-    # Capture button
-    btn_capture = tk.Button(right, text="📷  Capture Reference", bg="#1b5e20", fg="white",
-                            font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
-    btn_capture.pack(fill="x", padx=10, pady=4)
-    
-    # NEW: Upload button
+    # Upload button
     btn_upload = tk.Button(right, text="📁  Upload Images", bg="#0277bd", fg="white",
                             font=("Arial", 10, "bold"), bd=0, padx=10, pady=6, cursor="hand2")
     btn_upload.pack(fill="x", padx=10, pady=4)
 
-    def _capture():
-        if current_frame["value"] is not None and len(captured_images) < 5:
-            captured_images.append(current_frame["value"].copy())
-            lbl_status.config(text=f"Images: {len(captured_images)} / 5")
-            lbl_video.config(bg="white")
-            win.after(80, lambda: lbl_video.config(bg="black"))
-            if len(captured_images) >= 3:
-                btn_save.config(state="normal")
-    btn_capture.config(command=_capture)
-    
     def _upload():
         from tkinter import filedialog
-        import cv2
-        import numpy as np
-        
         filepaths = filedialog.askopenfilenames(
             parent=win,
             title="Select Reference Images",
@@ -356,23 +390,21 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
         
         added = 0
         for fp in filepaths:
-            if len(captured_images) >= 5:
-                break
-            # Read image
-            # Ensure it works with unicode paths (though cv2.imread is usually fine on macOS)
             img = cv2.imread(fp)
             if img is not None:
-                # Resize if necessary to match camera resolution (width x height)
-                # But actually contour extraction will adapt to ROI. It's best if we resize to the exact width/height of the configured camera.
                 img_resized = cv2.resize(img, (width, height))
                 captured_images.append(img_resized)
                 added += 1
                 
         if added > 0:
-            lbl_status.config(text=f"Images: {len(captured_images)} / 5")
+            current_frame["value"] = captured_images[0]
+            lbl_status.config(text=f"Images: {len(captured_images)}")
             if len(captured_images) >= 3:
                 btn_save.config(state="normal")
-            messagebox.showinfo("Uploaded", f"Added {added} images from disk.", parent=win)
+            
+            # Force layout update so _render_frame gets correct label sizes
+            win.update_idletasks()
+            _render_frame()
 
     btn_upload.config(command=_upload)
 
@@ -384,12 +416,11 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
 
     def _save_model():
         if len(captured_images) < 3:
-            messagebox.showwarning("Need More", "Capture at least 3 reference images.", parent=win)
+            messagebox.showwarning("Need More", "Please upload at least 3 reference images.", parent=win)
             return
 
         roi = roi_state["roi"]
         if not roi:
-            # Use full frame
             h, w = captured_images[0].shape[:2]
             roi = {"x": 0, "y": 0, "width": w, "height": h}
 
@@ -411,11 +442,9 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
                 min_contour_area=int(ctrl.config.get("min_contour_area", 500)),
             )
             messagebox.showinfo("Success",
-                f"Dataset saved for '{part_number}'\n"
-                f"References: {len(captured_images)}\n"
+                f"Dataset saved for '{part_number}'\n" \
+                f"References: {len(captured_images)}\n" \
                 f"File: {os.path.basename(path)}", parent=win)
-            running["value"] = False
-            cap.release()
             win.destroy()
             if on_done_callback:
                 on_done_callback()
@@ -426,7 +455,6 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
 
     # --- Mouse events for ROI drawing ---
     def _scale_coords(event):
-        """Convert label click coords back to original frame coords."""
         if current_frame["value"] is None:
             return None, None
         fh, fw = current_frame["value"].shape[:2]
@@ -449,12 +477,14 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
             if rx is not None:
                 roi_state["start"] = (rx, ry)
                 roi_state["end"] = (rx, ry)
+                _render_frame()
 
     def _mouse_drag(event):
         if roi_state["drawing"] and roi_state["start"]:
             rx, ry = _scale_coords(event)
             if rx is not None:
                 roi_state["end"] = (rx, ry)
+                _render_frame()
 
     def _mouse_up(event):
         if roi_state["drawing"] and roi_state["start"] and roi_state["end"]:
@@ -468,80 +498,8 @@ def _open_contour_builder(parent, part_number, cam_index, width, height, on_done
                 btn_roi.config(text=f"ROI: {w}x{h} @ ({x},{y})", bg="#0d47a1")
             roi_state["start"] = None
             roi_state["end"] = None
+            _render_frame()
 
     lbl_video.bind("<ButtonPress-1>", _mouse_down)
     lbl_video.bind("<B1-Motion>", _mouse_drag)
     lbl_video.bind("<ButtonRelease-1>", _mouse_up)
-
-    # --- Video loop with contour overlay ---
-    photo_ref = {"photo": None}
-
-    def _update():
-        if not running["value"]:
-            return
-        ret, frame = cap.read()
-        if not ret:
-            win.after(33, _update)
-            return
-
-        current_frame["value"] = frame.copy()
-        disp = frame.copy()
-
-        # Draw ROI
-        roi = roi_state["roi"]
-        if roi:
-            cv2.rectangle(disp, (roi["x"], roi["y"]),
-                          (roi["x"] + roi["width"], roi["y"] + roi["height"]),
-                          (0, 255, 0), 2)
-            # Extract and draw contour within ROI
-            region = frame[roi["y"]:roi["y"]+roi["height"], roi["x"]:roi["x"]+roi["width"]]
-        elif roi_state["start"] and roi_state["end"] and roi_state["drawing"]:
-            cv2.rectangle(disp, roi_state["start"], roi_state["end"], (255, 0, 0), 2)
-            region = None
-        else:
-            region = frame
-
-        # Contour detection overlay
-        if region is not None and region.size > 0:
-            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            edges = cv2.Canny(blurred, slider_canny_low.get(), slider_canny_high.get())
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            edges = cv2.dilate(edges, kernel, iterations=1)
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            valid = [c for c in contours if cv2.contourArea(c) >= 500]
-
-            if valid:
-                biggest = max(valid, key=cv2.contourArea)
-                area = cv2.contourArea(biggest)
-                # Offset contours back to full-frame coords
-                offset_x = roi["x"] if roi else 0
-                offset_y = roi["y"] if roi else 0
-                shifted = biggest.copy()
-                shifted[:, :, 0] += offset_x
-                shifted[:, :, 1] += offset_y
-                cv2.drawContours(disp, [shifted], -1, (0, 255, 255), 2)
-                win.after(0, lambda a=area: lbl_contour_info.config(
-                    text=f"Contour: area={int(a)}, pts={len(biggest)}", fg="#76ff03"))
-            else:
-                win.after(0, lambda: lbl_contour_info.config(text="Contour: none detected", fg="#ff5555"))
-
-        # Display
-        disp_rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(disp_rgb)
-        lw, lh = lbl_video.winfo_width(), lbl_video.winfo_height()
-        if lw > 10 and lh > 10:
-            img.thumbnail((lw, lh), Image.Resampling.LANCZOS)
-        photo_ref["photo"] = ImageTk.PhotoImage(img)
-        lbl_video.config(image=photo_ref["photo"])
-
-        if running["value"]:
-            win.after(33, _update)
-
-    def _on_close():
-        running["value"] = False
-        cap.release()
-        win.destroy()
-
-    win.protocol("WM_DELETE_WINDOW", _on_close)
-    win.after(100, _update)
