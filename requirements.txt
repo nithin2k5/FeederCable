@@ -1,6 +1,5 @@
 pyserial>=3.5
 pymodbus>=3.0.0
 mysql-connector-python>=8.0.0
-pywin32>=300
 pillow>=10.0.0
 opencv-python>=4.8.0
