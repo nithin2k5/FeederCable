@@ -8,5 +8,8 @@
         "canny_low": 50,
         "canny_high": 150
     },
-    "part_mapping": {}
+    "part_mapping": {
+        "12345": "12345.npz",
+        "12345678": "12345678.npz"
+    }
 }

@@ -2,10 +2,10 @@ import tkinter as tk
 from tkinter import messagebox
 import mysql.connector
 
+import db
+
 def _get_conn():
-    return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="12345"
-    )
+    return db.get_connection()
 
 def show_disclaimer(parent_root):
     # Modal dialog that blocks the main window
@@ -106,12 +106,9 @@ def show_login(parent_root, title="Login"):
             return
             
         try:
-            conn = _get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT pwd FROM admin WHERE eno=%s", (eno,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
+            with db.get_cursor() as cur:
+                cur.execute("SELECT pwd FROM admin WHERE eno=%s", (eno,))
+                row = cur.fetchone()
             
             if row and row[0] == pwd:
                 result["success"] = True

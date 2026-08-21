@@ -243,8 +243,12 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         try:
             model = build_reference_model(self.captured_images, roi)
             
+            import os
+            initial_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vision_models")
+            os.makedirs(initial_dir, exist_ok=True)
             save_path = filedialog.asksaveasfilename(
                 title="Save Reference Model",
+                initialdir=initial_dir,
                 defaultextension=".ivmodel",
                 filetypes=[("IV Model Files", "*.ivmodel"), ("All Files", "*.*")]
             )

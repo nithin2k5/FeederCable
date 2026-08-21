@@ -60,6 +60,19 @@ def save_vision_config(cfg: dict):
     with open(_VISION_CFG_PATH, "w") as f:
         json.dump(cfg, f, indent=4)
 
+def get_vision_controller():
+    cfg = load_vision_config()
+    engine = cfg.get("engine", "template")
+    if engine == "yolo":
+        try:
+            from .yolo_controller import YoloVisionController
+            return YoloVisionController()
+        except ImportError:
+            pass
+    elif engine == "sift":
+        from .sift_controller import SiftVisionController
+        return SiftVisionController()
+    return VisionController()
 
 class VisionController:
     """

@@ -1,9 +1,15 @@
 import mysql.connector
 
+import db
+
 def init_db():
     try:
         # Prompt user for credentials if needed, or assume root/root as per Function.cs
-        conn = mysql.connector.connect(host='localhost', user='root', password='12345')
+        conn = mysql.connector.connect(
+            host=db.DB_CONFIG['host'], 
+            user=db.DB_CONFIG['user'], 
+            password=db.DB_CONFIG['password']
+        )
         cur = conn.cursor()
         
         print("Creating database 'fceol' if it doesn't exist...")

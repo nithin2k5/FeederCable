@@ -57,7 +57,10 @@ def render(parent):
     ent_threshold.insert(0, str(v_cfg.get("match_threshold", 0.15)))
     ent_threshold.pack(side="left", padx=(4, 16))
 
-    
+    tk.Label(settings_row, text="Engine:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
+    engine_var = tk.StringVar(value=v_cfg.get("engine", "template"))
+    engine_combo = ttk.Combobox(settings_row, textvariable=engine_var, values=["template", "sift", "yolo"], width=8, state="readonly")
+    engine_combo.pack(side="left", padx=(4, 16))
 
     # Vision enabled checkbox
     vision_enabled_var = tk.BooleanVar(value=v_cfg.get("vision_enabled", True))
@@ -89,22 +92,31 @@ def render(parent):
 
     def _refresh_model_table():
         tree.delete(*tree.get_children())
-        v_cfg_now = load_vision_config()
-        import numpy as np
         models_dir = os.path.join(os.path.dirname(__file__), "vision_models")
-        for pno, filename in v_cfg_now.get("part_mapping", {}).items():
-            refs = "?"
-            created = "?"
-            fpath = os.path.join(models_dir, filename)
-            if os.path.exists(fpath):
-                try:
-                    data = np.load(fpath, allow_pickle=True)
-                    mcfg = json.loads(str(data["config"]))
-                    refs = str(mcfg.get("num_references", "?"))
-                    created = mcfg.get("created", "?")
-                except Exception:
-                    pass
-            tree.insert("", "end", iid=pno, values=(pno, filename, refs, created))
+        yolo_dir = os.path.join(os.path.dirname(__file__), "yolo_models")
+        
+        seen = set()
+        
+        # Scan templates and SIFT
+        if os.path.exists(models_dir):
+            for f in os.listdir(models_dir):
+                if f.endswith(".npz"):
+                    pno = f.replace(".npz", "")
+                    tree.insert("", "end", iid=pno, values=(pno, f, "Template", "Ready"))
+                    seen.add(pno)
+                elif f.endswith(".ivmodel"):
+                    pno = f.replace(".ivmodel", "")
+                    tree.insert("", "end", iid=pno, values=(pno, f, "SIFT Feature", "Ready"))
+                    seen.add(pno)
+                    
+        # Scan YOLO models
+        if os.path.exists(yolo_dir):
+            for f in os.listdir(yolo_dir):
+                if f.endswith(".pt"):
+                    pno = f.replace(".pt", "")
+                    if pno not in seen:
+                        tree.insert("", "end", iid=pno, values=(pno, f, "YOLO Deep Learning", "Ready"))
+                        seen.add(pno)
 
     _refresh_model_table()
 
@@ -113,8 +125,16 @@ def render(parent):
     btn_row.pack(fill="x")
 
     def _build_model():
-        """Open the unified dataset builder window."""
-        _open_template_builder(parent, 640, 480, _refresh_model_table)
+        engine = engine_var.get()
+        if engine == "sift":
+            from vision_engine_ui import open_builder_ui
+            cam_index = 0
+            open_builder_ui(parent, cam_index, 640, 480)
+            _refresh_model_table()
+        elif engine == "yolo":
+            messagebox.showinfo("YOLO Builder", "YOLO models must be trained externally.\nCollect 30-50 images, train using ultralytics CLI, and place the .pt file in the yolo_models/ directory.")
+        else:
+            _open_template_builder(parent, 640, 480, _refresh_model_table)
 
     def _delete_model():
         sel = tree.selection()
@@ -124,10 +144,14 @@ def render(parent):
         pno = sel[0]
         if not messagebox.askyesno("Confirm", f"Delete dataset for '{pno}'?"):
             return
-        ctrl = VisionController()
-        ctrl.delete_model(pno)
-        _refresh_model_table()
-        messagebox.showinfo("Deleted", f"Dataset for '{pno}' deleted.")
+        from vision_engine.vision_controller import get_vision_controller
+        ctrl = get_vision_controller()
+        if hasattr(ctrl, "delete_model"):
+            ctrl.delete_model(pno)
+            _refresh_model_table()
+            messagebox.showinfo("Deleted", f"Dataset for '{pno}' deleted.")
+        else:
+            messagebox.showwarning("Delete", "Model deletion not supported from UI for this engine.")
 
     def _test_model():
         sel = tree.selection()
@@ -135,7 +159,20 @@ def render(parent):
             messagebox.showwarning("Select", "Select a part from the table first.")
             return
         pno = sel[0]
-        ctrl = VisionController()
+        
+        engine = engine_var.get()
+        if engine == "sift":
+            from vision_engine_ui import open_tester_ui
+            cam_index = 0
+            model_path = os.path.join(os.path.dirname(__file__), "vision_models", f"{pno}.ivmodel")
+            if not os.path.exists(model_path):
+                messagebox.showerror("Test", "SIFT model not found. Build it first.")
+                return
+            open_tester_ui(parent, cam_index, 640, 480, model_path)
+            return
+
+        from vision_engine.vision_controller import get_vision_controller
+        ctrl = get_vision_controller()
         result = ctrl.inspect(pno)
         if result.judgement == "OK":
             messagebox.showinfo("Vision Test",
@@ -153,10 +190,76 @@ def render(parent):
                 f"Part: {pno}\nResult: ⚠ ERROR\n"
                 f"Error: {result.error}")
 
+    def _connect_camera():
+        import configparser
+        cam_cfg_path = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
+        cfg = configparser.ConfigParser()
+        if os.path.exists(cam_cfg_path):
+            cfg.read(cam_cfg_path)
+        else:
+            cfg.add_section("CAMERA")
+            
+        def _save_cam():
+            try:
+                idx = int(cam_var.get())
+                if "CAMERA" not in cfg.sections():
+                    cfg.add_section("CAMERA")
+                cfg.set("CAMERA", "cam1_index", str(idx))
+                cfg.set("CAMERA", "cam1_enabled", "True")
+                with open(cam_cfg_path, "w") as f:
+                    cfg.write(f)
+                messagebox.showinfo("Camera", f"Camera {idx} connected and saved.")
+                cam_win.destroy()
+            except ValueError:
+                messagebox.showerror("Error", "Invalid camera index.")
+
+        cam_win = tk.Toplevel(parent)
+        cam_win.title("Connect Camera")
+        cam_win.geometry("300x150")
+        cam_win.configure(bg="#222")
+        cam_win.transient(parent)
+        cam_win.grab_set()
+
+        tk.Label(cam_win, text="Select Camera Index:", bg="#222", fg="white", font=("Arial", 10)).pack(pady=10)
+        
+        cam_var = tk.StringVar(value=cfg.get("CAMERA", "cam1_index", fallback="0") if cfg.has_section("CAMERA") else "0")
+        cam_combo = ttk.Combobox(cam_win, textvariable=cam_var, values=["Detecting..."], state="readonly")
+        cam_combo.pack(pady=5)
+        
+        def _detect_cams():
+            import cv2
+            cams = []
+            for i in range(6):
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    cams.append(str(i))
+                    cap.release()
+            if not cams:
+                cams = ["0", "1", "2", "3", "4", "5"]
+            
+            def _update_ui():
+                try:
+                    cam_combo.config(values=cams)
+                    if cam_var.get() not in cams and cams:
+                        cam_var.set(cams[0])
+                except:
+                    pass
+            cam_win.after(0, _update_ui)
+            
+        import threading
+        threading.Thread(target=_detect_cams, daemon=True).start()
+        
+        tk.Button(cam_win, text="Save & Connect", bg="#00838f", fg="white", bd=0, padx=10, pady=5, command=_save_cam).pack(pady=10)
+
     btn_build = tk.Button(btn_row, text="📷  Add New Part Dataset", bg="#4a148c", fg="white",
                           font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
                           cursor="hand2", activebackground="#7b1fa2", command=_build_model)
     btn_build.pack(side="left", padx=(0, 8))
+
+    btn_camera = tk.Button(btn_row, text="📹  Connect Camera", bg="#00838f", fg="white",
+                           font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
+                           cursor="hand2", activebackground="#00acc1", command=_connect_camera)
+    btn_camera.pack(side="left", padx=(0, 8))
 
     btn_test = tk.Button(btn_row, text="🔍  Test Selected Part", bg="#e65100", fg="white",
                          font=("Arial", 10, "bold"), bd=0, padx=14, pady=5,
@@ -176,6 +279,7 @@ def render(parent):
         try:
             v_cfg["vision_enabled"] = vision_enabled_var.get()
             v_cfg["match_threshold"] = float(ent_threshold.get().strip())
+            v_cfg["engine"] = engine_var.get()
             
             save_vision_config(v_cfg)
         except ValueError:

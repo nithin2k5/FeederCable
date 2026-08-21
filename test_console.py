@@ -52,10 +52,10 @@ try:
 except ImportError:
     _pil_ok = False
 
+import db
+
 def _get_conn():
-    return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="12345"
-    )
+    return db.get_connection()
 
 _CFG_PATH = os.path.join(os.path.dirname(__file__), "comport_cfg.ini")
 def _load_cfg() -> dict:
@@ -360,26 +360,25 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
     mid_char = machine_id[-1] if machine_id else "1"
     prefix = f"{date_str}I{mid_char}A2A"
     try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM testmaster WHERE pno=%s AND lotno LIKE %s", (pno, f"{date_str}%"))
-        row = cur.fetchone()
-        seq = (row[0] if row else 0) + 1
-        cur.close(); conn.close()
-    except Exception: seq = 1
+        with db.get_cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM testmaster WHERE pno=%s AND lotno LIKE %s", (pno, f"{date_str}%"))
+            row = cur.fetchone()
+            seq = (row[0] if row else 0) + 1
+    except Exception as ex: 
+        print(f"DB Error generating lot: {ex}")
+        seq = 1
     return f"{prefix}{seq}"
 
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, printer_name: str = "EOLPRINTER"):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT lblsel FROM settingmaster WHERE pno=%s", (pno,))
-        row = cur.fetchone()
-        if row: lbl_sel = row[0] or ""
-        cur.close(); conn.close()
-    except Exception: pass
+        with db.get_cursor() as cur:
+            cur.execute("SELECT lblsel FROM settingmaster WHERE pno=%s", (pno,))
+            row = cur.fetchone()
+            if row: lbl_sel = row[0] or ""
+    except Exception as ex: 
+        print(f"DB Error getting label: {ex}")
     prn_file = os.path.join(base, f"{lbl_sel}R.prn") if lbl_sel else ""
     if not prn_file or not os.path.exists(prn_file): prn_file = os.path.join(base, "TEMPPRN.prn")
     if not os.path.exists(prn_file): return
@@ -518,7 +517,8 @@ def render(parent):
     
     # Initialize local vision controller (headless, no UI panel)
     try:
-        vision_ctrl = VisionController()
+        from vision_engine.vision_controller import get_vision_controller
+        vision_ctrl = get_vision_controller()
     except Exception as e:
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
@@ -871,25 +871,22 @@ def render(parent):
         log_txt.config(state="normal"); log_txt.insert("end", f"{ts}  {msg}\n"); log_txt.see("end"); log_txt.config(state="disabled")
     def _load_specs(pno: str) -> bool:
         try:
-            conn = _get_conn()
-            cur = conn.cursor(dictionary=True)
-            cur.execute("SELECT pname,cname,mname AS model,alc,chsel AS channel,vendorcode,eocode FROM settingmaster WHERE pno=%s", (pno,))
-            master = cur.fetchone()
-            if not master:
-                cur.execute("SELECT * FROM settingmaster WHERE pno=%s", (pno,))
+            with db.get_dict_cursor() as cur:
+                cur.execute("SELECT pname,cname,mname AS model,alc,chsel AS channel,vendorcode,eocode FROM settingmaster WHERE pno=%s", (pno,))
                 master = cur.fetchone()
-            if not master:
-                messagebox.showwarning("Not Found", f"Part number '{pno}' not found.")
-                cur.close(); conn.close()
-                return False
-            pname = master.get("pname", ""); cname = master.get("cname", ""); mod = master.get("mname", master.get("model", ""))
-            alc = master.get("alc", ""); channel = int(master.get("chsel", master.get("channel", 1)) or 1)
-            vendor = master.get("vendorcode", ""); eo = master.get("eocode", master.get("eo_number", ""))
-            state.update({"pno": pno, "alc": alc, "model": mod, "vendor_code": vendor, "eo_number": eo or "", "pname": pname, "cname": cname, "num_channels": channel})
-            _fill_ro(ent_pname, pname); _fill_ro(ent_cust, cname); _fill_ro(ent_model, mod); _fill_ro(ent_alc, alc); _fill_ro(ent_vendor, vendor); _fill_ro(ent_eo, eo or "")
-            cur.execute("SELECT testname, chsel AS channel, appvol, testtime, min, max FROM settingspec WHERE pno=%s", (pno,))
-            rows = cur.fetchall()
-            cur.close(); conn.close()
+                if not master:
+                    cur.execute("SELECT * FROM settingmaster WHERE pno=%s", (pno,))
+                    master = cur.fetchone()
+                if not master:
+                    messagebox.showwarning("Not Found", f"Part number '{pno}' not found.")
+                    return False
+                pname = master.get("pname", ""); cname = master.get("cname", ""); mod = master.get("mname", master.get("model", ""))
+                alc = master.get("alc", ""); channel = int(master.get("chsel", master.get("channel", 1)) or 1)
+                vendor = master.get("vendorcode", ""); eo = master.get("eocode", master.get("eo_number", ""))
+                state.update({"pno": pno, "alc": alc, "model": mod, "vendor_code": vendor, "eo_number": eo or "", "pname": pname, "cname": cname, "num_channels": channel})
+                _fill_ro(ent_pname, pname); _fill_ro(ent_cust, cname); _fill_ro(ent_model, mod); _fill_ro(ent_alc, alc); _fill_ro(ent_vendor, vendor); _fill_ro(ent_eo, eo or "")
+                cur.execute("SELECT testname, chsel AS channel, appvol, testtime, min, max FROM settingspec WHERE pno=%s", (pno,))
+                rows = cur.fetchall()
             spec_ir = {}; spec_acw = {}
             for r in rows:
                 tn = str(r.get("testname", "")).strip()
@@ -913,27 +910,26 @@ def render(parent):
     def _load_history(pno=None):
         tree_hist.delete(*tree_hist.get_children())
         try:
-            conn = _get_conn(); cur = conn.cursor()
-            if pno: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster WHERE pno=%s ORDER BY id DESC LIMIT 15", (pno,))
-            else: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster ORDER BY id DESC LIMIT 15")
-            for row in cur.fetchall():
-                tag = "pass" if row[5] == "PASS" else "fail"
-                tree_hist.insert("", "end", tags=(tag,), values=row)
-            cur.close(); conn.close()
+            with db.get_cursor() as cur:
+                if pno: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster WHERE pno=%s ORDER BY id DESC LIMIT 15", (pno,))
+                else: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster ORDER BY id DESC LIMIT 15")
+                for row in cur.fetchall():
+                    tag = "pass" if row[5] == "PASS" else "fail"
+                    tree_hist.insert("", "end", tags=(tag,), values=row)
         except Exception: pass
 
     def _load_today_pass(pno=None):
         tree_lot.delete(*tree_lot.get_children())
         try:
-            conn = _get_conn(); cur = conn.cursor()
-            query = "SELECT testmaster.lotno, testmaster.alc, testresult.result, testmaster.scanresult, testmaster.empcode, testmaster.time FROM testmaster JOIN testresult ON testmaster.lotno = testresult.lotno WHERE testresult.result = 'PASS' AND DATE(testmaster.date) = CURDATE() " + (f"AND testmaster.pno='{pno}' " if pno else "") + "ORDER BY testmaster.time DESC"
-            cur.execute(query); rows = cur.fetchall(); cur.close(); conn.close()
+            with db.get_cursor() as cur:
+                query = "SELECT testmaster.lotno, testmaster.alc, testresult.result, testmaster.scanresult, testmaster.empcode, testmaster.time FROM testmaster JOIN testresult ON testmaster.lotno = testresult.lotno WHERE testresult.result = 'PASS' AND DATE(testmaster.date) = CURDATE() " + (f"AND testmaster.pno='{pno}' " if pno else "") + "ORDER BY testmaster.time DESC"
+                cur.execute(query); rows = cur.fetchall()
         except Exception: rows = []
         ok = len(rows)
         try:
-            conn2 = _get_conn(); cur2 = conn2.cursor()
-            q2 = "SELECT COUNT(*) FROM testmaster WHERE result='FAIL' AND DATE(date)=CURDATE()" + (f" AND pno='{pno}'" if pno else "")
-            cur2.execute(q2); ng = cur2.fetchone()[0] or 0; cur2.close(); conn2.close()
+            with db.get_cursor() as cur2:
+                q2 = "SELECT COUNT(*) FROM testmaster WHERE result='FAIL' AND DATE(date)=CURDATE()" + (f" AND pno='{pno}'" if pno else "")
+                cur2.execute(q2); ng = cur2.fetchone()[0] or 0
         except Exception: ng = 0
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; parent.after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
@@ -941,19 +937,18 @@ def render(parent):
 
     def _save_result(lot_no: str, overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict):
         try:
-            conn = _get_conn(); cur = conn.cursor(); now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
-            cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"]))
-            for ch in range(1, state["num_channels"] + 1):
-                cur.execute("INSERT INTO testresult (lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result, empcode) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", ""), emp))
-            conn.commit(); cur.close(); conn.close()
+            with db.get_cursor(commit=True) as cur:
+                now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
+                cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"]))
+                for ch in range(1, state["num_channels"] + 1):
+                    cur.execute("INSERT INTO testresult (lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result, empcode) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", ""), emp))
             _log(f"Saved {overall} â†’ {lot_no}")
         except Exception as ex: _log(f"Save error: {ex}")
 
     def _update_scan_result(lot_no: str, scan_res: str):
         try:
-            conn = _get_conn(); cur = conn.cursor()
-            cur.execute("UPDATE testmaster SET scanresult=%s WHERE lotno=%s", (scan_res, lot_no))
-            conn.commit(); cur.close(); conn.close()
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("UPDATE testmaster SET scanresult=%s WHERE lotno=%s", (scan_res, lot_no))
         except Exception as ex: _log(f"Scan update error: {ex}")
 
     def _validate_employee(empno: str) -> bool:

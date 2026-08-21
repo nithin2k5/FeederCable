@@ -1,11 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import mysql.connector
+import db
 
 def _get_conn():
-    return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="12345"
-    )
+    return db.get_connection()
 
 def render(parent):
     bg_color = "#000000"
@@ -59,14 +57,12 @@ def render(parent):
     def load_users():
         tree.delete(*tree.get_children())
         try:
-            conn = _get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT eno, ename, desig, dept FROM admin")
-            for row in cur.fetchall():
-                tree.insert("", "end", values=row)
-            cur.close(); conn.close()
-        except Exception:
-            pass
+            with db.get_cursor() as cur:
+                cur.execute("SELECT eno, ename, desig, dept FROM admin")
+                for row in cur.fetchall():
+                    tree.insert("", "end", values=row)
+        except Exception as ex:
+            messagebox.showerror("DB Error", f"Failed to load users: {ex}")
 
     def on_tree_select(event):
         selected = tree.selection()
@@ -74,11 +70,9 @@ def render(parent):
         item = tree.item(selected[0])
         eno = item["values"][0]
         try:
-            conn = _get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT eno, ename, pwd, desig, dept FROM admin WHERE eno=%s", (str(eno),))
-            row = cur.fetchone()
-            cur.close(); conn.close()
+            with db.get_cursor() as cur:
+                cur.execute("SELECT eno, ename, pwd, desig, dept FROM admin WHERE eno=%s", (str(eno),))
+                row = cur.fetchone()
             if row:
                 for e in [ent_eno, ent_ename, ent_pwd, ent_desig, ent_dept]: e.delete(0, "end")
                 ent_eno.insert(0, row[0]); ent_ename.insert(0, row[1])
@@ -93,14 +87,13 @@ def render(parent):
             messagebox.showwarning("Validation", "Employee ID and Password are required.")
             return
         try:
-            conn = _get_conn(); cur = conn.cursor()
-            cur.execute("SELECT eno FROM admin WHERE eno=%s", (eno,))
-            exists = cur.fetchone()
-            if exists:
-                cur.execute("UPDATE admin SET ename=%s, pwd=%s, desig=%s, dept=%s WHERE eno=%s", (ename, pwd, desig, dept, eno))
-            else:
-                cur.execute("INSERT INTO admin (eno, ename, pwd, desig, dept) VALUES (%s, %s, %s, %s, %s)", (eno, ename, pwd, desig, dept))
-            conn.commit(); cur.close(); conn.close()
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("SELECT eno FROM admin WHERE eno=%s", (eno,))
+                exists = cur.fetchone()
+                if exists:
+                    cur.execute("UPDATE admin SET ename=%s, pwd=%s, desig=%s, dept=%s WHERE eno=%s", (ename, pwd, desig, dept, eno))
+                else:
+                    cur.execute("INSERT INTO admin (eno, ename, pwd, desig, dept) VALUES (%s, %s, %s, %s, %s)", (eno, ename, pwd, desig, dept))
             messagebox.showinfo("Success", "User saved successfully.")
             load_users()
             on_clear()
@@ -112,9 +105,8 @@ def render(parent):
         if not eno: return
         if messagebox.askyesno("Confirm", f"Delete user '{eno}'?"):
             try:
-                conn = _get_conn(); cur = conn.cursor()
-                cur.execute("DELETE FROM admin WHERE eno=%s", (eno,))
-                conn.commit(); cur.close(); conn.close()
+                with db.get_cursor(commit=True) as cur:
+                    cur.execute("DELETE FROM admin WHERE eno=%s", (eno,))
                 messagebox.showinfo("Success", "User deleted.")
                 load_users()
                 on_clear()
