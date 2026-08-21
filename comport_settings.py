@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 from pymodbus.client import ModbusSerialClient
+import os
+import configparser
 
 def render(parent):
     style = ttk.Style()
@@ -37,14 +39,21 @@ def render(parent):
         sticky = "w" if i == 0 else ""
         tk.Label(table_frame, text=h, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=0, column=i, sticky=sticky, padx=15, pady=(0, 15))
 
+    _CFG_PATH = os.path.join(os.path.dirname(__file__), "comport_cfg.ini")
+    cfg = configparser.ConfigParser()
+    if os.path.exists(_CFG_PATH):
+        cfg.read(_CFG_PATH)
+    if "COM" not in cfg:
+        cfg["COM"] = {}
+        
     devices = [
-        ("HIPOT", "COM0", "9600", "-"),
-        ("LCR METER", "COM0", "9600", "-"),
-        ("PLC", "COM0", "9600", "01"),
-        ("Delta PLC", "COM0", "9600", "01"),
-        ("IO Controller Cable", "COM0", "9600", "-"),
-        ("Label Printer", "COM0", "9600", "-"),
-        ("Scanner", "COM0", "9600", "-"),
+        ("HIPOT", cfg["COM"].get("hp_port", "0"), cfg["COM"].get("hp_baud", "0"), "-"),
+        ("LCR METER", cfg["COM"].get("lcr_port", "0"), cfg["COM"].get("lcr_baud", "0"), "-"),
+        ("PLC", cfg["COM"].get("plc_port", "0"), cfg["COM"].get("plc_baud", "0"), "01"),
+        ("Delta PLC", cfg["COM"].get("io_port", "0"), cfg["COM"].get("io_baud", "0"), "01"),
+        ("IO Controller Cable", cfg["COM"].get("ioc_port", "0"), cfg["COM"].get("ioc_baud", "0"), "-"),
+        ("Label Printer", cfg["COM"].get("printer_port", "0"), cfg["COM"].get("printer_baud", "0"), "-"),
+        ("Scanner", cfg["COM"].get("scanner_port", "0"), cfg["COM"].get("scanner_baud", "0"), "-"),
     ]
 
     import serial.tools.list_ports
@@ -122,6 +131,7 @@ def render(parent):
         else:
             log_msg(f"{dev}: Test not implemented yet.")
 
+    combos = {}
     for r, (dev, port, baud, sid) in enumerate(devices, start=1):
         tk.Label(table_frame, text=dev, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=r, column=0, sticky="w", padx=15, pady=10)
         
@@ -153,6 +163,26 @@ def render(parent):
         btn = tk.Button(table_frame, text="TEST", bg="#e0e0e0", fg="black", font=('Arial', 10, 'bold'), width=10, bd=0)
         btn.config(command=lambda d=dev, cp=cb_port, cb=cb_baud, cs=cb_sid, b=btn: test_connection(d, cp, cb, cs, b))
         btn.grid(row=r, column=5, padx=15)
+        
+        combos[dev] = (cb_port, cb_baud, cb_sid)
+
+    def save_settings():
+        mapping = {
+            "HIPOT": ("hp_port", "hp_baud"),
+            "LCR METER": ("lcr_port", "lcr_baud"),
+            "PLC": ("plc_port", "plc_baud"),
+            "Delta PLC": ("io_port", "io_baud"),
+            "IO Controller Cable": ("ioc_port", "ioc_baud"),
+            "Label Printer": ("printer_port", "printer_baud"),
+            "Scanner": ("scanner_port", "scanner_baud")
+        }
+        for dev, (cb_p, cb_b, cb_s) in combos.items():
+            if dev in mapping:
+                cfg["COM"][mapping[dev][0]] = cb_p.get()
+                cfg["COM"][mapping[dev][1]] = cb_b.get()
+        with open(_CFG_PATH, "w") as f:
+            cfg.write(f)
+        log_msg("Settings saved successfully!")
 
     # Bottom buttons
     bottom_bar = tk.Frame(panel, bg="#12151b")
@@ -160,7 +190,7 @@ def render(parent):
     
     tk.Button(bottom_bar, text="Complete", bg="#e0e0e0", fg="black", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=(5, 0))
     tk.Button(bottom_bar, text="Update", bg="#2196f3", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
-    tk.Button(bottom_bar, text="Save", bg="#4caf50", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
+    tk.Button(bottom_bar, text="Save", bg="#4caf50", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2", command=save_settings).pack(side="right", padx=5)
 
     # Text Area
     text_frame = tk.Frame(panel, bg="#12151b", bd=1, relief="solid", highlightbackground="#333", highlightthickness=1)

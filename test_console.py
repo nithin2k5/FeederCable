@@ -62,10 +62,10 @@ def _load_cfg() -> dict:
     cfg = configparser.ConfigParser()
     cfg.read(_CFG_PATH)
     return {
-        "io_port":    cfg.get("COM", "io_port",    fallback="COM5"),
-        "io_baud":    cfg.getint("COM", "io_baud",  fallback=9600),
-        "hp_port":    cfg.get("COM", "hp_port",    fallback="COM6"),
-        "hp_baud":    cfg.getint("COM", "hp_baud",  fallback=9600),
+        "io_port":    cfg.get("COM", "io_port",    fallback="0"),
+        "io_baud":    cfg.getint("COM", "io_baud",  fallback=0),
+        "hp_port":    cfg.get("COM", "hp_port",    fallback="0"),
+        "hp_baud":    cfg.getint("COM", "hp_baud",  fallback=0),
         "machine_id": cfg.get("COM", "machine_id", fallback="PB1"),
     }
 def _save_cfg(d: dict):
