@@ -5,10 +5,10 @@ import datetime
 import csv
 import os
 
+import db
+
 def _get_conn():
-    return mysql.connector.connect(
-        host="localhost", database="fceol", user="root", password="12345"
-    )
+    return db.get_connection()
 
 def render(parent):
     bg_color = "#081014" 
@@ -47,10 +47,9 @@ def render(parent):
 
     # PNO List
     try:
-        conn = _get_conn(); cur = conn.cursor()
-        cur.execute("SELECT DISTINCT pno FROM testmaster ORDER BY pno")
-        pno_list = ["ALL"] + [r[0] for r in cur.fetchall()]
-        cur.close(); conn.close()
+        with db.get_cursor() as cur:
+            cur.execute("SELECT DISTINCT pno FROM testmaster ORDER BY pno")
+            pno_list = ["ALL"] + [r[0] for r in cur.fetchall()]
     except Exception:
         pno_list = ["ALL"]
 
@@ -97,24 +96,23 @@ def render(parent):
         tree.delete(*tree.get_children())
         pno = cb_pno.get(); start = ent_start.get(); end = ent_end.get(); res = cb_result.get()
         try:
-            conn = _get_conn(); cur = conn.cursor()
-            query = """
-                SELECT m.date, m.time, (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) as cname, 
-                       m.model, m.pno, m.pname, m.lotno, m.alc, m.result, 
-                       r.channel, r.ir_resistance, r.acw_current, r.contact_result
-                FROM testmaster m
-                LEFT JOIN testresult r ON m.lotno = r.lotno
-                WHERE m.date >= %s AND m.date <= %s
-            """
-            params = [start, end]
-            if pno != "ALL": query += " AND m.pno = %s"; params.append(pno)
-            if res != "ALL": query += " AND m.result = %s"; params.append(res)
-            query += " ORDER BY m.date DESC, m.time DESC, m.lotno, r.channel"
-            
-            cur.execute(query, tuple(params))
-            for idx, row in enumerate(cur.fetchall(), start=1):
-                tree.insert("", "end", values=(idx, row[0], row[1], row[2] or "", row[3], row[4], row[5], row[6], row[7], row[8], row[9] or "", row[10] or "", row[11] or "", row[12] or ""))
-            cur.close(); conn.close()
+            with db.get_cursor() as cur:
+                query = """
+                    SELECT m.date, m.time, (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) as cname, 
+                           m.model, m.pno, m.pname, m.lotno, m.alc, m.result, 
+                           r.channel, r.ir_resistance, r.acw_current, r.contact_result
+                    FROM testmaster m
+                    LEFT JOIN testresult r ON m.lotno = r.lotno
+                    WHERE m.date >= %s AND m.date <= %s
+                """
+                params = [start, end]
+                if pno != "ALL": query += " AND m.pno = %s"; params.append(pno)
+                if res != "ALL": query += " AND m.result = %s"; params.append(res)
+                query += " ORDER BY m.date DESC, m.time DESC, m.lotno, r.channel"
+                
+                cur.execute(query, tuple(params))
+                for idx, row in enumerate(cur.fetchall(), start=1):
+                    tree.insert("", "end", values=(idx, row[0], row[1], row[2] or "", row[3], row[4], row[5], row[6], row[7], row[8], row[9] or "", row[10] or "", row[11] or "", row[12] or ""))
         except Exception as ex: messagebox.showerror("DB Error", f"Failed to search: {ex}")
 
     def _do_export():

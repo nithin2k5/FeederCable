@@ -2,14 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import mysql.connector
 
-# ─── DB connection (mirrors Function.cs) ─────────────────────────────────────
-def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        database="fceol",
-        user="root",
-        password="12345"
-    )
+import db
 
 # ─── Load available PRN label templates (mirrors Settings.cs display()) ───────
 def load_prn_templates():
@@ -337,15 +330,12 @@ def render(parent):
         """Reload the bottom treeview from settingmaster."""
         tree_bot.delete(*tree_bot.get_children())
         try:
-            conn = get_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT pno, pname, cname, mname, alc, chsel, machine FROM settingmaster ORDER BY pno")
-            for idx, row in enumerate(cur.fetchall(), start=1):
-                pno, pname, cname, model, alc, channel, machine = row
-                tree_bot.insert("", "end", iid=pno,
-                                values=(idx, pno, pname, cname, model, alc, channel, machine))
-            cur.close()
-            conn.close()
+            with db.get_cursor() as cur:
+                cur.execute("SELECT pno, pname, cname, mname, alc, chsel, machine FROM settingmaster ORDER BY pno")
+                for idx, row in enumerate(cur.fetchall(), start=1):
+                    pno, pname, cname, model, alc, channel, machine = row
+                    tree_bot.insert("", "end", iid=pno,
+                                    values=(idx, pno, pname, cname, model, alc, channel, machine))
         except Exception as ex:
             # DB not available — silently skip
             pass
@@ -358,21 +348,18 @@ def render(parent):
                 "ACW": ["", "", "", ""],
             }
         try:
-            conn = get_connection()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT testname, chsel, appvol, testtime, min, max "
-                "FROM settingspec WHERE pno=%s", (pno,))
-            for row in cur.fetchall():
-                testname, ch_str, appvol, testtime, vmin, vmax = row
-                try:
-                    ch = int(ch_str)
-                except ValueError:
-                    continue
-                if ch in spec_data and testname in spec_data[ch]:
-                    spec_data[ch][testname] = [appvol, testtime, vmin, vmax]
-            cur.close()
-            conn.close()
+            with db.get_cursor() as cur:
+                cur.execute(
+                    "SELECT testname, chsel, appvol, testtime, min, max "
+                    "FROM settingspec WHERE pno=%s", (pno,))
+                for row in cur.fetchall():
+                    testname, ch_str, appvol, testtime, vmin, vmax = row
+                    try:
+                        ch = int(ch_str)
+                    except ValueError:
+                        continue
+                    if ch in spec_data and testname in spec_data[ch]:
+                        spec_data[ch][testname] = [appvol, testtime, vmin, vmax]
         except Exception:
             pass
         switch_channel(active_ch["value"])
@@ -408,32 +395,27 @@ def render(parent):
         if not validate_channel_data():
             return
         try:
-            conn = get_connection()
-            cur = conn.cursor()
+            with db.get_cursor(commit=True) as cur:
+                # Insert settingmaster
+                cur.execute(
+                    "INSERT INTO settingmaster (pno, pname, cname, mname, vendorcode, eocode, alc, chsel, lblsel, machine, testmode) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (pno, ent_pname.get().strip(), ent_cname.get().strip(),
+                     ent_model.get().strip(), ent_vcode.get().strip(),
+                     ent_eon.get().strip(), ent_alc.get().strip(),
+                     cb_channels.get(), cb_label.get(), cb_machine.get(),
+                     cb_testmode.get()))
 
-            # Insert settingmaster
-            cur.execute(
-                "INSERT INTO settingmaster (pno, pname, cname, mname, vendorcode, eocode, alc, chsel, lblsel, machine, testmode) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (pno, ent_pname.get().strip(), ent_cname.get().strip(),
-                 ent_model.get().strip(), ent_vcode.get().strip(),
-                 ent_eon.get().strip(), ent_alc.get().strip(),
-                 cb_channels.get(), cb_label.get(), cb_machine.get(),
-                 cb_testmode.get()))
+                # Insert settingspec for each channel and test type
+                num_channels = int(cb_channels.get())
+                for ch in range(1, num_channels + 1):
+                    for test_name in ("IR", "ACW"):
+                        vals = spec_data[ch][test_name]
+                        cur.execute(
+                            "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                            (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
 
-            # Insert settingspec for each channel and test type
-            num_channels = int(cb_channels.get())
-            for ch in range(1, num_channels + 1):
-                for test_name in ("IR", "ACW"):
-                    vals = spec_data[ch][test_name]
-                    cur.execute(
-                        "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                        (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
-
-            conn.commit()
-            cur.close()
-            conn.close()
             messagebox.showinfo("Success", f"Part '{pno}' saved successfully.")
             mode["value"] = "VIEW"
             refresh_parts_list()
@@ -452,32 +434,27 @@ def render(parent):
         if not validate_channel_data():
             return
         try:
-            conn = get_connection()
-            cur = conn.cursor()
+            with db.get_cursor(commit=True) as cur:
+                cur.execute(
+                    "UPDATE settingmaster SET pname=%s, cname=%s, mname=%s, vendorcode=%s, "
+                    "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s, testmode=%s WHERE pno=%s",
+                    (ent_pname.get().strip(), ent_cname.get().strip(),
+                     ent_model.get().strip(), ent_vcode.get().strip(),
+                     ent_eon.get().strip(), ent_alc.get().strip(),
+                     cb_channels.get(), cb_label.get(), cb_machine.get(),
+                     cb_testmode.get(), pno))
 
-            cur.execute(
-                "UPDATE settingmaster SET pname=%s, cname=%s, mname=%s, vendorcode=%s, "
-                "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s, testmode=%s WHERE pno=%s",
-                (ent_pname.get().strip(), ent_cname.get().strip(),
-                 ent_model.get().strip(), ent_vcode.get().strip(),
-                 ent_eon.get().strip(), ent_alc.get().strip(),
-                 cb_channels.get(), cb_label.get(), cb_machine.get(),
-                 cb_testmode.get(), pno))
+                # Delete old specs and re-insert
+                cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))
+                num_channels = int(cb_channels.get())
+                for ch in range(1, num_channels + 1):
+                    for test_name in ("IR", "ACW"):
+                        vals = spec_data[ch][test_name]
+                        cur.execute(
+                            "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                            (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
 
-            # Delete old specs and re-insert
-            cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))
-            num_channels = int(cb_channels.get())
-            for ch in range(1, num_channels + 1):
-                for test_name in ("IR", "ACW"):
-                    vals = spec_data[ch][test_name]
-                    cur.execute(
-                        "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                        (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
-
-            conn.commit()
-            cur.close()
-            conn.close()
             messagebox.showinfo("Success", f"Part '{pno}' updated.")
             mode["value"] = "VIEW"
             refresh_parts_list()
@@ -493,13 +470,9 @@ def render(parent):
         if not messagebox.askyesno("Confirm", f"Delete part '{pno}' and all its specs?"):
             return
         try:
-            conn = get_connection()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))
-            cur.execute("DELETE FROM settingmaster WHERE pno=%s", (pno,))
-            conn.commit()
-            cur.close()
-            conn.close()
+            with db.get_cursor(commit=True) as cur:
+                cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))
+                cur.execute("DELETE FROM settingmaster WHERE pno=%s", (pno,))
             messagebox.showinfo("Deleted", f"Part '{pno}' deleted.")
             clear_form()
             lock_form(True)
@@ -526,12 +499,9 @@ def render(parent):
         pno = sel[0]   # iid is pno
         selected_pno["value"] = pno
         try:
-            conn = get_connection()
-            cur = conn.cursor(dictionary=True)
-            cur.execute("SELECT * FROM settingmaster WHERE pno=%s", (pno,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
+            with db.get_dict_cursor() as cur:
+                cur.execute("SELECT * FROM settingmaster WHERE pno=%s", (pno,))
+                row = cur.fetchone()
             if row:
                 set_form(row)
                 load_specs_from_db(pno)
