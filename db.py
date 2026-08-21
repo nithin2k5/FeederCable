@@ -5,7 +5,8 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "fceol",
     "user": "root",
-    "password": "12345"
+    "password": "12345",
+    "use_pure": True
 }
 
 def get_connection():
