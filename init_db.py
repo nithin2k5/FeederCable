@@ -12,9 +12,9 @@ def init_db():
         )
         cur = conn.cursor()
         
-        print("Creating database 'fceol' if it doesn't exist...")
-        cur.execute('CREATE DATABASE IF NOT EXISTS fceol')
-        cur.execute('USE fceol')
+        print("Creating database 'feeder' if it doesn't exist...")
+        cur.execute('CREATE DATABASE IF NOT EXISTS feeder')
+        cur.execute('USE feeder')
 
         print("Creating settingmaster table...")
         cur.execute('''
@@ -99,10 +99,10 @@ def init_db():
         ''')
 
         conn.commit()
-        print('✅ Database and all tables initialized successfully.')
+        print('Database and all tables initialized successfully.')
 
     except mysql.connector.Error as err:
-        print(f"❌ Error: {err}")
+        print(f"Error: {err}")
         print("Please ensure MySQL is running on localhost and the user 'root' with password 'root' exists.")
     finally:
         if 'cur' in locals(): cur.close()

@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 DB_CONFIG = {
     "host": "localhost",
-    "database": "fceol",
+    "database": "feeder",
     "user": "root",
     "password": "12345",
     "use_pure": True
