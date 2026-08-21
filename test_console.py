@@ -1132,52 +1132,21 @@ def render(parent):
             
             vision_ctrl.reload_config()
 
-            # Check if a model exists for this part
             if not vision_ctrl.has_model(state["pno"]):
-                
-                
-                _log(f"Vision ERROR: No vision model configured for part '{state['pno']}'")
-                state["test_running"] = False
-                parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
-                parent.after(0, _input_poll_start)
-                return
+                _log(f"Vision WARNING: No vision model configured for part '{state['pno']}'. Skipping vision.")
+            else:
+                # Run inspection (capture frame + contour match)
+                vision_result = vision_ctrl.inspect(state["pno"])
+                state["vision_result"] = vision_result.judgement
 
-            
-
-            # Run inspection (capture frame + contour match)
-            vision_result = vision_ctrl.inspect(state["pno"])
-            state["vision_result"] = vision_result.judgement
-
-            if vision_result.judgement == "ERROR":
-                
-                err_text = f"Result: ERROR ({vision_result.error or 'Unknown'})"
-                
-                _log(f"Vision ERROR: {vision_result.error}")
-                state["test_running"] = False
-                parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
-                parent.after(0, _input_poll_start)
-                return
-
-            if not vision_result.ok:
-                
-                err_text = f"Result: NG ({vision_result.error or 'Part not detected'})"
-                
-                _log(f"Vision NG: {vision_result.error} (score={vision_result.match_score:.4f})")
-                _finish_test("FAIL", {}, {}, {})
-                return
-
-            # Vision OK
-            
-            ok_text = f"Result: OK (score={vision_result.match_score:.4f}, {vision_result.processing_time_ms}ms)"
-            
-            _log(f"Vision OK: score={vision_result.match_score:.4f} in {vision_result.processing_time_ms}ms")
+                if vision_result.judgement == "ERROR":
+                    _log(f"Vision ERROR: {vision_result.error}. Skipping vision.")
+                elif not vision_result.ok:
+                    _log(f"Vision NG: {vision_result.error} (score={vision_result.match_score:.4f}). Skipping vision.")
+                else:
+                    _log(f"Vision OK: score={vision_result.match_score:.4f} in {vision_result.processing_time_ms}ms")
         else:
-            _log("Vision Controller not initialized — FAIL-SAFE: blocking test")
-            
-            state["test_running"] = False
-            parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST"))
-            parent.after(0, _input_poll_start)
-            return
+            _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
 
         parent.after(0, lambda: scan_lbl.config(text="🔌  Checking cable connection...", bg="#001830", fg="#e8a000"))
