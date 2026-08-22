@@ -1076,7 +1076,13 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(0.15)
+                time.sleep(0.3)
+                for ch in range(1, n_ch + 1):
+                    ack = plc.read_channel_ack(ch)
+                    parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
+                    if not ack:
+                        _log(f"IR (Combined): Channel {ch} ACK failed!")
+                        all_pass = False
             s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
             _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
             for ch in range(1, n_ch + 1):
@@ -1090,16 +1096,22 @@ def render(parent):
             _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
+                ack_ok = True
                 if plc.is_open:
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(0.15)
+                    time.sleep(0.3)
+                    ack_ok = plc.read_channel_ack(ch)
+                    parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
+                    if not ack_ok:
+                        _log(f"IR (Individual): Channel {ch} ACK failed!")
+                        all_pass = False
                 s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
                 _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
                 passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
-                if not passed: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+                if not passed or not ack_ok: all_pass = False
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
                     plc.set_channel(ch, False)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
@@ -1136,7 +1148,13 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(0.15)
+                time.sleep(0.3)
+                for ch in range(1, n_ch + 1):
+                    ack = plc.read_channel_ack(ch)
+                    parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
+                    if not ack:
+                        _log(f"ACW (Combined): Channel {ch} ACK failed!")
+                        all_pass = False
             s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
             _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
             for ch in range(1, n_ch + 1):
@@ -1150,16 +1168,22 @@ def render(parent):
             _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
+                ack_ok = True
                 if plc.is_open:
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(0.15)
+                    time.sleep(0.3)
+                    ack_ok = plc.read_channel_ack(ch)
+                    parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
+                    if not ack_ok:
+                        _log(f"ACW (Individual): Channel {ch} ACK failed!")
+                        all_pass = False
                 s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = float(s.get("min", 0.0)); v_max = float(s.get("max", 10.0))
                 _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
                 passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
-                if not passed: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
+                if not passed or not ack_ok: all_pass = False
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     plc.set_channel(ch, False)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
