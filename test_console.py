@@ -139,9 +139,11 @@ _PLC_CH_INPUTS = {
 _PLC_SAFETY_RELAY = 0x081A   # M26 — Contact Test ↔ IR/ACW mode switch
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
 
-# Cable connection detection & start button (adjust if on different X addresses)
-_PLC_CABLE_INPUT  = 0x0400   # X0  — cable connected to jig
-_PLC_START_INPUT  = 0x0401   # X1  — physical START button
+# Physical PLC Inputs (X0-X3)
+_PLC_START_INPUT      = 0x0400   # X0  — physical START button
+_PLC_NG_RESET_INPUT   = 0x0401   # X1  — NG Reset
+_PLC_CONTACT_OK_INPUT = 0x0402   # X2  — Contact OK
+_PLC_REWORK_ON_INPUT  = 0x0403   # X3  — Rework on
 
 
 class DeltaPLC:
@@ -272,15 +274,23 @@ class DeltaPLC:
         """Switch to Contact Test mode. MUST call after HV tests."""
         return self.write_coil(_PLC_SAFETY_RELAY, False)
 
-    # ── Cable / Start button inputs ──────────────────────────────────────
-
-    def is_cable_connected(self) -> bool:
-        """Check if cable is connected to the jig (X0)."""
-        return self.read_input(_PLC_CABLE_INPUT)
+    # ── Physical PLC Inputs (X0-X3) ──────────────────────────────────────
 
     def is_start_pressed(self) -> bool:
-        """Check if physical START button is pressed (X1)."""
+        """Check if physical START button is pressed (X0)."""
         return self.read_input(_PLC_START_INPUT)
+
+    def is_ng_reset_pressed(self) -> bool:
+        """Check if NG Reset button is pressed (X1)."""
+        return self.read_input(_PLC_NG_RESET_INPUT)
+
+    def is_contact_ok(self) -> bool:
+        """Check if Contact OK is signaled (X2)."""
+        return self.read_input(_PLC_CONTACT_OK_INPUT)
+
+    def is_rework_on(self) -> bool:
+        """Check if Rework Mode is toggled on (X3)."""
+        return self.read_input(_PLC_REWORK_ON_INPUT)
 
 
 class HiPotSerial:
@@ -717,7 +727,7 @@ def render(parent):
         e = tk.Entry(parent, bg="black" if editable else "#0d0d0d", fg=fg, font=("Arial", 10), insertbackground="white", bd=1, relief="solid", width=w, highlightbackground="#444", highlightcolor="#888", highlightthickness=1, readonlybackground="#0d0d0d", state=st)
         return e
 
-    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=4); ent_pno = _ent(pi, w=18, editable=True); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=4); ent_pno = _ent(pi, w=18, editable=False); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "EMP ID").grid(row=0, column=4, sticky="w", padx=(10, 4)); ent_emp = _ent(pi, w=12, editable=True); ent_emp.grid(row=0, column=5, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Part Name").grid(row=1, column=0, sticky="w", pady=4); ent_pname = _ent(pi, w=14, editable=False); ent_pname.grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Customer").grid(row=1, column=4, sticky="w", padx=(10, 4)); ent_cust = _ent(pi, w=12, editable=False); ent_cust.grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
@@ -727,6 +737,7 @@ def render(parent):
     _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=4); ent_vendor = _ent(pi, w=10, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
     _lbl(pi, "EO No").grid(row=3, column=2, sticky="w", padx=(8, 4)); ent_eo = _ent(pi, w=8, editable=False); ent_eo.grid(row=3, column=3, sticky="ew", padx=5)
     _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=8, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
+    _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=4); ent_jig = _ent(pi, w=18, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
     
     def _fill_ro(entry, val):
         entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, str(val) if val else ""); entry.config(state="readonly")
@@ -872,7 +883,7 @@ def render(parent):
     def _load_specs(pno: str) -> bool:
         try:
             with db.get_dict_cursor() as cur:
-                cur.execute("SELECT pname,cname,mname AS model,alc,chsel AS channel,vendorcode,eocode FROM settingmaster WHERE pno=%s", (pno,))
+                cur.execute("SELECT pname,cname,mname AS model,alc,chsel AS channel,vendorcode,eocode,testmode FROM settingmaster WHERE pno=%s", (pno,))
                 master = cur.fetchone()
                 if not master:
                     cur.execute("SELECT * FROM settingmaster WHERE pno=%s", (pno,))
@@ -883,7 +894,9 @@ def render(parent):
                 pname = master.get("pname", ""); cname = master.get("cname", ""); mod = master.get("mname", master.get("model", ""))
                 alc = master.get("alc", ""); channel = int(master.get("chsel", master.get("channel", 1)) or 1)
                 vendor = master.get("vendorcode", ""); eo = master.get("eocode", master.get("eo_number", ""))
-                state.update({"pno": pno, "alc": alc, "model": mod, "vendor_code": vendor, "eo_number": eo or "", "pname": pname, "cname": cname, "num_channels": channel})
+                testmode = master.get("testmode", "Combined")
+                if testmode: testmode = testmode.strip()
+                state.update({"pno": pno, "alc": alc, "model": mod, "vendor_code": vendor, "eo_number": eo or "", "pname": pname, "cname": cname, "num_channels": channel, "testmode": testmode})
                 _fill_ro(ent_pname, pname); _fill_ro(ent_cust, cname); _fill_ro(ent_model, mod); _fill_ro(ent_alc, alc); _fill_ro(ent_vendor, vendor); _fill_ro(ent_eo, eo or "")
                 cur.execute("SELECT testname, chsel AS channel, appvol, testtime, min, max FROM settingspec WHERE pno=%s", (pno,))
                 rows = cur.fetchall()
@@ -1022,10 +1035,10 @@ def render(parent):
         plc.safety_relay_to_contact()
         time.sleep(0.05)
 
-    def _check_cable_connected() -> bool:
-        """Check if cable is connected via PLC input."""
+    def _check_contact_ok() -> bool:
+        """Check if Contact OK is signaled via PLC input."""
         if not _plc_open(): return False
-        connected = plc.is_cable_connected()
+        connected = plc.is_contact_ok()
         plc.close()
         return connected
 
@@ -1039,9 +1052,9 @@ def render(parent):
 
 
     def _run_ir_test(n_ch: int) -> tuple:
-        _log("IR Test â†’ MANU:EDIT:MODE IR | FUNC:TEST ON | MEAS?")
+        _log("IR Test → MANU:EDIT:MODE IR | FUNC:TEST ON | MEAS?")
         if not _serial_ok or not hipot.open():
-            _log("HiPot not connected â€” simulating IR result"); set_com_status("HiPot", False)
+            _log("HiPot not connected — simulating IR result"); set_com_status("HiPot", False)
             ir_res = {}; all_pass = True
             for ch in range(1, n_ch + 1):
                 s = state["spec_ir"].get(ch, {}); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
@@ -1051,34 +1064,57 @@ def render(parent):
                 parent.after(0, lambda c=ch-1, v=f"{val:.0f}", pp=p: _set_cell("IR", c, v, pp))
             parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
             return all_pass, ir_res
+            
         set_com_status("HiPot", True); time.sleep(0.3)
-        # Switch safety relay to HV mode and turn all channel coils ON
         if _plc_open():
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(True))
             time.sleep(0.1)
-            plc.set_all_channels(n_ch, True)
-            for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-            time.sleep(0.15)
-            plc.close()
-        s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
-        _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max); hipot.close()
+            
         all_pass = True; ir_res = {}
-        for ch in range(1, n_ch + 1):
-            s = state["spec_ir"].get(ch, {}); passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
-            if not passed: all_pass = False
-            ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
-            parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+        if state.get("testmode", "Combined").strip().lower() == "combined":
+            if plc.is_open:
+                plc.set_all_channels(n_ch, True)
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+                time.sleep(0.15)
+            s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
+            _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
+            for ch in range(1, n_ch + 1):
+                s = state["spec_ir"].get(ch, {}); passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                if not passed: all_pass = False
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+            if plc.is_open:
+                plc.set_all_channels(n_ch, False)
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+            _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
+        else:
+            for ch in range(1, n_ch + 1):
+                if plc.is_open:
+                    plc.set_channel(ch, True)
+                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
+                    time.sleep(0.15)
+                s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
+                _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
+                passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                if not passed: all_pass = False
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+                if plc.is_open:
+                    plc.set_channel(ch, False)
+                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
+                    time.sleep(0.05)
+            _log(f"IR (Individual): {'PASS' if all_pass else 'FAIL'}")
+
+        hipot.close()
+        if plc.is_open: plc.close()
         parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
-        # Reset channel coils (safety relay stays HV for ACW test which follows)
-        if _plc_open(): plc.set_all_channels(n_ch, False); plc.close()
-        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
-        _log(f"IR: {ir_val:.0f} MÎ© â€” {'PASS' if all_pass else 'FAIL'}"); return all_pass, ir_res
+        return all_pass, ir_res
 
     def _run_acw_test(n_ch: int) -> tuple:
-        _log("ACW Test â†’ MANU:EDIT:MODE ACW | FUNC:TEST ON | MEAS?")
+        _log("ACW Test → MANU:EDIT:MODE ACW | FUNC:TEST ON | MEAS?")
         if not _serial_ok or not hipot.open():
-            _log("HiPot not connected â€” simulating ACW result"); set_com_status("HiPot", False)
+            _log("HiPot not connected — simulating ACW result"); set_com_status("HiPot", False)
             acw_res = {}; all_pass = True
             for ch in range(1, n_ch + 1):
                 s = state["spec_acw"].get(ch, {}); v_min = float(s.get("min", 0)); v_max = float(s.get("max", 10))
@@ -1088,33 +1124,57 @@ def render(parent):
                 parent.after(0, lambda c=ch-1, v=f"{val:.2f}", pp=p: _set_cell("ACW", c, v, pp))
             parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
             return all_pass, acw_res
+            
         time.sleep(0.1)
-        # Safety relay should already be in HV mode from IR test; re-enable all channels
         if _plc_open():
-            plc.safety_relay_to_hv()   # ensure HV mode (M26 ON)
+            plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(True))
             time.sleep(0.1)
-            plc.set_all_channels(n_ch, True)
-            for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-            time.sleep(0.15)
-            plc.close()
-        s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
-        _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max); hipot.close()
+            
         all_pass = True; acw_res = {}
-        for ch in range(1, n_ch + 1):
-            s = state["spec_acw"].get(ch, {}); passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
-            if not passed: all_pass = False
-            acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
-            parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
-        parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
-        # Reset: turn all coils OFF, switch safety relay back to Contact mode
-        if _plc_open():
+        if state.get("testmode", "Combined").strip().lower() == "combined":
+            if plc.is_open:
+                plc.set_all_channels(n_ch, True)
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+                time.sleep(0.15)
+            s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
+            _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
+            for ch in range(1, n_ch + 1):
+                s = state["spec_acw"].get(ch, {}); passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                if not passed: all_pass = False
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
+            if plc.is_open:
+                plc.set_all_channels(n_ch, False)
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+            _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
+        else:
+            for ch in range(1, n_ch + 1):
+                if plc.is_open:
+                    plc.set_channel(ch, True)
+                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
+                    time.sleep(0.15)
+                s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = float(s.get("min", 0.0)); v_max = float(s.get("max", 10.0))
+                _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
+                passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                if not passed: all_pass = False
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
+                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
+                if plc.is_open:
+                    plc.set_channel(ch, False)
+                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
+                    time.sleep(0.05)
+            _log(f"ACW (Individual): {'PASS' if all_pass else 'FAIL'}")
+
+        hipot.close()
+        if plc.is_open:
             plc.set_all_channels(n_ch, False)
             plc.safety_relay_to_contact()
             plc.close()
         for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
         parent.after(0, lambda: _set_safety_indicator(False))
-        _log(f"ACW: {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}"); return all_pass, acw_res
+        parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
+        return all_pass, acw_res
 
     def _run_test_sequence():
         if not state["pno"]: parent.after(0, lambda: _log("No part loaded.")); return
@@ -1149,10 +1209,10 @@ def render(parent):
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
 
-        parent.after(0, lambda: scan_lbl.config(text="🔌  Checking cable connection...", bg="#001830", fg="#e8a000"))
+        parent.after(0, lambda: scan_lbl.config(text="🔌  Checking contact (X2)...", bg="#001830", fg="#e8a000"))
         if _modbus_ok:
-            if not _check_cable_connected():
-                _log("Cable not connected to jig — aborting"); parent.after(0, lambda: messagebox.showwarning("Cable", "Please connect the cable to the Jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Cable not connected — reconnect and retry", bg="#220000", fg="#ff5555"))
+            if not _check_contact_ok():
+                _log("Contact NOT OK (X2) — aborting"); parent.after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
                 state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); parent.after(0, _input_poll_start); return
         parent.after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
@@ -1218,24 +1278,62 @@ def render(parent):
 
     def _clear_all():
         _input_poll_stop()
-        for e in [ent_pno, ent_emp]: e.delete(0, "end")
+        ent_emp.config(state="normal"); ent_emp.delete(0, "end"); ent_emp.config(bg="black")
+        ent_pno.config(state="normal"); ent_pno.delete(0, "end"); ent_pno.config(state="readonly", bg="#0d0d0d")
+        ent_jig.config(state="normal"); ent_jig.delete(0, "end"); ent_jig.config(state="readonly", bg="#0d0d0d")
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); tree_lot.delete(*tree_lot.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); scan_entry_frame.pack_forget()
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True})
-        btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_pno.focus_set()
-    tk.Button(left_area, text="âŸ³  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
+        btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_emp.focus_set()
+    tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
+
+    def _on_emp_enter(event=None):
+        emp = ent_emp.get().strip()
+        if not emp: return
+        if not _validate_employee(emp):
+            messagebox.showwarning("Auth", "Employee number not found.")
+            ent_emp.delete(0, "end")
+            return
+        _log(f"Employee {emp} validated.")
+        ent_emp.config(state="readonly", bg="#0d0d0d")
+        ent_pno.config(state="normal", bg="black")
+        ent_pno.focus_set()
+    ent_emp.bind("<Return>", _on_emp_enter)
 
     def _on_pno_enter(event=None):
         pno = ent_pno.get().strip().upper()
         if not pno: return
-        _input_poll_stop(); spec_status_lbl.config(text="[ Loadingâ€¦ ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
-        if _load_specs(pno):
-            _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white"); scan_lbl.config(text=f"Part '{pno}' loaded ({state['num_channels']} ch) â€” Ready", bg="#001830", fg="#4caf50")
-            ent_emp.focus_set(); parent.after(500, _input_poll_start)
-        else: btn_start.config(bg="#1a1a1a", fg="#444"); ent_pno.focus_set()
+        _log(f"Part Number '{pno}' entered. Waiting for JIG scan.")
+        ent_pno.config(state="readonly", bg="#0d0d0d")
+        ent_jig.config(state="normal", bg="black")
+        ent_jig.focus_set()
     ent_pno.bind("<Return>", _on_pno_enter)
 
-    _load_history(); _log("System ready. Enter Part Number and press ENTER.")
+    def _on_jig_enter(event=None):
+        jig = ent_jig.get().strip().upper()
+        if not jig: return
+        pno = ent_pno.get().strip().upper()
+        
+        if not jig.endswith("J"):
+            messagebox.showwarning("JIG Error", "End of the JIG label 'J' is compulsory. Please insert correct JIG.")
+            ent_jig.delete(0, "end"); ent_jig.focus_set(); return
+            
+        if jig[:-1] != pno:
+            messagebox.showwarning("JIG Error", "Master cable and master JIG are not same. Please insert correct JIG.")
+            ent_jig.delete(0, "end"); ent_jig.focus_set(); return
+            
+        _log("JIG validated.")
+        ent_jig.config(state="readonly", bg="#0d0d0d")
+        
+        _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
+        if _load_specs(pno):
+            _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white"); scan_lbl.config(text=f"Part '{pno}' loaded ({state['num_channels']} ch) — Ready", bg="#001830", fg="#4caf50")
+            btn_start.focus_set(); parent.after(500, _input_poll_start)
+        else: 
+            btn_start.config(bg="#1a1a1a", fg="#444"); _clear_all()
+    ent_jig.bind("<Return>", _on_jig_enter)
+
+    _load_history(); _log("System ready. Enter Employee ID and press ENTER.")
     set_com_status("HiPot", False); set_com_status("IO Ctrl", False); set_com_status("Scanner", False); set_com_status("Printer", False)
-    ent_pno.focus_set()
+    ent_emp.focus_set()

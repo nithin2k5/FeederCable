@@ -4,13 +4,14 @@ This document explains the end-to-end workflow of the `test_console.py` page. Th
 
 ## 1. Setup & Preparation phase
 Before any testing can begin, the system and operator must complete the setup loop:
-1. **Operator Input**: The operator enters a **Part Number (PNO)** and presses Enter.
-2. **Database Lookup**: The system queries the MySQL database (`fceol`) to load:
+1. **Employee Validation**: The operator enters their **Employee ID** and presses Enter. This is validated against a local `emp.txt` file. The Part Number field remains disabled until this step is completed.
+2. **Part Number Input**: The operator enters a **Part Number (PNO)** and presses Enter.
+3. **JIG Label Validation**: The operator must scan the JIG label. The system validates that the JIG label ends with "J" and matches the Part Number exactly (excluding the trailing "J"). If incorrect, an error prompts the operator to insert the correct JIG.
+4. **Database Lookup**: Upon successful JIG validation, the system queries the MySQL database (`fceol`) to load:
    - Part metadata (Model, ALC, Name).
    - Test specifications for IR (Insulation Resistance) and ACW (Withstand Voltage) for the required number of channels.
    - Historical pass/fail counts for the day.
-3. **Validation**: The operator enters their **Employee ID**, which is validated against a local `emp.txt` file.
-4. **Ready State**: The background polling thread (`_input_poll_once`) starts monitoring the PLC for the physical START button (X1) and continuously updates the live I/O UI indicators (X20-X27).
+5. **Ready State**: The background polling thread (`_input_poll_once`) starts monitoring the PLC for the physical START button (X1) and continuously updates the live I/O UI indicators (X20-X27).
 
 ## 2. Test Execution Sequence
 Once the operator presses the physical **START button** (or clicks the UI button), the automated test sequence (`_run_test_sequence`) begins.
@@ -56,14 +57,19 @@ flowchart TD
 ```
 
 ### Deep Dive into Test Stages:
-* **IR Test (Insulation Resistance)**: 
-  * The PLC switches the Safety Relay (M26) to High Voltage mode. This physically routes the circuit away from the contact testing board to prevent blowing up the low-voltage electronics.
-  * All active channel coils are turned ON simultaneously.
-  * A serial command is sent to the HiPot tester. The app waits for the test to complete, reads the Mega-Ohm (MΩ) value, and checks it against the database spec.
-* **ACW Test (Withstand Voltage)**: 
-  * Similar to IR, the Safety Relay remains in HV mode, and all channel coils are turned ON. 
-  * The HiPot tester applies high voltage to check for leakage current (mA).
-  * *Crucial Step*: After ACW finishes, the PLC turns OFF all channel coils and switches the Safety Relay (M26) OFF, reverting the hardware back to Contact/Low-Voltage mode.
+* **IR Test (Insulation Resistance)**:
+   * **Safety Isolation**: The software commands the PLC to turn **ON** the Safety Relay (`M26`). This physically isolates the low-voltage electronics board to protect it from high-voltage blowouts.
+   * **Coil Activation**: Based on the `testmode` fetched from the database:
+     - If **Combined**: It turns ON all required channel coils on the PLC simultaneously and runs a single HiPot test for the whole bundle.
+     - If **Individual**: It turns ON Channel 1, runs a HiPot test, turns OFF Channel 1, turns ON Channel 2, runs a HiPot test, and repeats sequentially.
+   * It sends SCPI serial commands to the HiPot tester to apply the target voltage and execute the IR test. 
+   * It reads the resulting resistance (in MΩ), checks it against the database Min/Max limits, and logs it to the UI. It then ensures all channel coils are OFF.
+* **ACW Test (Withstand Voltage)**:
+    * The Safety Relay (`M26`) remains **ON** (High Voltage mode).
+    * It runs the same Combined (all at once) or Individual (sequential loop) logic to turn the PLC channel coils ON.
+    * It sends SCPI commands to the HiPot to apply high-voltage AC and measure current leakage (in mA). 
+    * It verifies the leakage against the limits, logs it, and ensures the coils are OFF.
+    * **Crucial Revert**: The software commands the PLC to turn the Safety Relay (`M26`) **OFF**, returning the machine to low-voltage Contact mode.
 * **Contact Test (Continuity/Wiring)**:
   * Iterates through every channel individually (1 up to 8).
   * Turns ON a specific coil (e.g., M0 for CH1).
