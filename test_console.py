@@ -996,11 +996,16 @@ def render(parent):
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
             time.sleep(0.3)
-            # Read acknowledge input for this channel
-            passed = plc.read_channel_ack(ch)
-            parent.after(0, lambda c=ch-1, a=passed: _set_io(io_in_labels, c, a))
+            # Read acknowledge input for this channel and verify X2 is still True
+            ack_passed = plc.read_channel_ack(ch)
+            x2_passed = plc.is_contact_ok()
+            passed = ack_passed and x2_passed
+            
+            parent.after(0, lambda c=ch-1, a=ack_passed: _set_io(io_in_labels, c, a))
             contact_res[ch] = {"result": "PASS" if passed else "FAIL"}
-            if not passed: all_pass = False
+            if not passed:
+                all_pass = False
+                if not x2_passed: _log(f"Contact (CH{ch}): Failed because X2 (Contact OK) went Low!")
             parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
             # Turn OFF channel coil before next
             plc.set_channel(ch, False)
