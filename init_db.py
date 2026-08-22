@@ -8,7 +8,8 @@ def init_db():
         conn = mysql.connector.connect(
             host=db.DB_CONFIG['host'], 
             user=db.DB_CONFIG['user'], 
-            password=db.DB_CONFIG['password']
+            password=db.DB_CONFIG['password'],
+            use_pure=True
         )
         cur = conn.cursor()
         
