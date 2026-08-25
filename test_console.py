@@ -547,7 +547,13 @@ def render(parent):
         com_inner.columnconfigure(c, weight=1)
     def set_com_status(dev, connected):
         lbl = com_labels.get(dev)
-        if lbl: lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
+        def _update():
+            try:
+                if lbl.winfo_exists(): lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
+            except Exception: pass
+        if lbl:
+            try: parent.after(0, _update)
+            except Exception: pass
 
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
@@ -879,7 +885,13 @@ def render(parent):
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        log_txt.config(state="normal"); log_txt.insert("end", f"{ts}  {msg}\n"); log_txt.see("end"); log_txt.config(state="disabled")
+        def _do_log():
+            try:
+                if log_txt.winfo_exists():
+                    log_txt.config(state="normal"); log_txt.insert("end", f"{ts}  {msg}\n"); log_txt.see("end"); log_txt.config(state="disabled")
+            except Exception: pass
+        try: parent.after(0, _do_log)
+        except Exception: pass
     def _load_specs(pno: str) -> bool:
         try:
             with db.get_dict_cursor() as cur:
