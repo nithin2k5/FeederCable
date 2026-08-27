@@ -932,9 +932,13 @@ def render(parent):
     safety_lbl = tk.Label(out_row, text="M28", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
     def _set_io(io_list, ch_idx, active):
-        if ch_idx < len(io_list): io_list[ch_idx].config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
+        try:
+            if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists(): io_list[ch_idx].config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
+        except Exception: pass
     def _set_safety_indicator(active):
-        safety_lbl.config(bg="#b71c1c" if active else "#1a0a0a", fg="#ff5555" if active else "#7d2e2e")
+        try:
+            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#b71c1c" if active else "#1a0a0a", fg="#ff5555" if active else "#7d2e2e")
+        except Exception: pass
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=1, sticky="nsew")
     log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
@@ -1306,9 +1310,9 @@ def render(parent):
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
 
-        parent.after(0, lambda: scan_lbl.config(text="🔌  Checking contact (X2)...", bg="#001830", fg="#e8a000"))
+        parent.after(0, lambda: scan_lbl.config(text="Checking contact (CH1)...", bg="#001830", fg="#e8a000"))
         if _modbus_ok:
-            if not _check_contact_ok():
+            if not _run_contact_ch1_check():
                 _log("Contact NOT OK (X2) — aborting"); parent.after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
                 state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); parent.after(0, _input_poll_start); return
         parent.after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
