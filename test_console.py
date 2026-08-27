@@ -932,7 +932,7 @@ def render(parent):
     safety_lbl = tk.Label(out_row, text="M28", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
     def _set_io(io_list, ch_idx, active):
-        if ch_idx < len(io_list): io_list[ch_idx].config(bg="#1b5e20" if active else "#0a1a0a", fg="#76ff03" if active else "#2e7d32")
+        if ch_idx < len(io_list): io_list[ch_idx].config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
     def _set_safety_indicator(active):
         safety_lbl.config(bg="#b71c1c" if active else "#1a0a0a", fg="#ff5555" if active else "#7d2e2e")
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
