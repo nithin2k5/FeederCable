@@ -231,6 +231,30 @@ class DeltaPLC:
         except Exception:
             return [False] * count
 
+    def read_coil(self, address: int) -> bool:
+        """Read a single coil (FC01)."""
+        if not self.is_open:
+            return False
+        try:
+            result = self._client.read_coils(address, 1, slave=self._slave_id)
+            if result.isError():
+                return False
+            return result.bits[0]
+        except Exception:
+            return False
+
+    def read_coils_bulk(self, address: int, count: int) -> list:
+        """Read multiple consecutive coils (FC01)."""
+        if not self.is_open:
+            return [False] * count
+        try:
+            result = self._client.read_coils(address, count, slave=self._slave_id)
+            if result.isError():
+                return [False] * count
+            return list(result.bits[:count])
+        except Exception:
+            return [False] * count
+
     # ── Channel relay control ────────────────────────────────────────────
 
     def set_channel(self, ch: int, on: bool) -> bool:
@@ -240,6 +264,14 @@ class DeltaPLC:
         if addr is None:
             return False
         return self.write_coil(addr, on)
+
+    def get_channel(self, ch: int) -> bool:
+        """Read the actual physical state of a channel relay coil."""
+        coils = _PLC_IR_ACW_COILS if self._is_hv_mode else _PLC_CONTACT_COILS
+        addr = coils.get(ch)
+        if addr is None:
+            return False
+        return self.read_coil(addr)
 
     def set_all_channels(self, n_ch: int, on: bool) -> bool:
         """Turn ON/OFF all channel relays."""
@@ -1326,11 +1358,16 @@ def render(parent):
         state["input_polling"] = True; _input_poll_once()
     def _input_poll_stop(): state["input_polling"] = False
     def _update_io_display():
-        """Refresh IO input indicators from PLC acknowledge inputs X20~X27."""
+        """Refresh IO indicators from PLC (reads X20~X27 inputs and actual channel coils)."""
         if not _plc_open(): return
         try:
-            bits = plc.read_inputs_bulk(0x0410, 8)   # X20~X27
+            # Sync inputs (X20-X27)
+            bits = plc.read_inputs_bulk(0x0410, 8)
             for i in range(8): parent.after(0, lambda idx=i, a=bits[idx]: _set_io(io_in_labels, idx, a))
+            # Sync actual outputs (M20-M27 or M30-M37 based on current mode)
+            for ch in range(1, 9):
+                actual_out = plc.get_channel(ch)
+                parent.after(0, lambda idx=ch-1, o=actual_out: _set_io(io_out_labels, idx, o))
         except Exception: pass
         finally: plc.close()
 
