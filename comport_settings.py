@@ -128,6 +128,46 @@ def render(parent):
                     _update_btn("FAIL", "#f44336")
 
             threading.Thread(target=_run_test, daemon=True).start()
+        elif dev == "HIPOT":
+            port = cb_port.get()
+            baud = cb_baud.get()
+            if port == "None" or not port:
+                log_msg(f"{dev}: No port selected.")
+                return
+            try:
+                baud_val = int(baud)
+            except ValueError:
+                log_msg(f"{dev}: Invalid baud rate.")
+                return
+
+            def _update_btn(text, bg, fg="white"):
+                parent.after(0, lambda: btn.config(text=text, bg=bg, fg=fg))
+
+            def _run_hipot_test():
+                _update_btn("TESTING...", "#ff9800", "black")
+                log_msg(f"Testing {dev} on {port} (Baud: {baud_val})...")
+                try:
+                    import serial
+                    import time
+                    ser = serial.Serial(port, baud_val, timeout=1.5, write_timeout=0.5)
+                    ser.reset_input_buffer()
+                    # Send standard SCPI identification query
+                    ser.write(b"*IDN?\r\n")
+                    time.sleep(0.1)
+                    response = ser.readline().decode('ascii', errors='ignore').strip()
+                    ser.close()
+                    
+                    if response:
+                        log_msg(f"{dev} Success: Connected! Device responded: {response}")
+                        _update_btn("PASS", "#4caf50")
+                    else:
+                        log_msg(f"{dev} Warning: Port opened, but no response received.")
+                        _update_btn("FAIL", "#f44336")
+                except Exception as e:
+                    log_msg(f"{dev} Error: {str(e)}")
+                    _update_btn("FAIL", "#f44336")
+
+            threading.Thread(target=_run_hipot_test, daemon=True).start()
         else:
             log_msg(f"{dev}: Test not implemented yet.")
 
