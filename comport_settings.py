@@ -111,18 +111,20 @@ def render(parent):
                         # Generic PLC usually uses Modbus RTU, 8, N, 1
                         client = ModbusSerialClient(framer='rtu', port=port, baudrate=baud_val, bytesize=8, parity='N', stopbits=1, timeout=1.5)
                         
-                    if client.connect():
-                        res = client.read_discrete_inputs(0, count=11, device_id=sid_val)
-                        if res.isError():
-                            log_msg(f"{dev} Error: Connected but no valid response.")
-                            _update_btn("FAIL", "#f44336")
+                    try:
+                        if client.connect():
+                            res = client.read_discrete_inputs(0, count=11, device_id=sid_val)
+                            if res.isError():
+                                log_msg(f"{dev} Error: Connected but no valid response.")
+                                _update_btn("FAIL", "#f44336")
+                            else:
+                                log_msg(f"{dev} Success: Read P0-P10 values {res.bits[:11]} from {port}.")
+                                _update_btn("PASS", "#4caf50")
                         else:
-                            log_msg(f"{dev} Success: Read P0-P10 values {res.bits[:11]} from {port}.")
-                            _update_btn("PASS", "#4caf50")
+                            log_msg(f"{dev} Error: Could not open {port}.")
+                            _update_btn("FAIL", "#f44336")
+                    finally:
                         client.close()
-                    else:
-                        log_msg(f"{dev} Error: Could not open {port}.")
-                        _update_btn("FAIL", "#f44336")
                 except Exception as e:
                     log_msg(f"{dev} Exception: {str(e)}")
                     _update_btn("FAIL", "#f44336")
