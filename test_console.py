@@ -1363,7 +1363,7 @@ def render(parent):
         try:
             # Sync inputs (X20-X27)
             bits = plc.read_inputs_bulk(0x0410, 8)
-            for i in range(8): parent.after(0, lambda idx=i, a=bits[idx]: _set_io(io_in_labels, idx, a))
+            for i in range(8): parent.after(0, lambda idx=i, a=bits[i]: _set_io(io_in_labels, idx, a))
             # Sync actual outputs (M20-M27 or M30-M37 based on current mode)
             for ch in range(1, 9):
                 actual_out = plc.get_channel(ch)
