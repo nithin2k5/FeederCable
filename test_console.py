@@ -289,12 +289,14 @@ class DeltaPLC:
     def safety_relay_to_hv(self) -> bool:
         """Switch to IR/ACW (high-voltage) mode. MUST call before HV tests."""
         self._is_hv_mode = True
-        return self.write_coil(_PLC_SAFETY_RELAY, True)
+        # Reversed logic: False = HV Mode
+        return self.write_coil(_PLC_SAFETY_RELAY, False)
 
     def safety_relay_to_contact(self) -> bool:
         """Switch to Contact Test mode. MUST call after HV tests."""
         self._is_hv_mode = False
-        return self.write_coil(_PLC_SAFETY_RELAY, False)
+        # Reversed logic: True = Contact Mode
+        return self.write_coil(_PLC_SAFETY_RELAY, True)
 
     # ── Physical PLC Inputs (X0-X3) ──────────────────────────────────────
 
