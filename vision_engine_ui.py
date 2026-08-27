@@ -6,13 +6,14 @@ import threading
 import time
 from vision_engine.reference_model import build_reference_model
 import numpy as np
+import os
 
 class ReferenceModelBuilderUI(tk.Toplevel):
     def __init__(self, parent, cam_index, width, height):
         super().__init__(parent)
         self.title("Build Reference Model")
-        self.geometry("800x600")
-        self.configure(bg="#222")
+        self.geometry("900x650")
+        self.configure(bg="#1E1E1E")
         self.cam_index = cam_index
         self.cam_width = width
         self.cam_height = height
@@ -24,33 +25,64 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         self.captured_images = []
         self.roi = None
         
-        # UI Elements
-        self.left_frame = tk.Frame(self, bg="#222")
-        self.left_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        # UI Styling (Modern Dark Theme)
+        style = ttk.Style()
+        style.theme_use('clam')
         
-        self.lbl_video = tk.Label(self.left_frame, bg="black")
+        # Configure frames and labels
+        style.configure("Dark.TFrame", background="#1E1E1E")
+        style.configure("Sidebar.TFrame", background="#2D2D30")
+        style.configure("Title.TLabel", background="#2D2D30", foreground="#FFFFFF", font=("Segoe UI", 14, "bold"))
+        style.configure("Status.TLabel", background="#2D2D30", foreground="#AAAAAA", font=("Segoe UI", 11))
+        
+        # Configure modern flat buttons
+        style.configure("Action.TButton", font=("Segoe UI", 11, "bold"), foreground="white", padding=8)
+        style.map("Action.TButton", background=[("active", "#454545")])
+        
+        style.configure("Capture.TButton", font=("Segoe UI", 11, "bold"), foreground="white", background="#2E7D32", padding=8)
+        style.map("Capture.TButton", background=[("active", "#1B5E20")])
+        
+        style.configure("Build.TButton", font=("Segoe UI", 11, "bold"), foreground="white", background="#C62828", padding=8)
+        style.map("Build.TButton", background=[("active", "#B71C1C"), ("disabled", "#555555")])
+
+        # Layout
+        self.left_frame = ttk.Frame(self, style="Dark.TFrame")
+        self.left_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+        
+        # Add a subtle border around the video feed
+        self.video_container = tk.Frame(self.left_frame, bg="#000000", bd=2, relief="flat")
+        self.video_container.pack(fill="both", expand=True)
+        
+        self.lbl_video = tk.Label(self.video_container, bg="black")
         self.lbl_video.pack(fill="both", expand=True)
         
-        self.right_frame = tk.Frame(self, bg="#333", width=250)
-        self.right_frame.pack(side="right", fill="y", padx=10, pady=10)
+        self.right_frame = ttk.Frame(self, style="Sidebar.TFrame", width=280)
+        self.right_frame.pack(side="right", fill="y")
         self.right_frame.pack_propagate(False)
         
-        tk.Label(self.right_frame, text="Reference Model Builder", bg="#333", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
+        # Sidebar content with padding
+        sidebar_content = tk.Frame(self.right_frame, bg="#2D2D30")
+        sidebar_content.pack(fill="both", expand=True, padx=20, pady=20)
         
-        self.lbl_status = tk.Label(self.right_frame, text="Images: 0 / 10", bg="#333", fg="#ccc", font=("Arial", 10))
-        self.lbl_status.pack(pady=5)
+        ttk.Label(sidebar_content, text="Reference Builder", style="Title.TLabel").pack(pady=(0, 20))
         
-        self.btn_capture = tk.Button(self.right_frame, text="Capture Image", bg="#1b5e20", fg="white", font=("Arial", 10, "bold"), command=self.capture_image)
-        self.btn_capture.pack(fill="x", padx=10, pady=5)
+        self.lbl_status = ttk.Label(sidebar_content, text="Images: 0 / 10", style="Status.TLabel")
+        self.lbl_status.pack(pady=(0, 20))
         
-        self.btn_upload = tk.Button(self.right_frame, text="Upload Dataset", bg="#4a148c", fg="white", font=("Arial", 10, "bold"), command=self.upload_dataset)
-        self.btn_upload.pack(fill="x", padx=10, pady=5)
+        self.btn_capture = ttk.Button(sidebar_content, text="📸 Capture Image", style="Capture.TButton", command=self.capture_image)
+        self.btn_capture.pack(fill="x", pady=8)
         
-        self.btn_set_roi = tk.Button(self.right_frame, text="Set ROI (Full Image)", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), command=self.toggle_roi_mode)
-        self.btn_set_roi.pack(fill="x", padx=10, pady=5)
+        self.btn_upload = ttk.Button(sidebar_content, text="📁 Upload Dataset", style="Action.TButton", command=self.upload_dataset)
+        self.btn_upload.pack(fill="x", pady=8)
         
-        self.btn_build = tk.Button(self.right_frame, text="Build & Save Model", bg="#b71c1c", fg="white", font=("Arial", 10, "bold"), command=self.build_model, state="disabled")
-        self.btn_build.pack(fill="x", padx=10, pady=20)
+        self.btn_set_roi = ttk.Button(sidebar_content, text="🎯 Draw ROI", style="Action.TButton", command=self.toggle_roi_mode)
+        self.btn_set_roi.pack(fill="x", pady=8)
+        
+        # Spacer
+        tk.Frame(sidebar_content, bg="#2D2D30", height=40).pack(fill="x")
+        
+        self.btn_build = ttk.Button(sidebar_content, text="⚙️ Build & Save Model", style="Build.TButton", command=self.build_model, state="disabled")
+        self.btn_build.pack(fill="x", side="bottom", pady=20)
         
         # ROI Drawing
         self.roi_mode = False
@@ -74,12 +106,29 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             return
         disp_frame = self.current_frame.copy()
         
+        # --- IMPROVED BOUNDING BOX VISUALS ---
         if self.roi:
-            cv2.rectangle(disp_frame, (self.roi['x'], self.roi['y']), 
-                          (self.roi['x']+self.roi['width'], self.roi['y']+self.roi['height']), 
-                          (0, 255, 0), 2)
+            x, y, w, h = self.roi['x'], self.roi['y'], self.roi['width'], self.roi['height']
+            
+            # 1. Darken the outside of the ROI so the part pops
+            overlay = disp_frame.copy()
+            cv2.rectangle(overlay, (0, 0), (disp_frame.shape[1], disp_frame.shape[0]), (0, 0, 0), -1)
+            overlay[y:y+h, x:x+w] = disp_frame[y:y+h, x:x+w]
+            cv2.addWeighted(overlay, 0.7, disp_frame, 0.3, 0, disp_frame)
+            
+            # 2. Draw a highly visible box (Thick green with black inner/outer border)
+            cv2.rectangle(disp_frame, (x-2, y-2), (x+w+2, y+h+2), (0, 0, 0), 2) # Outer shadow
+            cv2.rectangle(disp_frame, (x, y), (x+w, y+h), (0, 255, 0), 3)       # Main bright box
+            
         elif self.rect_start and self.rect_end and self.roi_mode:
-            cv2.rectangle(disp_frame, self.rect_start, self.rect_end, (255, 0, 0), 2)
+            x1, y1 = self.rect_start
+            x2, y2 = self.rect_end
+            x, y = min(x1, x2), min(y1, y2)
+            w, h = abs(x2 - x1), abs(y2 - y1)
+            if w > 0 and h > 0:
+                # Live drawing box (Cyan with shadow)
+                cv2.rectangle(disp_frame, (x-1, y-1), (x+w+1, y+h+1), (0, 0, 0), 2)
+                cv2.rectangle(disp_frame, (x, y), (x+w, y+h), (255, 255, 0), 2)
         
         disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(disp_frame)
@@ -153,7 +202,6 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             
         if added > 0:
             messagebox.showinfo("Upload", f"Successfully uploaded {added} image(s).")
-            # Stop the live feed and show the first uploaded image so they can draw ROI
             self.show_live_feed = False
             if self.captured_images:
                 self.current_frame = self.captured_images[0].copy()
@@ -162,10 +210,10 @@ class ReferenceModelBuilderUI(tk.Toplevel):
     def toggle_roi_mode(self):
         self.roi_mode = not self.roi_mode
         if self.roi_mode:
-            self.btn_set_roi.config(text="Draw ROI on Video", bg="#ff9800")
+            self.btn_set_roi.config(text="✖ Cancel ROI")
             self.roi = None
         else:
-            self.btn_set_roi.config(text="Set ROI (Full Image)", bg="#0d47a1")
+            self.btn_set_roi.config(text="🎯 Draw ROI")
             self.roi = None
             self.rect_start = None
             self.rect_end = None
@@ -173,16 +221,13 @@ class ReferenceModelBuilderUI(tk.Toplevel):
 
     def on_mouse_down(self, event):
         if self.roi_mode:
-            # Map click coordinates to original frame resolution
             lbl_w, lbl_h = self.lbl_video.winfo_width(), self.lbl_video.winfo_height()
             if self.current_frame is None: return
             fh, fw = self.current_frame.shape[:2]
             
-            # Calculate displayed image size
             scale = min(lbl_w/fw, lbl_h/fh)
             dw, dh = int(fw * scale), int(fh * scale)
             
-            # Offsets if centered (Tkinter label centers image by default)
             ox, oy = (lbl_w - dw) // 2, (lbl_h - dh) // 2
             
             if ox <= event.x <= ox + dw and oy <= event.y <= oy + dh:
@@ -218,7 +263,7 @@ class ReferenceModelBuilderUI(tk.Toplevel):
             if w > 10 and h > 10:
                 self.roi = {"x": x, "y": y, "width": w, "height": h}
                 self.roi_mode = False
-                self.btn_set_roi.config(text="Clear ROI", bg="#0d47a1")
+                self.btn_set_roi.config(text="🗑 Clear ROI")
             self.rect_start = None
             self.rect_end = None
             self._update_display_frame()
@@ -243,7 +288,6 @@ class ReferenceModelBuilderUI(tk.Toplevel):
         try:
             model = build_reference_model(self.captured_images, roi)
             
-            import os
             initial_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vision_models")
             os.makedirs(initial_dir, exist_ok=True)
             save_path = filedialog.asksaveasfilename(
@@ -275,9 +319,9 @@ def open_builder_ui(parent, cam_index, width, height):
 class ReferenceModelTesterUI(tk.Toplevel):
     def __init__(self, parent, cam_index, width, height, model_path):
         super().__init__(parent)
-        self.title(f"Test Reference Model - {model_path}")
-        self.geometry("800x600")
-        self.configure(bg="#222")
+        self.title(f"Test Reference Model")
+        self.geometry("900x650")
+        self.configure(bg="#1E1E1E")
         self.cam_index = cam_index
         self.cam_width = width
         self.cam_height = height
@@ -294,27 +338,36 @@ class ReferenceModelTesterUI(tk.Toplevel):
         self.cap = None
         self.running = False
         
-        # UI Elements
-        self.left_frame = tk.Frame(self, bg="#222")
-        self.left_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        # UI Styling
+        style = ttk.Style()
+        style.theme_use('clam')
         
-        self.lbl_video = tk.Label(self.left_frame, bg="black")
+        self.left_frame = ttk.Frame(self, style="Dark.TFrame")
+        self.left_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+        
+        self.video_container = tk.Frame(self.left_frame, bg="#000000", bd=2, relief="flat")
+        self.video_container.pack(fill="both", expand=True)
+        
+        self.lbl_video = tk.Label(self.video_container, bg="black")
         self.lbl_video.pack(fill="both", expand=True)
         
-        self.right_frame = tk.Frame(self, bg="#333", width=250)
-        self.right_frame.pack(side="right", fill="y", padx=10, pady=10)
+        self.right_frame = ttk.Frame(self, style="Sidebar.TFrame", width=280)
+        self.right_frame.pack(side="right", fill="y")
         self.right_frame.pack_propagate(False)
         
-        tk.Label(self.right_frame, text="Model Testing", bg="#333", fg="white", font=("Arial", 12, "bold")).pack(pady=10)
+        sidebar_content = tk.Frame(self.right_frame, bg="#2D2D30")
+        sidebar_content.pack(fill="both", expand=True, padx=20, pady=20)
         
-        self.lbl_status = tk.Label(self.right_frame, text="Waiting...", bg="#333", fg="#ccc", font=("Arial", 11))
-        self.lbl_status.pack(pady=10)
+        ttk.Label(sidebar_content, text="Live Testing", style="Title.TLabel").pack(pady=(0, 20))
         
-        self.lbl_matches = tk.Label(self.right_frame, text="Matches: 0", bg="#333", fg="#4caf50", font=("Arial", 14, "bold"))
+        self.lbl_status = ttk.Label(sidebar_content, text="Waiting...", background="#2D2D30", foreground="#AAAAAA", font=("Segoe UI", 16, "bold"))
+        self.lbl_status.pack(pady=20)
+        
+        self.lbl_matches = ttk.Label(sidebar_content, text="Matches: 0", background="#2D2D30", foreground="#4caf50", font=("Segoe UI", 14))
         self.lbl_matches.pack(pady=10)
         
-        self.btn_close = tk.Button(self.right_frame, text="Close", bg="#b71c1c", fg="white", font=("Arial", 10, "bold"), command=self.on_close)
-        self.btn_close.pack(fill="x", side="bottom", padx=10, pady=20)
+        self.btn_close = ttk.Button(sidebar_content, text="✖ Close", style="Build.TButton", command=self.on_close)
+        self.btn_close.pack(fill="x", side="bottom", pady=20)
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         
@@ -342,7 +395,6 @@ class ReferenceModelTesterUI(tk.Toplevel):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_height)
         
-        # We will compare against the first reference descriptor for simplicity
         ref_desc = self.model.descriptors_list[0] if self.model.descriptors_list else None
         
         while self.running:
@@ -350,14 +402,16 @@ class ReferenceModelTesterUI(tk.Toplevel):
             if ret:
                 disp_frame = frame.copy()
                 
-                # Apply ROI mask if present
                 roi = self.model.roi
                 mask = None
                 if roi:
                     mask = np.zeros(frame.shape[:2], dtype=np.uint8)
                     x, y, w, h = roi.get("x", 0), roi.get("y", 0), roi.get("width", frame.shape[1]), roi.get("height", frame.shape[0])
                     mask[y:y+h, x:x+w] = 255
-                    cv2.rectangle(disp_frame, (x, y), (x+w, y+h), (255, 255, 0), 2)
+                    
+                    # Improved visual for test mode bounding box
+                    cv2.rectangle(disp_frame, (x-2, y-2), (x+w+2, y+h+2), (0, 0, 0), 2)
+                    cv2.rectangle(disp_frame, (x, y), (x+w, y+h), (0, 255, 255), 3)
                 
                 preprocessed = self._preprocess(frame)
                 kp, desc = self.sift.detectAndCompute(preprocessed, mask)
@@ -372,18 +426,20 @@ class ReferenceModelTesterUI(tk.Toplevel):
                                 if m.distance < 0.7 * n.distance:
                                     good_matches += 1
                                     
-                        # Draw keypoints
-                        disp_frame = cv2.drawKeypoints(disp_frame, kp, None, color=(0,255,0), flags=0)
+                        # Draw keypoints cleanly (small green dots instead of massive circles)
+                        for point in kp:
+                            x_pt, y_pt = int(point.pt[0]), int(point.pt[1])
+                            cv2.circle(disp_frame, (x_pt, y_pt), 2, (0, 255, 0), -1)
                     except Exception as e:
                         pass
                 
                 # Update UI
                 if good_matches > 15:
-                    status_text = "MATCH"
-                    status_fg = "#00FF00"
+                    status_text = "✅ PASS"
+                    status_fg = "#4CAF50" # Green
                 else:
-                    status_text = "NO MATCH"
-                    status_fg = "#FF0000"
+                    status_text = "❌ FAIL"
+                    status_fg = "#F44336" # Red
                     
                 disp_frame = cv2.cvtColor(disp_frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(disp_frame)
@@ -392,10 +448,9 @@ class ReferenceModelTesterUI(tk.Toplevel):
                 if lbl_w > 10 and lbl_h > 10:
                     img.thumbnail((lbl_w, lbl_h), Image.Resampling.LANCZOS)
                 
-                # Update UI safely from main thread
                 def _update_ui(st_text=status_text, st_fg=status_fg, matches=good_matches, pil_img=img):
                     try:
-                        self.lbl_status.config(text=st_text, fg=st_fg)
+                        self.lbl_status.config(text=st_text, foreground=st_fg)
                         self.lbl_matches.config(text=f"Matches: {matches}")
                         self.photo = ImageTk.PhotoImage(pil_img)
                         self.lbl_video.config(image=self.photo)
