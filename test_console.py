@@ -105,24 +105,34 @@ def _print_raw(printer_name: str, filename: str):
 # ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
 # Memory Coils (M):      base 0x0800  (write via FC05/FC15)
 # Discrete Inputs (X):   base 0x0400  (read via FC02, octal numbering)
-# Safety Relay:           M26 = 0x081A (switches Contact Test ↔ IR/ACW mode)
+# Safety Relay:           M28 = 0x081C (switches Contact Test ↔ IR/ACW mode)
 #
 # Channel mapping (from hardware reference):
-#   CH1: M0  → X20    CH5: M20 → X24
-#   CH2: M1  → X21    CH6: M21 → X25
-#   CH3: M2  → X22    CH7: M22 → X26
-#   CH4: M3  → X23    CH8: M23 → X27
+#   IR/ACW: CH1-CH8 -> M20-M27
+#   CONTACT: CH1-CH8 -> M30-M37
+#   ACK: CH1-CH8 -> X20-X27
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PLC_CH_COILS = {
-    1: 0x0800,  # M0
-    2: 0x0801,  # M1
-    3: 0x0802,  # M2
-    4: 0x0803,  # M3
-    5: 0x0814,  # M20
-    6: 0x0815,  # M21
-    7: 0x0816,  # M22
-    8: 0x0817,  # M23
+_PLC_IR_ACW_COILS = {
+    1: 0x0814,  # M20
+    2: 0x0815,  # M21
+    3: 0x0816,  # M22
+    4: 0x0817,  # M23
+    5: 0x0818,  # M24
+    6: 0x0819,  # M25
+    7: 0x081A,  # M26
+    8: 0x081B,  # M27
+}
+
+_PLC_CONTACT_COILS = {
+    1: 0x081E,  # M30
+    2: 0x081F,  # M31
+    3: 0x0820,  # M32
+    4: 0x0821,  # M33
+    5: 0x0822,  # M34
+    6: 0x0823,  # M35
+    7: 0x0824,  # M36
+    8: 0x0825,  # M37
 }
 
 _PLC_CH_INPUTS = {
@@ -136,7 +146,8 @@ _PLC_CH_INPUTS = {
     8: 0x0417,  # X27
 }
 
-_PLC_SAFETY_RELAY = 0x081A   # M26 — Contact Test ↔ IR/ACW mode switch
+_PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
+_PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M28)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
 
 # Physical PLC Inputs (X0-X3)
@@ -154,6 +165,7 @@ class DeltaPLC:
         self._baud = baud
         self._slave_id = slave_id
         self._client = None
+        self._is_hv_mode = False
 
     def open(self) -> bool:
         if not _modbus_ok:
@@ -223,13 +235,14 @@ class DeltaPLC:
 
     def set_channel(self, ch: int, on: bool) -> bool:
         """Turn a channel relay ON or OFF via its memory coil."""
-        addr = _PLC_CH_COILS.get(ch)
+        coils = _PLC_IR_ACW_COILS if self._is_hv_mode else _PLC_CONTACT_COILS
+        addr = coils.get(ch)
         if addr is None:
             return False
         return self.write_coil(addr, on)
 
     def set_all_channels(self, n_ch: int, on: bool) -> bool:
-        """Turn ON/OFF all channel relays (M0~M3, M20~M23)."""
+        """Turn ON/OFF all channel relays."""
         ok = True
         for ch in range(1, min(n_ch, 8) + 1):
             if not self.set_channel(ch, on):
@@ -238,8 +251,15 @@ class DeltaPLC:
         return ok
 
     def reset_all_channels(self) -> bool:
-        """Turn OFF all 8 channel relays."""
-        return self.set_all_channels(8, False)
+        """Turn OFF all 8 channel relays (both Contact and IR/ACW coils)."""
+        ok = True
+        for addr in _PLC_IR_ACW_COILS.values():
+            if not self.write_coil(addr, False):
+                ok = False
+        for addr in _PLC_CONTACT_COILS.values():
+            if not self.write_coil(addr, False):
+                ok = False
+        return ok
 
     # ── Acknowledge / confirmation inputs ────────────────────────────────
 
@@ -268,10 +288,12 @@ class DeltaPLC:
 
     def safety_relay_to_hv(self) -> bool:
         """Switch to IR/ACW (high-voltage) mode. MUST call before HV tests."""
+        self._is_hv_mode = True
         return self.write_coil(_PLC_SAFETY_RELAY, True)
 
     def safety_relay_to_contact(self) -> bool:
         """Switch to Contact Test mode. MUST call after HV tests."""
+        self._is_hv_mode = False
         return self.write_coil(_PLC_SAFETY_RELAY, False)
 
     # ── Physical PLC Inputs (X0-X3) ──────────────────────────────────────
@@ -865,15 +887,15 @@ def render(parent):
         lbl = tk.Label(in_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
-    tk.Label(io_inner, text="OUTPUT (M0~M23)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    tk.Label(io_inner, text="OUTPUT (CH1~8)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w")
     io_out_labels = []
     for i in range(1, 9):
         lbl = tk.Label(out_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_out_labels.append(lbl)
-    # Safety relay indicator (M26)
-    safety_lbl = tk.Label(out_row, text="M26", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    # Safety relay indicator (M28)
+    safety_lbl = tk.Label(out_row, text="M28", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
     def _set_io(io_list, ch_idx, active):
         if ch_idx < len(io_list): io_list[ch_idx].config(bg="#1b5e20" if active else "#0a1a0a", fg="#76ff03" if active else "#2e7d32")
