@@ -1072,10 +1072,8 @@ def render(parent):
         """Contact test via PLC — set each channel coil, read acknowledge input."""
         _log("Contact Test → PLC Modbus (M coils / X inputs)")
         if not _plc_open():
-            _log("PLC not available — simulating Contact PASS")
-            for ch in range(1, n_ch + 1): parent.after(0, lambda c=ch-1: _set_cell("Contact", c, "OK", True))
-            parent.after(0, lambda: _set_row_result("Contact", True))
-            return True, {ch: {"result": "PASS"} for ch in range(1, n_ch + 1)}
+            _log("CRITICAL: PLC Modbus port blocked or disconnected!")
+            return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
         # Ensure safety relay is in Contact Test mode
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
@@ -1116,8 +1114,8 @@ def render(parent):
         """Quick contact check on CH1 only — verifies cable is in jig."""
         _log("Contact CH1 check → cable in jig?")
         if not _plc_open():
-            _log("PLC not available — assuming cable connected")
-            return True
+            _log("CRITICAL: PLC Modbus port blocked or disconnected!")
+            return False
             
         # 1) Turn on Safety Relay and confirm X4
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
@@ -1183,16 +1181,12 @@ def render(parent):
     def _run_ir_test(n_ch: int) -> tuple:
         _log("IR Test → MANU:EDIT:MODE IR | FUNC:TEST ON | MEAS?")
         if not _serial_ok or not hipot.open():
-            _log("HiPot not connected — simulating IR result"); set_com_status("HiPot", False)
-            ir_res = {}; all_pass = True
-            for ch in range(1, n_ch + 1):
-                s = state["spec_ir"].get(ch, {}); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
-                val = 350.0; p = v_min <= val <= v_max
-                if not p: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": val, "result": "PASS" if p else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{val:.0f}", pp=p: _set_cell("IR", c, v, pp))
-            parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
-            return all_pass, ir_res
+            _log("CRITICAL: HiPot not connected or port blocked!")
+            set_com_status("HiPot", False)
+            return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
+        if not _plc_open():
+            _log("CRITICAL: PLC Modbus port blocked or disconnected!")
+            return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
         set_com_status("HiPot", True); time.sleep(2.0)
         if _plc_open():
@@ -1263,16 +1257,12 @@ def render(parent):
     def _run_acw_test(n_ch: int) -> tuple:
         _log("ACW Test → MANU:EDIT:MODE ACW | FUNC:TEST ON | MEAS?")
         if not _serial_ok or not hipot.open():
-            _log("HiPot not connected — simulating ACW result"); set_com_status("HiPot", False)
-            acw_res = {}; all_pass = True
-            for ch in range(1, n_ch + 1):
-                s = state["spec_acw"].get(ch, {}); v_min = float(s.get("min", 0)); v_max = float(s.get("max", 10))
-                val = 0.5; p = v_min <= val <= v_max
-                if not p: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": val, "result": "PASS" if p else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{val:.2f}", pp=p: _set_cell("ACW", c, v, pp))
-            parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
-            return all_pass, acw_res
+            _log("CRITICAL: HiPot not connected or port blocked!")
+            set_com_status("HiPot", False)
+            return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
+        if not _plc_open():
+            _log("CRITICAL: PLC Modbus port blocked or disconnected!")
+            return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
         time.sleep(0.1)
         if _plc_open():
