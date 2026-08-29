@@ -1067,7 +1067,7 @@ def render(parent):
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
-            time.sleep(0.3)
+            time.sleep(2.0)
             # Read acknowledge input for this channel and verify X2 is still True
             ack_passed = plc.read_channel_ack(ch)
             x2_passed = plc.is_contact_ok()
@@ -1098,7 +1098,7 @@ def render(parent):
         time.sleep(0.1)
         plc.set_channel(1, True)
         parent.after(0, lambda: _set_io(io_out_labels, 0, True))
-        time.sleep(0.3)
+        time.sleep(2.0)
         passed = plc.read_channel_ack(1)
         parent.after(0, lambda a=passed: _set_io(io_in_labels, 0, a))
         plc.set_channel(1, False)
@@ -1143,7 +1143,7 @@ def render(parent):
             parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
             return all_pass, ir_res
             
-        set_com_status("HiPot", True); time.sleep(0.3)
+        set_com_status("HiPot", True); time.sleep(2.0)
         if _plc_open():
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(True))
@@ -1155,7 +1155,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(0.3)
+                time.sleep(2.0)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -1181,7 +1181,7 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(0.3)
+                    time.sleep(2.0)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
@@ -1231,7 +1231,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(0.3)
+                time.sleep(2.0)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -1257,7 +1257,7 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(0.3)
+                    time.sleep(2.0)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
