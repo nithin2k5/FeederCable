@@ -934,6 +934,9 @@ def render(parent):
     # Safety relay indicator (M28)
     safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
+    # X4 (Safety ACK) indicator
+    x4_lbl = tk.Label(out_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    x4_lbl.pack(side="left", padx=(4, 1))
     
     def _set_io(io_list, ch_idx, active):
         try:
@@ -948,6 +951,11 @@ def render(parent):
     def _set_x2_indicator(active):
         try:
             if x2_lbl.winfo_exists(): x2_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
+        except Exception: pass
+
+    def _set_x4_indicator(active):
+        try:
+            if x4_lbl.winfo_exists(): x4_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
         except Exception: pass
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=1, sticky="nsew")
@@ -1073,6 +1081,9 @@ def render(parent):
         plc.safety_relay_to_contact()
         parent.after(0, lambda: _set_safety_indicator(True))
         time.sleep(0.1)
+        x4_ack = plc.read_input(_PLC_SAFETY_ACK)
+        _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+        parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
         contact_res = {}; all_pass = True
         for ch in range(1, n_ch + 1):
             _log(f"Contact Test: Testing CH{ch}...")
@@ -1110,6 +1121,9 @@ def render(parent):
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(0.1)
+        x4_ack = plc.read_input(_PLC_SAFETY_ACK)
+        _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+        parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
         plc.set_channel(1, True)
         parent.after(0, lambda: _set_io(io_out_labels, 0, True))
         time.sleep(2.0)
@@ -1173,6 +1187,9 @@ def render(parent):
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.1)
+            x4_ack = plc.read_input(_PLC_SAFETY_ACK)
+            _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
             
         all_pass = True; ir_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
@@ -1250,6 +1267,9 @@ def render(parent):
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.1)
+            x4_ack = plc.read_input(_PLC_SAFETY_ACK)
+            _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
             
         all_pass = True; acw_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
@@ -1307,6 +1327,10 @@ def render(parent):
             plc.set_all_channels(n_ch, False)
             _log("M28 (Safety Relay) -> ON (Contact Mode)")
             plc.safety_relay_to_contact()
+            time.sleep(0.1)
+            x4_ack = plc.read_input(_PLC_SAFETY_ACK)
+            _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
             plc.close()
         for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
         parent.after(0, lambda: _set_safety_indicator(True))
@@ -1416,6 +1440,10 @@ def render(parent):
             # Sync X2 (Contact OK)
             x2_state = plc.read_input(0x0402)
             parent.after(0, lambda a=x2_state: _set_x2_indicator(a))
+            
+            # Sync X4 (Safety ACK)
+            x4_state = plc.read_input(0x0404)
+            parent.after(0, lambda a=x4_state: _set_x4_indicator(a))
             
         except Exception: pass
         finally: plc.close()
