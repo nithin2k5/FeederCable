@@ -1069,9 +1069,9 @@ def render(parent):
             parent.after(0, lambda: _set_row_result("Contact", True))
             return True, {ch: {"result": "PASS"} for ch in range(1, n_ch + 1)}
         # Ensure safety relay is in Contact Test mode
-        _log("M28 (Safety Relay) -> OFF (Contact Mode)")
+        _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
-        parent.after(0, lambda: _set_safety_indicator(False))
+        parent.after(0, lambda: _set_safety_indicator(True))
         time.sleep(0.1)
         contact_res = {}; all_pass = True
         for ch in range(1, n_ch + 1):
@@ -1107,7 +1107,7 @@ def render(parent):
         if not _plc_open():
             _log("PLC not available — assuming cable connected")
             return True
-        _log("M28 (Safety Relay) -> OFF (Contact Mode)")
+        _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(0.1)
         plc.set_channel(1, True)
@@ -1133,7 +1133,7 @@ def render(parent):
     def _plc_reset():
         """Reset all channel coils and safety relay to OFF."""
         plc.reset_all_channels()
-        _log("M28 (Safety Relay) -> OFF (Contact Mode)")
+        _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(0.05)
 
@@ -1169,9 +1169,9 @@ def render(parent):
             
         set_com_status("HiPot", True); time.sleep(2.0)
         if _plc_open():
-            _log("M28 (Safety Relay) -> ON (HV Mode)")
+            _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
-            parent.after(0, lambda: _set_safety_indicator(True))
+            parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.1)
             
         all_pass = True; ir_res = {}
@@ -1246,9 +1246,9 @@ def render(parent):
             
         time.sleep(0.1)
         if _plc_open():
-            _log("M28 (Safety Relay) -> ON (HV Mode)")
+            _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
-            parent.after(0, lambda: _set_safety_indicator(True))
+            parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.1)
             
         all_pass = True; acw_res = {}
@@ -1305,11 +1305,11 @@ def render(parent):
         hipot.close()
         if plc.is_open:
             plc.set_all_channels(n_ch, False)
-            _log("M28 (Safety Relay) -> OFF (Contact Mode)")
+            _log("M28 (Safety Relay) -> ON (Contact Mode)")
             plc.safety_relay_to_contact()
             plc.close()
         for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
-        parent.after(0, lambda: _set_safety_indicator(False))
+        parent.after(0, lambda: _set_safety_indicator(True))
         parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
         return all_pass, acw_res
 
