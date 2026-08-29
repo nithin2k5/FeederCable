@@ -105,7 +105,7 @@ def _print_raw(printer_name: str, filename: str):
 # ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
 # Memory Coils (M):      base 0x0800  (write via FC05/FC15)
 # Discrete Inputs (X):   base 0x0400  (read via FC02, octal numbering)
-# Safety Relay:           M28 = 0x081C (switches Contact Test ↔ IR/ACW mode)
+# Safety Relay:           M26 = 0x081C (switches Contact Test ↔ IR/ACW mode)
 #
 # Channel mapping (from hardware reference):
 #   IR/ACW: CH1-CH8 -> M20-M27
@@ -120,7 +120,7 @@ _PLC_IR_ACW_COILS = {
     4: 0x0817,  # M23
     5: 0x0818,  # M24
     6: 0x0819,  # M25
-    7: 0x081A,  # M26
+    7: 0x081C,  # M28
     8: 0x081B,  # M27
 }
 
@@ -146,8 +146,8 @@ _PLC_CH_INPUTS = {
     8: 0x0417,  # X27
 }
 
-_PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
-_PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M28)
+_PLC_SAFETY_RELAY = 0x081A   # M26 — Contact Test ↔ IR/ACW mode switch
+_PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M26)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
 
 # Physical PLC Inputs (X0-X3)
@@ -931,8 +931,8 @@ def render(parent):
         lbl = tk.Label(out_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_out_labels.append(lbl)
-    # Safety relay indicator (M28)
-    safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    # Safety relay indicator (M26)
+    safety_lbl = tk.Label(out_row, text="M26", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
     # X4 (Safety ACK) indicator
     x4_lbl = tk.Label(out_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
@@ -1075,7 +1075,7 @@ def render(parent):
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
         # Ensure safety relay is in Contact Test mode
-        _log("M28 (Safety Relay) -> ON (Contact Mode)")
+        _log("M26 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         parent.after(0, lambda: _set_safety_indicator(True))
         time.sleep(10.0)
@@ -1118,7 +1118,7 @@ def render(parent):
             return False
             
         # 1) Turn on Safety Relay and confirm X4
-        _log("M28 (Safety Relay) -> ON (Contact Mode)")
+        _log("M26 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(10.0)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
@@ -1143,8 +1143,8 @@ def render(parent):
             
         _log("CH1 contact: OK — X2 is High (cable in jig)")
         
-        # 3) Turn off safety relay M28 and ensure no X4 feedback is received
-        _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
+        # 3) Turn off safety relay M26 and ensure no X4 feedback is received
+        _log("M26 (Safety Relay) -> OFF (Preparing for HV Mode)")
         plc.safety_relay_to_hv()
         parent.after(0, lambda: _set_safety_indicator(False))
         time.sleep(10.0)
@@ -1158,7 +1158,7 @@ def render(parent):
     def _plc_reset():
         """Reset all channel coils and safety relay to OFF."""
         plc.reset_all_channels()
-        _log("M28 (Safety Relay) -> ON (Contact Mode)")
+        _log("M26 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(0.05)
 
@@ -1190,7 +1190,7 @@ def render(parent):
             
         set_com_status("HiPot", True); time.sleep(10.0)
         if _plc_open():
-            _log("M28 (Safety Relay) -> OFF (HV Mode)")
+            _log("M26 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(10.0)
@@ -1266,7 +1266,7 @@ def render(parent):
             
         time.sleep(0.1)
         if _plc_open():
-            _log("M28 (Safety Relay) -> OFF (HV Mode)")
+            _log("M26 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
             time.sleep(10.0)
@@ -1328,7 +1328,7 @@ def render(parent):
         hipot.close()
         if plc.is_open:
             plc.set_all_channels(n_ch, False)
-            _log("M28 (Safety Relay) -> ON (Contact Mode)")
+            _log("M26 (Safety Relay) -> ON (Contact Mode)")
             plc.safety_relay_to_contact()
             time.sleep(10.0)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
@@ -1436,7 +1436,7 @@ def render(parent):
                 actual_out = plc.get_channel(ch)
                 parent.after(0, lambda idx=ch-1, o=actual_out: _set_io(io_out_labels, idx, o))
                 
-            # Sync safety relay (M28)
+            # Sync safety relay (M26)
             m28_state = plc.read_coil(0x081C)
             parent.after(0, lambda a=m28_state: _set_safety_indicator(a))
             
