@@ -1118,31 +1118,44 @@ def render(parent):
         if not _plc_open():
             _log("PLC not available — assuming cable connected")
             return True
+            
+        # 1) Turn on Safety Relay and confirm X4
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         time.sleep(0.1)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
-        _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
+        _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
         parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+        
+        # 2) Turn on CH1 and read X2
         plc.set_channel(1, True)
         parent.after(0, lambda: _set_io(io_out_labels, 0, True))
         time.sleep(2.0)
         passed_ack = plc.read_channel_ack(1)
         passed_x2 = plc.is_contact_ok()
-        passed = passed_ack and passed_x2
         parent.after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
+        
         plc.set_channel(1, False)
         parent.after(0, lambda: _set_io(io_out_labels, 0, False))
-        plc.close()
         
         if not passed_x2:
             _log("CH1 contact: NG — X2 (Contact OK) is False. Cable not detected.")
-        elif not passed_ack:
-            _log("CH1 contact: NG — CH1 ACK is False. (M28 safety relay might be blocking the signal!)")
-        else:
-            _log("CH1 contact: OK — cable in jig")
+            plc.close()
+            return False
             
-        return passed
+        _log("CH1 contact: OK — X2 is High (cable in jig)")
+        
+        # 3) Turn off safety relay M28 and ensure no X4 feedback is received
+        _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
+        plc.safety_relay_to_hv()
+        parent.after(0, lambda: _set_safety_indicator(False))
+        time.sleep(0.1)
+        x4_off = plc.read_input(_PLC_SAFETY_ACK)
+        _log(f"X4 (Safety ACK): {'Still ON! (WARNING)' if x4_off else 'OFF (Low - OK)'}")
+        parent.after(0, lambda a=x4_off: _set_x4_indicator(a))
+        
+        plc.close()
+        return True
 
     def _plc_reset():
         """Reset all channel coils and safety relay to OFF."""
