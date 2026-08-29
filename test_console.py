@@ -919,6 +919,11 @@ def render(parent):
         lbl = tk.Label(in_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
+    
+    # X2 (Contact OK) indicator
+    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    x2_lbl.pack(side="left", padx=(4, 1))
+
     tk.Label(io_inner, text="OUTPUT (CH1~8)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w")
     io_out_labels = []
@@ -927,15 +932,22 @@ def render(parent):
         lbl.pack(side="left", padx=1)
         io_out_labels.append(lbl)
     # Safety relay indicator (M28)
-    safety_lbl = tk.Label(out_row, text="M28", bg="#1a0a0a", fg="#7d2e2e", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
     safety_lbl.pack(side="left", padx=(4, 1))
+    
     def _set_io(io_list, ch_idx, active):
         try:
             if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists(): io_list[ch_idx].config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
         except Exception: pass
+        
     def _set_safety_indicator(active):
         try:
-            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#b71c1c" if active else "#1a0a0a", fg="#ff5555" if active else "#7d2e2e")
+            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
+        except Exception: pass
+
+    def _set_x2_indicator(active):
+        try:
+            if x2_lbl.winfo_exists(): x2_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
         except Exception: pass
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=1, sticky="nsew")
@@ -1387,6 +1399,15 @@ def render(parent):
             for ch in range(1, 9):
                 actual_out = plc.get_channel(ch)
                 parent.after(0, lambda idx=ch-1, o=actual_out: _set_io(io_out_labels, idx, o))
+                
+            # Sync safety relay (M28)
+            m28_state = plc.read_coil(0x081C)
+            parent.after(0, lambda a=m28_state: _set_safety_indicator(a))
+            
+            # Sync X2 (Contact OK)
+            x2_state = plc.read_input(0x0402)
+            parent.after(0, lambda a=x2_state: _set_x2_indicator(a))
+            
         except Exception: pass
         finally: plc.close()
 
