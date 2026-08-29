@@ -321,14 +321,12 @@ class DeltaPLC:
     def safety_relay_to_hv(self) -> bool:
         """Switch to IR/ACW (high-voltage) mode. MUST call before HV tests."""
         self._is_hv_mode = True
-        # Reversed logic: False = HV Mode
-        return self.write_coil(_PLC_SAFETY_RELAY, False)
+        return self.write_coil(_PLC_SAFETY_RELAY, True)
 
     def safety_relay_to_contact(self) -> bool:
         """Switch to Contact Test mode. MUST call after HV tests."""
         self._is_hv_mode = False
-        # Reversed logic: True = Contact Mode
-        return self.write_coil(_PLC_SAFETY_RELAY, True)
+        return self.write_coil(_PLC_SAFETY_RELAY, False)
 
     # ── Physical PLC Inputs (X0-X3) ──────────────────────────────────────
 
@@ -1064,7 +1062,9 @@ def render(parent):
         time.sleep(0.1)
         contact_res = {}; all_pass = True
         for ch in range(1, n_ch + 1):
+            _log(f"Contact Test: Testing CH{ch}...")
             # Turn ON channel coil
+            _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
             time.sleep(0.3)
@@ -1080,6 +1080,7 @@ def render(parent):
                 if not x2_passed: _log(f"Contact (CH{ch}): Failed because X2 (Contact OK) went Low!")
             parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
             # Turn OFF channel coil before next
+            _log(f"CH{ch} -> OFF")
             plc.set_channel(ch, False)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, False))
             time.sleep(0.1)
@@ -1150,6 +1151,7 @@ def render(parent):
             
         all_pass = True; ir_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
+            _log("IR Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
@@ -1173,8 +1175,10 @@ def render(parent):
             _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
+                _log(f"IR Test: Testing CH{ch}...")
                 ack_ok = True
                 if plc.is_open:
+                    _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
                     time.sleep(0.3)
@@ -1190,6 +1194,7 @@ def render(parent):
                 ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
                 parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
+                    _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
                     time.sleep(0.05)
@@ -1222,6 +1227,7 @@ def render(parent):
             
         all_pass = True; acw_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
+            _log("ACW Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
@@ -1245,8 +1251,10 @@ def render(parent):
             _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
+                _log(f"ACW Test: Testing CH{ch}...")
                 ack_ok = True
                 if plc.is_open:
+                    _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
                     time.sleep(0.3)
@@ -1262,6 +1270,7 @@ def render(parent):
                 acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
                 parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
+                    _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
                     time.sleep(0.05)
