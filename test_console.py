@@ -1113,12 +1113,21 @@ def render(parent):
         plc.set_channel(1, True)
         parent.after(0, lambda: _set_io(io_out_labels, 0, True))
         time.sleep(2.0)
-        passed = plc.read_channel_ack(1)
-        parent.after(0, lambda a=passed: _set_io(io_in_labels, 0, a))
+        passed_ack = plc.read_channel_ack(1)
+        passed_x2 = plc.is_contact_ok()
+        passed = passed_ack and passed_x2
+        parent.after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
         plc.set_channel(1, False)
         parent.after(0, lambda: _set_io(io_out_labels, 0, False))
         plc.close()
-        _log(f"CH1 contact: {'OK — cable in jig' if passed else 'NG — cable not detected'}")
+        
+        if not passed_x2:
+            _log("CH1 contact: NG — X2 (Contact OK) is False. Cable not detected.")
+        elif not passed_ack:
+            _log("CH1 contact: NG — CH1 ACK is False. (M28 safety relay might be blocking the signal!)")
+        else:
+            _log("CH1 contact: OK — cable in jig")
+            
         return passed
 
     def _plc_reset():
