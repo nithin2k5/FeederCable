@@ -935,31 +935,36 @@ def render(parent):
     bottom.grid_propagate(False); bottom.columnconfigure(0, weight=4); bottom.columnconfigure(1, weight=3); bottom.rowconfigure(0, weight=1)
     io_lf = ttk.LabelFrame(bottom, text="IO Channel State", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=3); io_inner.pack(fill="both", expand=True)
-    tk.Label(io_inner, text="INPUT (X20~X27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
-    in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 4))
+    io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=1); io_inner.pack(fill="both", expand=True)
+    
+    tk.Label(io_inner, text="Relay ACK (X20~X27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 2))
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
-    
-    # X2 (Contact OK) indicator
-    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x2_lbl.pack(side="left", padx=(4, 1))
 
-    tk.Label(io_inner, text="OUTPUT (CH1~8)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
-    out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w")
-    io_out_labels = []
+    tk.Label(io_inner, text="IR/ACW (M20~M27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    ir_row = tk.Frame(io_inner, bg="black"); ir_row.pack(anchor="w", pady=(0, 2))
+    io_ir_acw_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"CH{i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=5)
+        lbl = tk.Label(ir_row, text=f"M{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
-        io_out_labels.append(lbl)
-    # Safety relay indicator (M28)
-    safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+        io_ir_acw_labels.append(lbl)
+    safety_lbl = tk.Label(ir_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     safety_lbl.pack(side="left", padx=(4, 1))
-    # X4 (Safety ACK) indicator
-    x4_lbl = tk.Label(out_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=5)
+
+    tk.Label(io_inner, text="Contact (M30~M37)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    contact_row = tk.Frame(io_inner, bg="black"); contact_row.pack(anchor="w", pady=(0, 2))
+    io_contact_labels = []
+    for i in range(1, 9):
+        lbl = tk.Label(contact_row, text=f"M{29+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl.pack(side="left", padx=1)
+        io_contact_labels.append(lbl)
+    x4_lbl = tk.Label(contact_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x4_lbl.pack(side="left", padx=(4, 1))
     
     def _set_io(io_list, ch_idx, active):
@@ -1112,7 +1117,7 @@ def render(parent):
             # Turn ON channel coil
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
-            parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
+            parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
             time.sleep(0.5)
             # Read acknowledge input for this channel and verify X2 is still True
             ack_passed = plc.read_channel_ack(ch)
@@ -1131,7 +1136,7 @@ def render(parent):
             # Turn OFF channel coil before next
             _log(f"CH{ch} -> OFF")
             plc.set_channel(ch, False)
-            parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, False))
+            parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, False))
             time.sleep(0.5)
         plc.close()
         parent.after(0, lambda p=all_pass: _set_row_result("Contact", p))
@@ -1154,14 +1159,14 @@ def render(parent):
         
         # 2) Turn on CH1 and read X2
         plc.set_channel(1, True)
-        parent.after(0, lambda: _set_io(io_out_labels, 0, True))
+        parent.after(0, lambda: _set_io(io_contact_labels, 0, True))
         time.sleep(0.5)
         passed_ack = plc.read_channel_ack(1)
         passed_x2 = plc.is_contact_ok()
         parent.after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
         
         plc.set_channel(1, False)
-        parent.after(0, lambda: _set_io(io_out_labels, 0, False))
+        parent.after(0, lambda: _set_io(io_contact_labels, 0, False))
         
         if not passed_x2:
             _log("CH1 contact: NG — X2 (Contact OK) is False. Cable not detected.")
@@ -1230,7 +1235,7 @@ def render(parent):
             _log("IR Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
                 time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
@@ -1247,7 +1252,7 @@ def render(parent):
                 parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
             _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1256,7 +1261,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
+                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
                     time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
@@ -1272,7 +1277,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
+                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
                     time.sleep(0.05)
             _log(f"IR (Individual): {'PASS' if all_pass else 'FAIL'}")
 
@@ -1306,7 +1311,7 @@ def render(parent):
             _log("ACW Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
                 time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
@@ -1323,7 +1328,7 @@ def render(parent):
                 parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
             _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1332,7 +1337,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
+                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
                     time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
@@ -1348,7 +1353,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, False))
+                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
                     time.sleep(0.05)
             _log(f"ACW (Individual): {'PASS' if all_pass else 'FAIL'}")
 
@@ -1362,7 +1367,7 @@ def render(parent):
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
             plc.close()
-        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, False))
+        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
         parent.after(0, lambda: _set_safety_indicator(True))
         parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
         return all_pass, acw_res
@@ -1458,10 +1463,13 @@ def render(parent):
             # Sync inputs (X20-X27)
             bits = plc.read_inputs_bulk(0x0410, 8)
             for i in range(8): parent.after(0, lambda idx=i, a=bits[i]: _set_io(io_in_labels, idx, a))
-            # Sync actual outputs (M20-M27 or M30-M37 based on current mode)
+            # Sync actual outputs (M20-M27 and M30-M37)
+            ir_acw_bits = plc.read_coils_bulk(0x0814, 8)
+            contact_bits = plc.read_coils_bulk(0x081E, 8)
             for ch in range(1, 9):
-                actual_out = plc.get_channel(ch)
-                parent.after(0, lambda idx=ch-1, o=actual_out: _set_io(io_out_labels, idx, o))
+                o_ir = ir_acw_bits[ch-1] if ir_acw_bits and len(ir_acw_bits) >= ch else False
+                o_cont = contact_bits[ch-1] if contact_bits and len(contact_bits) >= ch else False
+                parent.after(0, lambda idx=ch-1, o_ir=o_ir, o_cont=o_cont: (_set_io(io_ir_acw_labels, idx, o_ir), _set_io(io_contact_labels, idx, o_cont)))
                 
             # Sync safety relay (M28)
             m28_state = plc.read_coil(0x081C)
