@@ -22,8 +22,8 @@ flowchart TD
     CheckCable -- No --> Abort[Abort Test & Alert]
     CheckCable -- Yes --> IRTest[IR Test Sequence]
     
-    IRTest --> M26ON[Turn Safety Relay M26 ON <br/> High Voltage Mode]
-    M26ON --> AllCoilsON[Turn All Channel Coils ON]
+    IRTest --> M28ON[Turn Safety Relay M28 ON <br/> High Voltage Mode]
+    M28ON --> AllCoilsON[Turn All Channel Coils ON]
     AllCoilsON --> HiPotIR[Send HiPot IR Command]
     HiPotIR --> ReadIR[Read IR Value & Compare Spec]
     ReadIR --> ResetCoils1[Turn All Channel Coils OFF]
@@ -35,7 +35,7 @@ flowchart TD
     ACWTest --> AllCoilsON2[Turn All Channel Coils ON]
     AllCoilsON2 --> HiPotACW[Send HiPot ACW Command]
     HiPotACW --> ReadACW[Read ACW Value & Compare Spec]
-    ReadACW --> ResetCoils2[Turn All Coils OFF & <br/> M26 OFF Contact Mode]
+    ReadACW --> ResetCoils2[Turn All Coils OFF & <br/> M28 OFF Contact Mode]
     
     ResetCoils2 --> PassACW{ACW Passed?}
     PassACW -- No --> FailRoute
@@ -58,18 +58,18 @@ flowchart TD
 
 ### Deep Dive into Test Stages:
 * **IR Test (Insulation Resistance)**:
-   * **Safety Isolation**: The software commands the PLC to turn **ON** the Safety Relay (`M26`). This physically isolates the low-voltage electronics board to protect it from high-voltage blowouts.
+   * **Safety Isolation**: The software commands the PLC to turn **ON** the Safety Relay (`M28`). This physically isolates the low-voltage electronics board to protect it from high-voltage blowouts.
    * **Coil Activation**: Based on the `testmode` fetched from the database:
      - If **Combined**: It turns ON all required channel coils on the PLC simultaneously and runs a single HiPot test for the whole bundle.
      - If **Individual**: It turns ON Channel 1, runs a HiPot test, turns OFF Channel 1, turns ON Channel 2, runs a HiPot test, and repeats sequentially.
    * It sends SCPI serial commands to the HiPot tester to apply the target voltage and execute the IR test. 
    * It reads the resulting resistance (in MΩ), checks it against the database Min/Max limits, and logs it to the UI. It then ensures all channel coils are OFF.
 * **ACW Test (Withstand Voltage)**:
-    * The Safety Relay (`M26`) remains **ON** (High Voltage mode).
+    * The Safety Relay (`M28`) remains **ON** (High Voltage mode).
     * It runs the same Combined (all at once) or Individual (sequential loop) logic to turn the PLC channel coils ON.
     * It sends SCPI commands to the HiPot to apply high-voltage AC and measure current leakage (in mA). 
     * It verifies the leakage against the limits, logs it, and ensures the coils are OFF.
-    * **Crucial Revert**: The software commands the PLC to turn the Safety Relay (`M26`) **OFF**, returning the machine to low-voltage Contact mode.
+    * **Crucial Revert**: The software commands the PLC to turn the Safety Relay (`M28`) **OFF**, returning the machine to low-voltage Contact mode.
 * **Contact Test (Continuity/Wiring)**:
   * Iterates through every channel individually (1 up to 8).
   * Turns ON a specific coil (e.g., M0 for CH1).
