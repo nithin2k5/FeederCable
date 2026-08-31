@@ -209,14 +209,18 @@ class DeltaPLC:
             return False
 
     def read_input(self, address: int) -> bool:
-        """Read a single discrete input (FC02)."""
+        """Read a single discrete input (FC02) via bulk read for Delta PLC reliability."""
         if not self.is_open:
             return False
         try:
-            result = self._client.read_discrete_inputs(address, 1, slave=self._slave_id)
+            # Bulk-read X0-X7 from base 0x0400 and extract the needed bit
+            base = 0x0400
+            offset = address - base
+            count = offset + 1 if offset >= 0 else 1
+            result = self._client.read_discrete_inputs(base, max(count, 8), slave=self._slave_id)
             if result.isError():
                 return False
-            return result.bits[0]
+            return result.bits[offset] if 0 <= offset < len(result.bits) else False
         except Exception:
             return False
 
