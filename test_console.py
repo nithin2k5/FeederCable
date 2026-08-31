@@ -1119,6 +1119,17 @@ def render(parent):
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
             time.sleep(0.5)
+            
+            # --- TARGETED LOGGING ---
+            try:
+                raw = plc._client.read_discrete_inputs(0x0400, count=24, device_id=plc._slave_id)
+                if not raw.isError():
+                    print(f"\n[CONTACT TEST] >> CH{ch} RAW BITS 0x0400-0x0417: {raw.bits[:24]}")
+                    print(f"[CONTACT TEST] >> EXPECTING INDEX {16 + ch - 1} (X2{ch-1}) TO BE True\n")
+            except Exception as e:
+                pass
+            # ------------------------
+
             # Read acknowledge input for this channel and verify X2 is still True
             ack_passed = plc.read_channel_ack(ch)
             x2_passed = plc.is_contact_ok()
