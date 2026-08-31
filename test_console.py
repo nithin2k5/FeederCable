@@ -158,7 +158,7 @@ _PLC_REWORK_ON_INPUT  = 0x0403   # X3  — Rework on
 
 
 class DeltaPLC:
-    """Delta DVP PLC communication via Modbus RTU (RS-485/RS-232)."""
+    """Delta DVP PLC communication via Modbus ASCII (RS-485/RS-232)."""
 
     def __init__(self, port: str, baud: int = 9600, slave_id: int = 1):
         self._port = port
@@ -173,11 +173,12 @@ class DeltaPLC:
         try:
             self.close()
             self._client = ModbusSerialClient(
+                framer='ascii',
                 port=self._port,
                 baudrate=self._baud,
-                parity='N',
+                parity='E',
                 stopbits=1,
-                bytesize=8,
+                bytesize=7,
                 timeout=1.5,
             )
             return self._client.connect()
