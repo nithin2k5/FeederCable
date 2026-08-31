@@ -113,12 +113,14 @@ def render(parent):
                         
                     try:
                         if client.connect():
-                            res = client.read_discrete_inputs(0, count=11, device_id=sid_val)
+                            addr = 0x0400 if dev == "Delta PLC" else 0
+                            res = client.read_discrete_inputs(addr, count=8, device_id=sid_val)
                             if res.isError():
                                 log_msg(f"{dev} Error: Connected but no valid response.")
                                 _update_btn("FAIL", "#f44336")
                             else:
-                                log_msg(f"{dev} Success: Read P0-P10 values {res.bits[:11]} from {port}.")
+                                vals = [1 if b else 0 for b in res.bits[:8]]
+                                log_msg(f"{dev} Success: Read X0-X7 values {vals} from {port}.")
                                 _update_btn("PASS", "#4caf50")
                         else:
                             log_msg(f"{dev} Error: Could not open {port}.")
