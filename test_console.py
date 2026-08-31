@@ -1102,7 +1102,7 @@ def render(parent):
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
         parent.after(0, lambda: _set_safety_indicator(True))
-        time.sleep(10.0)
+        time.sleep(0.5)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
         parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -1113,7 +1113,7 @@ def render(parent):
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, True))
-            time.sleep(10.0)
+            time.sleep(0.5)
             # Read acknowledge input for this channel and verify X2 is still True
             ack_passed = plc.read_channel_ack(ch)
             x2_passed = plc.is_contact_ok()
@@ -1147,7 +1147,7 @@ def render(parent):
         # 1) Turn on Safety Relay and confirm X4
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
-        time.sleep(10.0)
+        time.sleep(0.5)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
         parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -1155,7 +1155,7 @@ def render(parent):
         # 2) Turn on CH1 and read X2
         plc.set_channel(1, True)
         parent.after(0, lambda: _set_io(io_out_labels, 0, True))
-        time.sleep(10.0)
+        time.sleep(0.5)
         passed_ack = plc.read_channel_ack(1)
         passed_x2 = plc.is_contact_ok()
         parent.after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
@@ -1174,7 +1174,7 @@ def render(parent):
         _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
         plc.safety_relay_to_hv()
         parent.after(0, lambda: _set_safety_indicator(False))
-        time.sleep(10.0)
+        time.sleep(0.5)
         x4_off = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'Still ON! (WARNING)' if x4_off else 'OFF (Low - OK)'}")
         parent.after(0, lambda a=x4_off: _set_x4_indicator(a))
@@ -1215,12 +1215,12 @@ def render(parent):
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
-        set_com_status("HiPot", True); time.sleep(10.0)
+        set_com_status("HiPot", True); time.sleep(0.5)
         if _plc_open():
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
-            time.sleep(10.0)
+            time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -1231,7 +1231,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(10.0)
+                time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -1257,7 +1257,7 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(10.0)
+                    time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
@@ -1296,7 +1296,7 @@ def render(parent):
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             parent.after(0, lambda: _set_safety_indicator(False))
-            time.sleep(10.0)
+            time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -1307,7 +1307,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_out_labels, idx, True))
-                time.sleep(10.0)
+                time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -1333,7 +1333,7 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     parent.after(0, lambda idx=ch-1: _set_io(io_out_labels, idx, True))
-                    time.sleep(10.0)
+                    time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
                     parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
@@ -1357,7 +1357,7 @@ def render(parent):
             plc.set_all_channels(n_ch, False)
             _log("M28 (Safety Relay) -> ON (Contact Mode)")
             plc.safety_relay_to_contact()
-            time.sleep(10.0)
+            time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
