@@ -120,7 +120,7 @@ _PLC_IR_ACW_COILS = {
     4: 0x0817,  # M23
     5: 0x0818,  # M24
     6: 0x0819,  # M25
-    7: 0x081C,  # M28
+    7: 0x081A,  # M26
     8: 0x081B,  # M27
 }
 
@@ -146,7 +146,7 @@ _PLC_CH_INPUTS = {
     8: 0x0417,  # X27
 }
 
-_PLC_SAFETY_RELAY = 0x081A   # M26 — Contact Test ↔ IR/ACW mode switch
+_PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
 _PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M26)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
 
