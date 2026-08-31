@@ -1117,13 +1117,16 @@ def render(parent):
             # Read acknowledge input for this channel and verify X2 is still True
             ack_passed = plc.read_channel_ack(ch)
             x2_passed = plc.is_contact_ok()
+            _log(f"CH{ch} ACK (X2{ch-1}): {'OK (High)' if ack_passed else 'NG (Low)'}")
+            _log(f"X2 (Contact OK): {'OK (High)' if x2_passed else 'NG (Low)'}")
             passed = ack_passed and x2_passed
             
             parent.after(0, lambda c=ch-1, a=ack_passed: _set_io(io_in_labels, c, a))
             contact_res[ch] = {"result": "PASS" if passed else "FAIL"}
             if not passed:
                 all_pass = False
-                if not x2_passed: _log(f"Contact (CH{ch}): Failed because X2 (Contact OK) went Low!")
+                if not ack_passed: _log(f"Contact (CH{ch}): Failed — ACK (X2{ch-1}) is Low!")
+                if not x2_passed: _log(f"Contact (CH{ch}): Failed — X2 (Contact OK) went Low!")
             parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
             # Turn OFF channel coil before next
             _log(f"CH{ch} -> OFF")
