@@ -1411,18 +1411,24 @@ def render(parent):
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
         parent.after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return
-        parent.after(0, lambda: scan_lbl.config(text="ðŸ”—  Contact Testingâ€¦", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
+        parent.after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
     def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict):
+        if _plc_open():
+            _log("Resetting all PLC pins (Contact + IR/ACW + Safety Relay)...")
+            plc.reset_all_channels()
+            plc.safety_relay_to_hv() # Resets M28 to False (default state)
+            plc.close()
+            
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
-        elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "â€”"
+        elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         parent.after(0, _update_counts); parent.after(0, lambda l=lot_no: lot_lbl.config(text=l)); parent.after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); parent.after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch)
         if overall == "PASS":
-            parent.after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); parent.after(0, lambda: scan_lbl.config(text="âœ…  PASS â€” Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
+            parent.after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); parent.after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"]), daemon=True).start()
             parent.after(5000, _show_scan_entry)
         else:
