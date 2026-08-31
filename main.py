@@ -21,6 +21,10 @@ class App:
         self.root.geometry("1350x860")
         self.root.configure(bg="black")
         
+        # Handle application shutdown to turn pins to low
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        
         # Apply standard theme
         style = ttk.Style()
         style.theme_use("clam")
@@ -42,6 +46,28 @@ class App:
         
         # Start on the default page
         self.load_page('test_console')
+
+    def on_closing(self):
+        try:
+            import configparser
+            import os
+            from test_console import DeltaPLC
+            cfg = configparser.ConfigParser()
+            cfg_path = os.path.join(os.path.dirname(__file__), "comport_cfg.ini")
+            if os.path.exists(cfg_path):
+                cfg.read(cfg_path)
+                if "COM" in cfg:
+                    port = cfg["COM"].get("io_port", "COM3")
+                    baud = int(cfg["COM"].get("io_baud", "9600"))
+                    plc = DeltaPLC(port, baud)
+                    if plc.open():
+                        plc.reset_all_channels()
+                        plc.write_coil(0x081C, False) # _PLC_SAFETY_RELAY
+                        plc.close()
+        except Exception as e:
+            print(f"Error resetting PLC pins on exit: {e}")
+        finally:
+            self.root.destroy()
 
     def build_header(self):
         # Universal header
