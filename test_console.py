@@ -213,13 +213,17 @@ class DeltaPLC:
         if not self.is_open:
             return False
         try:
-            # Bulk-read X0-X7 from base 0x0400 and extract the needed bit
+            # Delta DVP: try base 0x0400 first, fallback to base 0
             base = 0x0400
             offset = address - base
-            count = offset + 1 if offset >= 0 else 1
-            result = self._client.read_discrete_inputs(base, max(count, 8), slave=self._slave_id)
+            count = max(offset + 1, 8)
+            result = self._client.read_discrete_inputs(base, count, slave=self._slave_id)
             if result.isError():
-                return False
+                # Fallback: try without 0x0400 offset (raw X index)
+                result = self._client.read_discrete_inputs(0, count, slave=self._slave_id)
+                if result.isError():
+                    return False
+                return result.bits[offset] if 0 <= offset < len(result.bits) else False
             return result.bits[offset] if 0 <= offset < len(result.bits) else False
         except Exception:
             return False
@@ -231,7 +235,12 @@ class DeltaPLC:
         try:
             result = self._client.read_discrete_inputs(address, count, slave=self._slave_id)
             if result.isError():
-                return [False] * count
+                # Fallback: try from base 0 with offset
+                offset = address - 0x0400 if address >= 0x0400 else address
+                result = self._client.read_discrete_inputs(0, offset + count, slave=self._slave_id)
+                if result.isError():
+                    return [False] * count
+                return list(result.bits[offset:offset + count])
             return list(result.bits[:count])
         except Exception:
             return [False] * count
