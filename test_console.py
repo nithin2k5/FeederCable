@@ -381,7 +381,7 @@ class HiPotSerial:
         try:
             if self._ser and self._ser.is_open:
                 self._ser.close()
-                time.sleep(0.1)
+                time.sleep(0.5)
             self._ser = serial.Serial(self._port, self._baud, timeout=3.0, write_timeout=0.5)
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
@@ -1132,7 +1132,7 @@ def render(parent):
             _log(f"CH{ch} -> OFF")
             plc.set_channel(ch, False)
             parent.after(0, lambda c=ch-1: _set_io(io_out_labels, c, False))
-            time.sleep(0.1)
+            time.sleep(0.5)
         plc.close()
         parent.after(0, lambda p=all_pass: _set_row_result("Contact", p))
         _log(f"Contact: {'PASS' if all_pass else 'FAIL'}"); return all_pass, contact_res
@@ -1291,7 +1291,7 @@ def render(parent):
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
-        time.sleep(0.1)
+        time.sleep(0.5)
         if _plc_open():
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
