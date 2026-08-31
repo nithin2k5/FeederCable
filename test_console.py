@@ -204,7 +204,7 @@ class DeltaPLC:
             print(f"[PLC DEBUG] write_coil(0x{address:04X}, {value}): port not open!")
             return False
         try:
-            result = self._client.write_coil(address, value, slave=self._slave_id)
+            result = self._client.write_coil(address, value, device_id=self._slave_id)
             ok = not result.isError()
             print(f"[PLC DEBUG] write_coil(0x{address:04X}, {value}): {'OK' if ok else f'FAILED: {result}'}")
             return ok
@@ -222,11 +222,11 @@ class DeltaPLC:
             offset = address - base
             count = max(offset + 1, 8)
             print(f"[PLC DEBUG] read_discrete_inputs(base=0x{base:04X}, count={count}, slave={self._slave_id})")
-            result = self._client.read_discrete_inputs(base, count, slave=self._slave_id)
+            result = self._client.read_discrete_inputs(base, count, device_id=self._slave_id)
             if result.isError():
                 print(f"[PLC DEBUG] 0x0400 base FAILED: {result}")
                 # Fallback: try without 0x0400 offset
-                result = self._client.read_discrete_inputs(0, count, slave=self._slave_id)
+                result = self._client.read_discrete_inputs(0, count, device_id=self._slave_id)
                 if result.isError():
                     print(f"[PLC DEBUG] base 0 also FAILED: {result}")
                     return False
@@ -243,11 +243,11 @@ class DeltaPLC:
         if not self.is_open:
             return [False] * count
         try:
-            result = self._client.read_discrete_inputs(address, count, slave=self._slave_id)
+            result = self._client.read_discrete_inputs(address, count, device_id=self._slave_id)
             if result.isError():
                 # Fallback: try from base 0 with offset
                 offset = address - 0x0400 if address >= 0x0400 else address
-                result = self._client.read_discrete_inputs(0, offset + count, slave=self._slave_id)
+                result = self._client.read_discrete_inputs(0, offset + count, device_id=self._slave_id)
                 if result.isError():
                     return [False] * count
                 return list(result.bits[offset:offset + count])
@@ -260,7 +260,7 @@ class DeltaPLC:
         if not self.is_open:
             return False
         try:
-            result = self._client.read_coils(address, 1, slave=self._slave_id)
+            result = self._client.read_coils(address, 1, device_id=self._slave_id)
             if result.isError():
                 return False
             return result.bits[0]
@@ -272,7 +272,7 @@ class DeltaPLC:
         if not self.is_open:
             return [False] * count
         try:
-            result = self._client.read_coils(address, count, slave=self._slave_id)
+            result = self._client.read_coils(address, count, device_id=self._slave_id)
             if result.isError():
                 return [False] * count
             return list(result.bits[:count])
