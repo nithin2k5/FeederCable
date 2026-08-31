@@ -1440,14 +1440,12 @@ def render(parent):
             m28_state = plc.read_coil(0x081C)
             parent.after(0, lambda a=m28_state: _set_safety_indicator(a))
             
-            # Sync X2 (Contact OK)
-            x2_state = plc.read_input(0x0402)
+            # Sync X0-X7 to get X2 (Contact OK) and X4 (Safety ACK)
+            x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
+            x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
+            x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
             parent.after(0, lambda a=x2_state: _set_x2_indicator(a))
-            
-            # Sync X4 (Safety ACK)
-            x4_state = plc.read_input(0x0404)
             parent.after(0, lambda a=x4_state: _set_x4_indicator(a))
-            
         except Exception: pass
         finally: plc.close()
 
