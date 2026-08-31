@@ -201,31 +201,41 @@ class DeltaPLC:
     def write_coil(self, address: int, value: bool) -> bool:
         """Write a single coil (FC05)."""
         if not self.is_open:
+            print(f"[PLC DEBUG] write_coil(0x{address:04X}, {value}): port not open!")
             return False
         try:
             result = self._client.write_coil(address, value, slave=self._slave_id)
-            return not result.isError()
-        except Exception:
+            ok = not result.isError()
+            print(f"[PLC DEBUG] write_coil(0x{address:04X}, {value}): {'OK' if ok else f'FAILED: {result}'}")
+            return ok
+        except Exception as e:
+            print(f"[PLC DEBUG] write_coil EXCEPTION: {e}")
             return False
 
     def read_input(self, address: int) -> bool:
         """Read a single discrete input (FC02) via bulk read for Delta PLC reliability."""
         if not self.is_open:
+            print(f"[PLC DEBUG] read_input(0x{address:04X}): port not open!")
             return False
         try:
-            # Delta DVP: try base 0x0400 first, fallback to base 0
             base = 0x0400
             offset = address - base
             count = max(offset + 1, 8)
+            print(f"[PLC DEBUG] read_discrete_inputs(base=0x{base:04X}, count={count}, slave={self._slave_id})")
             result = self._client.read_discrete_inputs(base, count, slave=self._slave_id)
             if result.isError():
-                # Fallback: try without 0x0400 offset (raw X index)
+                print(f"[PLC DEBUG] 0x0400 base FAILED: {result}")
+                # Fallback: try without 0x0400 offset
                 result = self._client.read_discrete_inputs(0, count, slave=self._slave_id)
                 if result.isError():
+                    print(f"[PLC DEBUG] base 0 also FAILED: {result}")
                     return False
+                print(f"[PLC DEBUG] base 0 OK, bits={result.bits[:count]}, returning bit[{offset}]={result.bits[offset]}")
                 return result.bits[offset] if 0 <= offset < len(result.bits) else False
+            print(f"[PLC DEBUG] 0x0400 OK, bits={list(result.bits[:count])}, returning bit[{offset}]={result.bits[offset]}")
             return result.bits[offset] if 0 <= offset < len(result.bits) else False
-        except Exception:
+        except Exception as e:
+            print(f"[PLC DEBUG] read_input EXCEPTION: {e}")
             return False
 
     def read_inputs_bulk(self, address: int, count: int) -> list:
