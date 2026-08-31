@@ -1119,30 +1119,16 @@ def render(parent):
             plc.set_channel(ch, True)
             parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
             time.sleep(0.5)
-            
-            # --- TARGETED LOGGING ---
-            try:
-                raw = plc._client.read_discrete_inputs(0x0400, count=24, device_id=plc._slave_id)
-                if not raw.isError():
-                    print(f"\n[CONTACT TEST] >> CH{ch} RAW BITS 0x0400-0x0417: {raw.bits[:24]}")
-                    print(f"[CONTACT TEST] >> EXPECTING INDEX {16 + ch - 1} (X2{ch-1}) TO BE True\n")
-            except Exception as e:
-                pass
-            # ------------------------
-
-            # Read acknowledge input for this channel and verify X2 is still True
-            ack_passed = plc.read_channel_ack(ch)
+            # Verify X2 is still True (Contact OK)
+            # Note: X20-X27 are hardware-linked to IR/ACW relays only, so we do not check them here.
             x2_passed = plc.is_contact_ok()
-            _log(f"CH{ch} ACK (X2{ch-1}): {'OK (High)' if ack_passed else 'NG (Low)'}")
             _log(f"X2 (Contact OK): {'OK (High)' if x2_passed else 'NG (Low)'}")
-            passed = ack_passed and x2_passed
+            passed = x2_passed
             
-            parent.after(0, lambda c=ch-1, a=ack_passed: _set_io(io_in_labels, c, a))
             contact_res[ch] = {"result": "PASS" if passed else "FAIL"}
             if not passed:
                 all_pass = False
-                if not ack_passed: _log(f"Contact (CH{ch}): Failed — ACK (X2{ch-1}) is Low!")
-                if not x2_passed: _log(f"Contact (CH{ch}): Failed — X2 (Contact OK) went Low!")
+                _log(f"Contact (CH{ch}): Failed — X2 (Contact OK) went Low!")
             parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
             # Turn OFF channel coil before next
             _log(f"CH{ch} -> OFF")
