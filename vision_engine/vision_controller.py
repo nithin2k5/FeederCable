@@ -1,21 +1,33 @@
 """
 vision_engine/vision_controller.py
 ==================================
-Local webcam-based vision controller using Template Matching (Normalized Cross-Correlation).
-Replaces the fragile Contour/Canny approach with robust industrial template matching.
+Webcam-based part verification using Template Matching (Normalized Cross-Correlation).
 
 Methodology:
-  - Teach: User draws ROI around the part. The image patch inside the ROI becomes the 'Template'.
-  - Inspect: Capture live frame. Search for the Template across the frame using cv2.matchTemplate.
-  - Result: If the highest match score > threshold, it's OK (Part is present and correct).
+  - Teach: the operator uploads reference images and draws a ROI around the part.
+    The image patch inside the ROI becomes the 'Template'.
+  - Inspect: capture a live frame and search for the Template across it with
+    cv2.matchTemplate.
+  - Result: if the best match score >= threshold the part is present and correct.
 """
-import cv2
-import numpy as np
+import configparser
 import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
+
+import cv2
+import numpy as np
+
+from . import camera
+
+DEFAULT_MATCH_THRESHOLD = 0.75
+
+_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+_VISION_CFG_PATH = os.path.join(_ROOT_DIR, "vision_config.json")
+_CAM_CFG_PATH = os.path.join(_ROOT_DIR, "camera_cfg.ini")
+_MODELS_DIR = os.path.join(_ROOT_DIR, "vision_models")
 
 
 @dataclass
@@ -30,55 +42,37 @@ class VisionResult:
     error: Optional[str] = None
 
 
-_VISION_CFG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vision_config.json")
-_MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vision_models")
-
-
 def _default_config() -> dict:
     return {
         "vision_enabled": True,
         "camera_source": "cam1",
-        "match_threshold": 0.75,
-        "part_mapping": {}
+        "match_threshold": DEFAULT_MATCH_THRESHOLD,
+        "part_mapping": {},
     }
 
 
 def load_vision_config() -> dict:
+    cfg = _default_config()
     if os.path.exists(_VISION_CFG_PATH):
         try:
             with open(_VISION_CFG_PATH, "r") as f:
-                cfg = json.load(f)
-                if "match_threshold" not in cfg:
-                    cfg["match_threshold"] = 0.75
-                return cfg
-        except Exception:
+                cfg.update(json.load(f))
+        except (OSError, ValueError):
             pass
-    return _default_config()
+    return cfg
 
 
 def save_vision_config(cfg: dict):
     with open(_VISION_CFG_PATH, "w") as f:
         json.dump(cfg, f, indent=4)
 
-def get_vision_controller():
-    cfg = load_vision_config()
-    engine = cfg.get("engine", "template")
-    if engine == "yolo":
-        try:
-            from .yolo_controller import YoloVisionController
-            return YoloVisionController()
-        except ImportError:
-            pass
-    elif engine == "sift":
-        from .sift_controller import SiftVisionController
-        return SiftVisionController()
+
+def get_vision_controller() -> "VisionController":
     return VisionController()
 
+
 class VisionController:
-    """
-    Headless, production-grade vision controller.
-    Uses webcam + OpenCV Template Matching to verify part presence.
-    """
+    """Headless part verification against taught templates."""
 
     def __init__(self):
         self.config = load_vision_config()
@@ -90,30 +84,30 @@ class VisionController:
 
     # ── Camera ──────────────────────────────────────────────────────────────
 
-    def _get_cam_index(self) -> int:
-        import configparser
-        cam_cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "camera_cfg.ini")
-        if not os.path.exists(cam_cfg_path):
-            return -1
-        cfg = configparser.ConfigParser()
-        cfg.read(cam_cfg_path)
+    def cam_settings(self) -> tuple:
+        """(index, width, height) for the configured camera source."""
         source = self.config.get("camera_source", "cam1")
-        key = f"{source}_index"
-        return cfg.getint("CAMERA", key, fallback=-1)
+        if not os.path.exists(_CAM_CFG_PATH):
+            return -1, 640, 480
+        cfg = configparser.ConfigParser()
+        cfg.read(_CAM_CFG_PATH)
+        return (
+            cfg.getint("CAMERA", f"{source}_index", fallback=-1),
+            cfg.getint("CAMERA", f"{source}_width", fallback=640),
+            cfg.getint("CAMERA", f"{source}_height", fallback=480),
+        )
 
     def _capture_frame(self) -> Optional[np.ndarray]:
-        cam_index = self._get_cam_index()
-        if cam_index < 0:
+        index, width, height = self.cam_settings()
+        if index < 0:
             return None
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            return None
-        # Allow auto-exposure to settle
-        for _ in range(5):
-            cap.read()
-        ret, frame = cap.read()
-        cap.release()
-        return frame if ret else None
+        return camera.grab(index, width, height)
+
+    def get_status(self) -> str:
+        index, width, height = self.cam_settings()
+        if index < 0:
+            return "NO_CAMERA"
+        return "READY" if camera.grab(index, width, height) is not None else "CAMERA_ERROR"
 
     # ── Model I/O ───────────────────────────────────────────────────────────
 
@@ -145,7 +139,7 @@ class VisionController:
             model_cfg["templates"] = templates
             self._model_cache[part_number] = model_cfg
             return model_cfg
-        except Exception:
+        except (OSError, ValueError, KeyError):
             return None
 
     def has_model(self, part_number: str) -> bool:
@@ -159,70 +153,68 @@ class VisionController:
     def inspect(self, part_number: str) -> VisionResult:
         start = time.time()
 
-        if not self.config.get("vision_enabled", True):
+        def _error(msg: str) -> VisionResult:
             return VisionResult(
-                ok=False, judgement="ERROR", part_number=part_number,
-                error="Vision inspection disabled"
+                ok=False, judgement="ERROR", part_number=part_number, error=msg,
+                processing_time_ms=int((time.time() - start) * 1000),
             )
+
+        if not self.config.get("vision_enabled", True):
+            return _error("Vision inspection disabled")
 
         model = self._load_model(part_number)
         if model is None:
-            return VisionResult(
-                ok=False, judgement="ERROR", part_number=part_number,
-                error=f"No vision model found for '{part_number}'"
-            )
+            return _error(f"No vision model found for '{part_number}'")
 
         templates = model.get("templates", [])
         if not templates:
-            return VisionResult(
-                ok=False, judgement="ERROR", part_number=part_number,
-                error="Model contains no templates"
-            )
+            return _error("Model contains no templates")
 
         frame = self._capture_frame()
         if frame is None:
-            return VisionResult(
-                ok=False, judgement="ERROR", part_number=part_number,
-                error="Camera not available"
-            )
+            return _error("Camera not available")
 
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Test against all saved templates, take the best match
+
         best_score = -1.0
+        compared = 0
         for template in templates:
-            # Make sure template is not larger than frame
             if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
                 continue
-            
             res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
             best_score = max(best_score, max_val)
+            compared += 1
 
-        threshold = model.get("match_threshold", self.config.get("match_threshold", 0.75))
-        ok = best_score >= threshold
+        if compared == 0:
+            return _error(
+                f"Every template is larger than the captured frame "
+                f"({gray_frame.shape[1]}x{gray_frame.shape[0]}) — "
+                f"re-teach the part at the current camera resolution"
+            )
+
+        threshold = model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
         elapsed = int((time.time() - start) * 1000)
 
-        if ok:
+        if best_score >= threshold:
             return VisionResult(
                 ok=True, judgement="OK", part_number=part_number,
                 match_score=best_score, threshold=threshold,
-                processing_time_ms=elapsed
-            )
-        else:
-            return VisionResult(
-                ok=False, judgement="NG", part_number=part_number,
-                match_score=best_score, threshold=threshold,
                 processing_time_ms=elapsed,
-                error=f"No match found (score {best_score:.2f} < {threshold})"
             )
+        return VisionResult(
+            ok=False, judgement="NG", part_number=part_number,
+            match_score=best_score, threshold=threshold,
+            processing_time_ms=elapsed,
+            error=f"No match found (score {best_score:.2f} < {threshold})",
+        )
 
     # ── Model Building ──────────────────────────────────────────────────────
 
     def build_and_save_model(
-        self, part_number: str, images: List[np.ndarray], roi: dict, match_threshold: float = 0.75
+        self, part_number: str, images: List[np.ndarray], roi: dict,
+        match_threshold: float = DEFAULT_MATCH_THRESHOLD,
     ) -> str:
-        
         x, y, w, h = roi["x"], roi["y"], roi["width"], roi["height"]
         if w < 10 or h < 10:
             raise ValueError("ROI is too small for template matching.")
@@ -230,9 +222,12 @@ class VisionController:
         templates = []
         for img in images:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-            # Crop the template patch from the full image
-            patch = gray[y:y+h, x:x+w]
-            templates.append(patch)
+            if y + h > gray.shape[0] or x + w > gray.shape[1]:
+                raise ValueError(
+                    "ROI falls outside one of the reference images. "
+                    "All references must share the camera resolution."
+                )
+            templates.append(gray[y:y + h, x:x + w])
 
         model_cfg = {
             "part_number": part_number,
@@ -251,7 +246,7 @@ class VisionController:
             save_dict[f"template_{i}"] = t
         np.savez_compressed(model_path, **save_dict)
 
-        self.config["part_mapping"][part_number] = filename
+        self.config.setdefault("part_mapping", {})[part_number] = filename
         save_vision_config(self.config)
         self._model_cache.pop(part_number, None)
 
@@ -265,13 +260,13 @@ class VisionController:
         save_vision_config(self.config)
         self._model_cache.pop(part_number, None)
 
-    def get_status(self) -> str:
-        cam_index = self._get_cam_index()
-        if cam_index < 0:
-            return "NO_CAMERA"
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            return "CAMERA_ERROR"
-        ret, _ = cap.read()
-        cap.release()
-        return "READY" if ret else "CAMERA_ERROR"
+    def model_info(self, part_number: str) -> Optional[dict]:
+        """Metadata for a taught part, or None if it has no usable model."""
+        model = self._load_model(part_number)
+        if model is None:
+            return None
+        return {
+            "references": model.get("num_references", len(model.get("templates", []))),
+            "created": model.get("created", "—"),
+            "threshold": model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD)),
+        }

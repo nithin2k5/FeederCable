@@ -2,9 +2,9 @@
 vision_settings.py
 ===================
 Vision Settings configuration page.
-Strictly for Vision Model management (Contour Matching).
+Vision model management (Template Matching).
 Allows adding new parts (teaching the golden sample), drawing ROI,
-and testing the dataset.
+and testing the dataset against the live camera.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -25,9 +25,12 @@ except ImportError:
 
 def render(parent):
     """Render the Vision Settings configuration page."""
-    from vision_engine.vision_controller import VisionController, load_vision_config, save_vision_config
-    
+    from vision_engine.vision_controller import (
+        VisionController, load_vision_config, save_vision_config, DEFAULT_MATCH_THRESHOLD,
+    )
+
     v_cfg = load_vision_config()
+    ctrl = VisionController()
 
     style = ttk.Style()
     style.configure("CS.TLabelframe", background="black", foreground="white", bordercolor="#444")
@@ -41,7 +44,7 @@ def render(parent):
                         bg="#331a00", fg="#ff9800", font=("Arial", 10, "bold"), pady=6)
         warn.pack(fill="x", pady=(0, 8))
 
-    vision_lf = ttk.LabelFrame(content, text="👁  Vision Model Management  (Contour Matching)", style="CS.TLabelframe")
+    vision_lf = ttk.LabelFrame(content, text="👁  Vision Model Management  (Template Matching)", style="CS.TLabelframe")
     vision_lf.pack(fill="both", expand=True, padx=6, pady=(10, 4))
 
     v_inner = tk.Frame(vision_lf, bg="black", padx=10, pady=6)
@@ -54,13 +57,8 @@ def render(parent):
     tk.Label(settings_row, text="Match Threshold:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
     ent_threshold = tk.Entry(settings_row, bg="#111", fg="white", font=("Arial", 10),
                              insertbackground="white", width=6)
-    ent_threshold.insert(0, str(v_cfg.get("match_threshold", 0.15)))
+    ent_threshold.insert(0, str(v_cfg.get("match_threshold", DEFAULT_MATCH_THRESHOLD)))
     ent_threshold.pack(side="left", padx=(4, 16))
-
-    tk.Label(settings_row, text="Engine:", bg="black", fg="#999", font=("Arial", 9)).pack(side="left")
-    engine_var = tk.StringVar(value=v_cfg.get("engine", "template"))
-    engine_combo = ttk.Combobox(settings_row, textvariable=engine_var, values=["template", "sift", "yolo"], width=8, state="readonly")
-    engine_combo.pack(side="left", padx=(4, 16))
 
     # Vision enabled checkbox
     vision_enabled_var = tk.BooleanVar(value=v_cfg.get("vision_enabled", True))
@@ -74,105 +72,103 @@ def render(parent):
     table_frame = tk.Frame(v_inner, bg="black")
     table_frame.pack(fill="both", expand=True, pady=(0, 6))
 
-    cols = ("PART NUMBER", "DATASET/MODEL FILE", "REFERENCES", "CREATED")
+    cols = ("PART NUMBER", "MODEL FILE", "REFERENCES", "CREATED", "STATUS")
     tree = ttk.Treeview(table_frame, columns=cols, show="headings", height=4)
     sb = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=sb.set)
     sb.pack(side="right", fill="y")
     tree.pack(fill="both", expand=True)
 
-    tree.heading("PART NUMBER", text="PART NUMBER")
-    tree.heading("DATASET/MODEL FILE", text="DATASET/MODEL FILE")
-    tree.heading("REFERENCES", text="REFS")
-    tree.heading("CREATED", text="CREATED")
-    tree.column("PART NUMBER", width=150, anchor="center")
-    tree.column("DATASET/MODEL FILE", width=180, anchor="center")
-    tree.column("REFERENCES", width=60, anchor="center")
-    tree.column("CREATED", width=150, anchor="center")
+    for c, w in (("PART NUMBER", 130), ("MODEL FILE", 150), ("REFERENCES", 55),
+                 ("CREATED", 140), ("STATUS", 130)):
+        tree.heading(c, text="REFS" if c == "REFERENCES" else c)
+        tree.column(c, width=w, anchor="center")
+
+    _ORPHAN_PREFIX = "!unmapped:"
 
     def _refresh_model_table():
         tree.delete(*tree.get_children())
+        ctrl.reload_config()
         models_dir = os.path.join(os.path.dirname(__file__), "vision_models")
-        yolo_dir = os.path.join(os.path.dirname(__file__), "yolo_models")
-        
-        seen = set()
-        
-        # Scan templates and SIFT
+
+        mapped_files = set()
+        for pno, filename in sorted(ctrl.get_mapped_parts().items()):
+            mapped_files.add(filename)
+            info = ctrl.model_info(pno)
+            if info is None:
+                tree.insert("", "end", iid=pno,
+                            values=(pno, filename, "—", "—", "⚠ FILE MISSING"))
+            else:
+                tree.insert("", "end", iid=pno,
+                            values=(pno, filename, info["references"],
+                                    info["created"], "✓ Ready"))
+
+        # Model files on disk that no part number resolves to. Production cannot
+        # reach these, so surface them rather than letting them look installed.
         if os.path.exists(models_dir):
-            for f in os.listdir(models_dir):
-                if f.endswith(".npz"):
-                    pno = f.replace(".npz", "")
-                    tree.insert("", "end", iid=pno, values=(pno, f, "Template", "Ready"))
-                    seen.add(pno)
-                elif f.endswith(".ivmodel"):
-                    pno = f.replace(".ivmodel", "")
-                    tree.insert("", "end", iid=pno, values=(pno, f, "SIFT Feature", "Ready"))
-                    seen.add(pno)
-                    
-        # Scan YOLO models
-        if os.path.exists(yolo_dir):
-            for f in os.listdir(yolo_dir):
-                if f.endswith(".pt"):
-                    pno = f.replace(".pt", "")
-                    if pno not in seen:
-                        tree.insert("", "end", iid=pno, values=(pno, f, "YOLO Deep Learning", "Ready"))
-                        seen.add(pno)
+            for f in sorted(os.listdir(models_dir)):
+                if f.endswith(".npz") and f not in mapped_files:
+                    tree.insert("", "end", iid=_ORPHAN_PREFIX + f,
+                                values=("—", f, "—", "—", "⚠ NOT MAPPED"))
 
     _refresh_model_table()
+
+    def _selected_part():
+        """Selected part number, or None (with an explanation shown) if unusable."""
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Select", "Select a part from the table first.")
+            return None
+        if sel[0].startswith(_ORPHAN_PREFIX):
+            messagebox.showwarning(
+                "Not Mapped",
+                "This model file is not mapped to any part number, so production "
+                "cannot use it.\n\nRe-teach the part with 'Add New Part Dataset', "
+                "or map it from the Test Console camera settings.")
+            return None
+        return sel[0]
 
     # --- Row 3: Buttons ---
     btn_row = tk.Frame(v_inner, bg="black")
     btn_row.pack(fill="x")
 
     def _build_model():
-        engine = engine_var.get()
-        if engine == "sift":
-            from vision_engine_ui import open_builder_ui
-            cam_index = 0
-            open_builder_ui(parent, cam_index, 640, 480)
-            _refresh_model_table()
-        elif engine == "yolo":
-            messagebox.showinfo("YOLO Builder", "YOLO models must be trained externally.\nCollect 30-50 images, train using ultralytics CLI, and place the .pt file in the yolo_models/ directory.")
-        else:
-            _open_template_builder(parent, 640, 480, _refresh_model_table)
+        _, cam_w, cam_h = ctrl.cam_settings()
+        _open_template_builder(parent, cam_w, cam_h, _refresh_model_table)
 
     def _delete_model():
         sel = tree.selection()
         if not sel:
             messagebox.showwarning("Select", "Select a part from the table first.")
             return
+        if sel[0].startswith(_ORPHAN_PREFIX):
+            filename = sel[0][len(_ORPHAN_PREFIX):]
+            if not messagebox.askyesno("Confirm", f"Delete unmapped model file '{filename}'?"):
+                return
+            try:
+                os.remove(os.path.join(os.path.dirname(__file__), "vision_models", filename))
+            except OSError as e:
+                messagebox.showerror("Delete", str(e))
+                return
+            _refresh_model_table()
+            messagebox.showinfo("Deleted", f"'{filename}' deleted.")
+            return
+
         pno = sel[0]
         if not messagebox.askyesno("Confirm", f"Delete dataset for '{pno}'?"):
             return
-        from vision_engine.vision_controller import get_vision_controller
-        ctrl = get_vision_controller()
-        if hasattr(ctrl, "delete_model"):
-            ctrl.delete_model(pno)
-            _refresh_model_table()
-            messagebox.showinfo("Deleted", f"Dataset for '{pno}' deleted.")
-        else:
-            messagebox.showwarning("Delete", "Model deletion not supported from UI for this engine.")
+        ctrl.delete_model(pno)
+        _refresh_model_table()
+        messagebox.showinfo("Deleted", f"Dataset for '{pno}' deleted.")
 
     def _test_model():
-        sel = tree.selection()
-        if not sel:
-            messagebox.showwarning("Select", "Select a part from the table first.")
-            return
-        pno = sel[0]
-        
-        engine = engine_var.get()
-        if engine == "sift":
-            from vision_engine_ui import open_tester_ui
-            cam_index = 0
-            model_path = os.path.join(os.path.dirname(__file__), "vision_models", f"{pno}.ivmodel")
-            if not os.path.exists(model_path):
-                messagebox.showerror("Test", "SIFT model not found. Build it first.")
-                return
-            open_tester_ui(parent, cam_index, 640, 480, model_path)
+        pno = _selected_part()
+        if pno is None:
             return
 
-        from vision_engine.vision_controller import get_vision_controller
-        ctrl = get_vision_controller()
+        # Runs the exact inspect() path production uses, so a pass here means a
+        # pass on the line.
+        ctrl.reload_config()
         result = ctrl.inspect(pno)
         if result.judgement == "OK":
             messagebox.showinfo("Vision Test",
@@ -277,15 +273,21 @@ def render(parent):
 
     def _save():
         try:
-            v_cfg["vision_enabled"] = vision_enabled_var.get()
-            v_cfg["match_threshold"] = float(ent_threshold.get().strip())
-            v_cfg["engine"] = engine_var.get()
-            
-            save_vision_config(v_cfg)
+            threshold = float(ent_threshold.get().strip())
         except ValueError:
             messagebox.showerror("Validation", "Threshold must be a number.")
             return
+        if not 0.0 < threshold <= 1.0:
+            messagebox.showerror(
+                "Validation",
+                "Threshold must be between 0 and 1.\n\n"
+                "This is a normalized correlation score — 1.0 is a perfect match. "
+                "Values below ~0.5 will pass almost any frame.")
+            return
 
+        v_cfg["vision_enabled"] = vision_enabled_var.get()
+        v_cfg["match_threshold"] = threshold
+        save_vision_config(v_cfg)
         messagebox.showinfo("Saved", "Vision settings saved successfully.\nChanges apply on next test run.")
 
     btn_save = tk.Button(bottom, text="💾  Save Settings", bg="#0d47a1", fg="white",
@@ -295,7 +297,7 @@ def render(parent):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Contour Model Builder Dialog
+# Template Model Builder Dialog
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _open_template_builder(parent, width, height, on_done_callback):
@@ -446,16 +448,19 @@ def _open_template_builder(parent, width, height, on_done_callback):
             return
 
         try:
-            from vision_engine.vision_controller import VisionController
-            ctrl = VisionController()
-            path = ctrl.build_and_save_model(
+            from vision_engine.vision_controller import VisionController, DEFAULT_MATCH_THRESHOLD
+            build_ctrl = VisionController()
+            path = build_ctrl.build_and_save_model(
                 part_number=pno,
                 images=captured_images,
                 roi=roi,
-                match_threshold=float(ctrl.config.get("match_threshold", 0.75))
+                match_threshold=float(build_ctrl.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
             )
             messagebox.showinfo("Success",
-                f"Dataset saved successfully!\n\n" f"Part: {pno}\n" f"References: {len(captured_images)}\n" f"File: {os.path.basename(path)}", parent=win)
+                f"Dataset saved and mapped to part '{pno}'.\n\n"
+                f"References: {len(captured_images)}\n"
+                f"File: {os.path.basename(path)}\n"
+                f"Captured at: {width}x{height}", parent=win)
             win.destroy()
             if on_done_callback:
                 on_done_callback()
