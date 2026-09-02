@@ -83,6 +83,10 @@ class CameraStream:
         self._opened.wait(timeout)
         return self._open_ok
 
+    def is_alive(self) -> bool:
+        """False once the reader has given up on the device."""
+        return self._running
+
     def release(self):
         with _REGISTRY_LOCK:
             self._refs -= 1
