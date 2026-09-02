@@ -18,6 +18,9 @@ import numpy as np
 _REGISTRY_LOCK = threading.Lock()
 _STREAMS: dict = {}
 
+# ~1s of failed reads at the 20ms retry interval.
+_MAX_CONSECUTIVE_READ_FAILURES = 50
+
 
 class CameraStream:
     """Background reader for one camera index. Serves the most recent frame."""
@@ -53,13 +56,23 @@ class CameraStream:
             self._running = False
         self._opened.set()
 
+        # A device can open and then never deliver a frame (unplugged mid-session,
+        # held by another process). Give up rather than let a reader block until
+        # its timeout — an inspection stalling the test cycle is worse than a
+        # fast "camera unavailable".
+        consecutive_failures = 0
         while self._running:
             ret, frame = self._cap.read()
             if ret:
                 with self._frame_lock:
                     self._frame = frame
                     self._frames_read += 1
+                consecutive_failures = 0
             else:
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_CONSECUTIVE_READ_FAILURES:
+                    self._running = False
+                    break
                 time.sleep(0.02)
 
         if self._cap is not None:
