@@ -933,39 +933,58 @@ def render(parent):
     bottom = tk.Frame(content, bg="black", height=110)
     bottom.grid(row=1, column=0, sticky="ew", pady=(4, 0))
     bottom.grid_propagate(False); bottom.columnconfigure(0, weight=4); bottom.columnconfigure(1, weight=3); bottom.rowconfigure(0, weight=1)
-    io_lf = ttk.LabelFrame(bottom, text="IO Channel State", style="TC.TLabelframe")
+    io_lf = ttk.LabelFrame(bottom, text="PLC I/O Channel Status", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=1); io_inner.pack(fill="both", expand=True)
+    io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=4); io_inner.pack(fill="both", expand=True)
+
+    # ── ROW 1: PLC Outputs (M Coils) ──
+    out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 6))
+    tk.Label(out_row, text="OUTPUTS (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
     
-    tk.Label(io_inner, text="Relay ACK (X20~X27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
+    # Safety Relay
+    safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    safety_lbl.pack(side="left", padx=(0, 8))
+
+    # Contact Relays
+    io_contact_labels = []
+    for i in range(1, 9):
+        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl.pack(side="left", padx=1)
+        io_contact_labels.append(lbl)
+        
+    tk.Frame(out_row, bg="black", width=8).pack(side="left")
+
+    # HV Relays
+    io_ir_acw_labels = []
+    for i in range(1, 9):
+        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl.pack(side="left", padx=1)
+        io_ir_acw_labels.append(lbl)
+
+    # ── ROW 2: PLC Inputs (X Pins) ──
     in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 2))
+    tk.Label(in_row, text="INPUTS (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
+
+    # Safety ACK
+    x4_lbl = tk.Label(in_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x4_lbl.pack(side="left", padx=(0, 8))
+
+    # Contact OK (aligns under M30)
+    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x2_lbl.pack(side="left", padx=1)
+    
+    # Empty space to pad under M31-M37
+    for i in range(2, 9):
+        tk.Label(in_row, text="", bg="black", width=4).pack(side="left", padx=1)
+        
+    tk.Frame(in_row, bg="black", width=8).pack(side="left")
+
+    # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
         lbl = tk.Label(in_row, text=f"X{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
-    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
-    x2_lbl.pack(side="left", padx=(4, 1))
-
-    tk.Label(io_inner, text="IR/ACW (M20~M27)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
-    ir_row = tk.Frame(io_inner, bg="black"); ir_row.pack(anchor="w", pady=(0, 2))
-    io_ir_acw_labels = []
-    for i in range(1, 9):
-        lbl = tk.Label(ir_row, text=f"M{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
-        lbl.pack(side="left", padx=1)
-        io_ir_acw_labels.append(lbl)
-    safety_lbl = tk.Label(ir_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
-    safety_lbl.pack(side="left", padx=(4, 1))
-
-    tk.Label(io_inner, text="Contact (M30~M37)", bg="black", fg="#777", font=("Arial", 8, "bold")).pack(anchor="w")
-    contact_row = tk.Frame(io_inner, bg="black"); contact_row.pack(anchor="w", pady=(0, 2))
-    io_contact_labels = []
-    for i in range(1, 9):
-        lbl = tk.Label(contact_row, text=f"M{29+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
-        lbl.pack(side="left", padx=1)
-        io_contact_labels.append(lbl)
-    x4_lbl = tk.Label(contact_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
-    x4_lbl.pack(side="left", padx=(4, 1))
     
     def _set_io(io_list, ch_idx, active):
         try:
