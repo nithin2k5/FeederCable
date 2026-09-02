@@ -15,7 +15,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -41,6 +41,12 @@ class VisionResult:
     processing_time_ms: int = 0
     error: Optional[str] = None
 
+    # Diagnostics for the settings-page test view. Production ignores these;
+    # they exist so the UI can show *where* the match landed instead of only a
+    # number, without duplicating the matching logic outside inspect().
+    match_box: Optional[Tuple[int, int, int, int]] = None   # (x, y, w, h) in frame
+    frame: Optional[np.ndarray] = None                      # frame that was judged
+
 
 def _default_config() -> dict:
     return {
@@ -65,6 +71,7 @@ def load_vision_config() -> dict:
 def save_vision_config(cfg: dict):
     with open(_VISION_CFG_PATH, "w") as f:
         json.dump(cfg, f, indent=4)
+        f.write("\n")
 
 
 def get_vision_controller() -> "VisionController":
@@ -177,13 +184,16 @@ class VisionController:
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         best_score = -1.0
+        best_box = None
         compared = 0
         for template in templates:
             if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
                 continue
             res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(res)
-            best_score = max(best_score, max_val)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if max_val > best_score:
+                best_score = max_val
+                best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
             compared += 1
 
         if compared == 0:
@@ -201,12 +211,14 @@ class VisionController:
                 ok=True, judgement="OK", part_number=part_number,
                 match_score=best_score, threshold=threshold,
                 processing_time_ms=elapsed,
+                match_box=best_box, frame=frame,
             )
         return VisionResult(
             ok=False, judgement="NG", part_number=part_number,
             match_score=best_score, threshold=threshold,
             processing_time_ms=elapsed,
             error=f"No match found (score {best_score:.2f} < {threshold})",
+            match_box=best_box, frame=frame,
         )
 
     # ── Model Building ──────────────────────────────────────────────────────
@@ -265,8 +277,46 @@ class VisionController:
         model = self._load_model(part_number)
         if model is None:
             return None
+        templates = model.get("templates", [])
+        roi = model.get("roi") or {}
         return {
-            "references": model.get("num_references", len(model.get("templates", []))),
+            "references": model.get("num_references", len(templates)),
             "created": model.get("created", "—"),
             "threshold": model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD)),
+            "roi": roi,
+            "template_size": (
+                (templates[0].shape[1], templates[0].shape[0]) if templates else
+                (roi.get("width", 0), roi.get("height", 0))
+            ),
         }
+
+    def set_model_threshold(self, part_number: str, threshold: float):
+        """Rewrite a taught model's own threshold.
+
+        A model carries the threshold it was taught with and that value wins over
+        the global default at inspection time, so tuning a part has to reach into
+        the .npz rather than the config file.
+        """
+        path = self._model_path(part_number)
+        if path is None:
+            raise ValueError(f"No model file mapped to '{part_number}'.")
+
+        data = np.load(path, allow_pickle=True)
+        model_cfg = json.loads(str(data["config"]))
+        model_cfg["match_threshold"] = float(threshold)
+
+        save_dict = {"config": json.dumps(model_cfg)}
+        i = 0
+        while f"template_{i}" in data:
+            save_dict[f"template_{i}"] = data[f"template_{i}"]
+            i += 1
+        np.savez_compressed(path, **save_dict)
+        self._model_cache.pop(part_number, None)
+
+    def map_model_file(self, part_number: str, filename: str):
+        """Point a part number at an existing model file in vision_models/."""
+        if not os.path.exists(os.path.join(_MODELS_DIR, filename)):
+            raise ValueError(f"Model file '{filename}' not found.")
+        self.config.setdefault("part_mapping", {})[part_number] = filename
+        save_vision_config(self.config)
+        self._model_cache.pop(part_number, None)
