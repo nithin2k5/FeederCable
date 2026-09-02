@@ -209,6 +209,10 @@ class RoiView(tk.Canvas):
       drag inside the box  -> move it
       drag a handle        -> resize from that edge or corner
       Delete / Escape      -> clear
+
+    With a locked size (see lock_size) the handles disappear and a click drops a
+    box of that exact size where you point, so a box drawn on one image can be
+    repositioned onto the part in the next without changing what it crops.
     """
 
     HANDLE = 4          # handle half-size, screen px
@@ -236,6 +240,7 @@ class RoiView(tk.Canvas):
         self._placeholder = "No image"
         self._hint = None
         self._accent = OK_GREEN
+        self._locked_size = None    # (w, h) in image px, or None for free drawing
 
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<ButtonPress-1>", self._on_press)
@@ -277,6 +282,20 @@ class RoiView(tk.Canvas):
     def set_accent(self, color):
         self._accent = color
         self._redraw()
+
+    def lock_size(self, wh):
+        """Pin the box to (w, h), or pass None to allow free drawing again."""
+        self._locked_size = tuple(wh) if wh else None
+        self._redraw()
+
+    def _place_locked(self, cx, cy):
+        """A locked-size box centred on (cx, cy), kept inside the image."""
+        w, h = self._locked_size
+        ih, iw = self._image.shape[:2]
+        w, h = min(w, iw), min(h, ih)
+        x = min(max(cx - w // 2, 0), iw - w)
+        y = min(max(cy - h // 2, 0), ih - h)
+        return {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
 
     def get_roi(self):
         return dict(self._roi) if self._roi else None
@@ -372,7 +391,7 @@ class RoiView(tk.Canvas):
             self.create_line(cx, cy, cx + arm * sx, cy, fill=self._accent, width=4)
             self.create_line(cx, cy, cx, cy + arm * sy, fill=self._accent, width=4)
 
-        if self._editable:
+        if self._editable and self._locked_size is None:
             for _, hx, hy in self._handles(x0, y0, x1, y1):
                 self.create_rectangle(hx - self.HANDLE, hy - self.HANDLE,
                                       hx + self.HANDLE, hy + self.HANDLE,
@@ -401,9 +420,10 @@ class RoiView(tk.Canvas):
         if not self._roi or self._view is None:
             return None
         x0, y0, x1, y1 = self._roi_screen()
-        for name, hx, hy in self._handles(x0, y0, x1, y1):
-            if abs(sx - hx) <= self.GRAB and abs(sy - hy) <= self.GRAB:
-                return name
+        if self._locked_size is None:
+            for name, hx, hy in self._handles(x0, y0, x1, y1):
+                if abs(sx - hx) <= self.GRAB and abs(sy - hy) <= self.GRAB:
+                    return name
         if x0 <= sx <= x1 and y0 <= sy <= y1:
             return "move"
         return None
@@ -423,6 +443,14 @@ class RoiView(tk.Canvas):
         if hit:
             self._drag = {"mode": hit, "roi0": dict(self._roi),
                           "origin": self._to_image(event.x, event.y)}
+        elif self._locked_size is not None:
+            # Locked: drop the box where they pointed and let the same gesture
+            # nudge it, rather than making them draw a box that cannot resize.
+            pt = self._to_image(event.x, event.y)
+            self._roi = self._place_locked(*pt)
+            self._drag = {"mode": "move", "roi0": dict(self._roi), "origin": pt}
+            self._redraw()
+            self._notify()
         else:
             anchor = self._to_image(event.x, event.y)
             self._drag = {"mode": "new", "anchor": anchor, "cursor": anchor}
@@ -450,7 +478,7 @@ class RoiView(tk.Canvas):
 
         self._redraw()
         if mode != "new":
-            self._notify()
+            self._notify(final=False)
 
     def _resized(self, r0, mode, pt):
         left, top = r0["x"], r0["y"]
@@ -480,9 +508,11 @@ class RoiView(tk.Canvas):
         self._redraw()
         self._notify()
 
-    def _notify(self):
+    def _notify(self, final=True):
+        """`final` is False for the intermediate states of a drag, so listeners
+        can keep cheap readouts live but defer expensive redraws to the release."""
         if self._on_change:
-            self._on_change(self.get_roi())
+            self._on_change(self.get_roi(), final)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -620,12 +650,14 @@ def render(parent):
                             values=(pno, filename, "—", "—", "—", "—", "FILE MISSING"))
             else:
                 tw, th = info["template_size"]
+                sizes = ("%d x %d" % (tw, th) if info["uniform_templates"]
+                         else "varied (%d)" % len(set(info["template_sizes"])))
                 # A threshold this low passes almost any frame, so the part looks
                 # guarded while nothing is really being checked. Say so.
                 weak = info["threshold"] < 0.55
                 tree.insert("", "end", iid=pno, tags=("problem" if weak else "ready",),
                             values=(pno, filename, info["references"],
-                                    "%d x %d" % (tw, th),
+                                    sizes,
                                     "%.2f" % info["threshold"],
                                     str(info["created"]).replace("T", "  "),
                                     "Threshold too low" if weak else "Ready"))
@@ -1013,14 +1045,13 @@ def _open_teach_wizard(parent, cam, part_number=None):
     _dialog_header(
         win,
         "Re-teach “%s”" % part_number if reteach else "Teach New Part",
-        "Capture the good part a few times, then mark the region vision should look for.")
+        "Capture the good part a few times, then box it on every reference.")
 
     alive = {"v": True}
     refs = []                       # [{"img", "label", "thumb", "widget"}]
     sel = {"i": None}
     live = {"on": False}
     stream = {"s": None}
-    roi_state = {"roi": None}
     ref_size = {"wh": None}
 
     body = tk.Frame(win, bg=BG)
@@ -1036,7 +1067,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
     view_wrap = tk.Frame(left, bg=LINE)
     view_wrap.grid(row=0, column=0, sticky="nsew")
-    view = RoiView(view_wrap, on_change=lambda r: _roi_changed(r))
+    view = RoiView(view_wrap, on_change=lambda r, final: _roi_changed(r, final))
     view.pack(fill="both", expand=True, padx=1, pady=1)
 
     view_bar = tk.Frame(left, bg=BG)
@@ -1081,8 +1112,8 @@ def _open_teach_wizard(parent, cam, part_number=None):
     thumbs.pack(fill="x", pady=(6, 0))
 
     s3, b3 = _step(rail, 3, "Target box")
-    tk.Label(s3, text="Drag on the image to box the part. Drag the handles to adjust, "
-                      "or drag inside to move it.",
+    tk.Label(s3, text="Box the part on every reference. The box carries over to the "
+                      "next image — click to drop it on the part there.",
              bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 8))
     roi_row = tk.Frame(s3, bg=BG)
@@ -1093,6 +1124,27 @@ def _open_teach_wizard(parent, cam, part_number=None):
     btn_clear_roi = _btn(roi_row, "Clear", BTN_NEUTRAL, pady=3, font_size=8,
                          command=lambda: view.clear_roi())
     btn_clear_roi.pack(side="right")
+
+    lock_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(s3, text="  Same size on every reference", variable=lock_var,
+                   bg=BG, fg=TXT_DIM, selectcolor=FIELD, activebackground=BG,
+                   activeforeground=TXT, font=("Arial", 8), bd=0,
+                   highlightthickness=0, anchor="w", cursor="hand2",
+                   command=lambda: _apply_lock()).pack(fill="x", pady=(8, 0))
+    tk.Label(s3, text="Matching is not scale-invariant, so crops of different sizes "
+                      "are not directly comparable. Unlock only if the part changes "
+                      "size between references.",
+             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             justify="left", anchor="w").pack(fill="x", pady=(2, 0))
+
+    tk.Label(s3, text="TEMPLATES", bg=BG, fg=TXT_FAINT,
+             font=("Arial", 8, "bold"), anchor="w").pack(fill="x", pady=(10, 2))
+    tk.Label(s3, text="The actual pixels each reference contributes — a crop showing "
+                      "background means that box missed the part.",
+             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             justify="left", anchor="w").pack(fill="x", pady=(0, 6))
+    crops = tk.Frame(s3, bg=BG)
+    crops.pack(fill="x")
 
     # ── Footer: checklist + actions ────────────────────────────────────────
     tk.Frame(win, bg=LINE, height=1).pack(fill="x")
@@ -1114,12 +1166,15 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
     # ── Behaviour ──────────────────────────────────────────────────────────
 
+    def _boxed():
+        return [r for r in refs if r["roi"]]
+
     def _gates():
         pno = ent_pno.get().strip().upper()
         return {
             "Part number": bool(pno),
             "%d+ references" % MIN_REFS: len(refs) >= MIN_REFS,
-            "Target box": roi_state["roi"] is not None,
+            "Box on every reference": bool(refs) and len(_boxed()) == len(refs),
         }
 
     def _refresh_gates(*_a):
@@ -1146,14 +1201,29 @@ def _open_teach_wizard(parent, cam, part_number=None):
             else:
                 pno_note.config(text="", fg=TXT_FAINT)
 
-    def _roi_changed(roi):
-        roi_state["roi"] = roi
+    def _apply_lock():
+        """Pin the box size to the first box drawn, unless the operator opts out."""
+        first = next((r["roi"] for r in refs if r["roi"]), None)
+        if lock_var.get() and first:
+            view.lock_size((first["width"], first["height"]))
+        else:
+            view.lock_size(None)
+
+    def _roi_changed(roi, final=True):
+        i = sel["i"]
+        if i is not None and 0 <= i < len(refs):
+            refs[i]["roi"] = roi
         if roi:
             roi_lbl.config(text="%d × %d px" % (roi["width"], roi["height"]),
                            fg=OK_GREEN)
         else:
             roi_lbl.config(text="Not drawn", fg=WARN)
         _set_btn_enabled(btn_clear_roi, roi is not None)
+        if not final:
+            return          # mid-drag: the readout is live, the strips are not
+        _apply_lock()
+        _paint_thumbs()
+        _paint_crops()
         _refresh_gates()
 
     def _set_live(on):
@@ -1174,12 +1244,23 @@ def _open_teach_wizard(parent, cam, part_number=None):
             return
         live["on"] = False
         sel["i"] = i
+        # Seed from the nearest reference that already has a box, in either
+        # direction, so the operator nudges an existing box onto the part instead
+        # of redrawing it — whatever order they work through the images in.
+        if refs[i]["roi"] is None:
+            near = min((j for j in range(len(refs)) if refs[j]["roi"]),
+                       key=lambda j: abs(j - i), default=None)
+            if near is not None:
+                refs[i]["roi"] = dict(refs[near]["roi"])
         view.set_image(refs[i]["img"])
-        view.set_roi(roi_state["roi"], notify=False)
+        _apply_lock()
+        view.set_roi(refs[i]["roi"], notify=False)
         view.set_editable(True)
-        view.set_hint("Drag to box the part")
+        view.set_hint("Click to place the box on the part"
+                      if view._locked_size else "Drag to box the part")
         frame_lbl.config(text="REFERENCE %d of %d  ·  %s"
                               % (i + 1, len(refs), refs[i]["label"]))
+        _roi_changed(refs[i]["roi"])
         _paint_thumbs()
         _paint_buttons()
 
@@ -1200,8 +1281,10 @@ def _open_teach_wizard(parent, cam, part_number=None):
         for i, ref in enumerate(refs):
             r, c = divmod(i, 4)
             selected = (i == sel["i"])
-            cell = tk.Frame(thumbs, bg=OK_GREEN if selected else LINE,
-                            cursor="hand2")
+            # An unboxed reference is the one thing that blocks saving, so it is
+            # marked on the strip rather than only in the checklist.
+            edge = OK_GREEN if selected else (LINE if ref["roi"] else WARN)
+            cell = tk.Frame(thumbs, bg=edge, cursor="hand2")
             cell.grid(row=r, column=c, padx=(0, 6), pady=(0, 6))
             holder = tk.Frame(cell, bg="#07080b")
             holder.pack(padx=2, pady=2)
@@ -1209,11 +1292,40 @@ def _open_teach_wizard(parent, cam, part_number=None):
             lbl.pack()
             for w in (cell, holder, lbl):
                 w.bind("<Button-1>", lambda e, i=i: _show_ref(i))
-            x = tk.Label(cell, text="✕", bg=OK_GREEN if selected else LINE,
+            x = tk.Label(cell, text="✕", bg=edge,
                          fg="#07080b" if selected else TXT_DIM,
                          font=("Arial", 7, "bold"), cursor="hand2")
             x.place(relx=1.0, rely=0.0, anchor="ne")
             x.bind("<Button-1>", lambda e, i=i: _remove_ref(i))
+
+    def _crop(ref):
+        r = ref["roi"]
+        if not r:
+            return None
+        return ref["img"][r["y"]:r["y"] + r["height"], r["x"]:r["x"] + r["width"]]
+
+    def _paint_crops():
+        for w in crops.winfo_children():
+            w.destroy()
+        drawn = 0
+        for i, ref in enumerate(refs):
+            patch = _crop(ref)
+            if patch is None or patch.size == 0:
+                continue
+            r, c = divmod(drawn, 4)
+            drawn += 1
+            cell = tk.Frame(crops, bg=OK_GREEN if i == sel["i"] else LINE,
+                            cursor="hand2")
+            cell.grid(row=r, column=c, padx=(0, 6), pady=(0, 6))
+            holder = tk.Frame(cell, bg="#07080b", width=66, height=50)
+            holder.pack_propagate(False)
+            holder.pack(padx=2, pady=2)
+            photo, _ = _to_photo(patch, 62, 46)
+            ref["crop_photo"] = photo          # keep a reference alive
+            lbl = tk.Label(holder, image=photo, bd=0, bg="#07080b", cursor="hand2")
+            lbl.pack(expand=True)
+            for w in (cell, holder, lbl):
+                w.bind("<Button-1>", lambda e, i=i: _show_ref(i))
 
     def _add_ref(img, label):
         if len(refs) >= MAX_REFS:
@@ -1227,7 +1339,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         elif (w, h) != ref_size["wh"]:
             return False
         thumb, _ = _to_photo(img, 66, 50)
-        refs.append({"img": img, "label": label, "thumb": thumb})
+        refs.append({"img": img, "label": label, "thumb": thumb, "roi": None})
         return True
 
     def _remove_ref(i):
@@ -1236,7 +1348,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         refs.pop(i)
         if not refs:
             ref_size["wh"] = None
-            roi_state["roi"] = None
+            view.lock_size(None)
             view.set_image(None)
             view.set_placeholder("No reference images yet")
             sel["i"] = None
@@ -1245,6 +1357,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         else:
             _show_ref(min(i, len(refs) - 1))
         _paint_thumbs()
+        _paint_crops()
         _refresh_gates()
 
     def _capture():
@@ -1281,7 +1394,9 @@ def _open_teach_wizard(parent, cam, part_number=None):
                 skipped.append((os.path.basename(p),
                                 "%d×%d" % (img.shape[1], img.shape[0])))
         if refs:
-            _show_ref(len(refs) - 1)
+            # Land on the first reference still needing a box, so the operator
+            # works forward through them rather than starting at the end.
+            _show_ref(next((i for i, r in enumerate(refs) if not r["roi"]), 0))
         _refresh_gates()
         if skipped:
             need = "%d×%d" % ref_size["wh"] if ref_size["wh"] else "the camera resolution"
@@ -1295,15 +1410,52 @@ def _open_teach_wizard(parent, cam, part_number=None):
     btn_import.config(command=_import)
     btn_live.config(command=lambda: _set_live(True))
 
+    def _odd_crops():
+        """Indices of crops that don't look like the others.
+
+        A box left behind on background still produces a valid template, and
+        max-of-N scoring means one background template is enough to pass an empty
+        fixture. Correlating every crop against the first one catches that before
+        it reaches the line.
+        """
+        patches = [_crop(r) for r in refs]
+        if any(p is None or p.size == 0 for p in patches):
+            return []
+        grays = [cv2.cvtColor(p, cv2.COLOR_BGR2GRAY) if len(p.shape) == 3 else p
+                 for p in patches]
+        h, w = grays[0].shape[:2]
+        odd = []
+        for i, g in enumerate(grays[1:], start=1):
+            probe = cv2.resize(g, (w, h)) if g.shape[:2] != (h, w) else g
+            score = cv2.matchTemplate(grays[0], probe, cv2.TM_CCOEFF_NORMED)[0][0]
+            if score < 0.35:
+                odd.append((i, score))
+        return odd
+
     def _save():
         pno = ent_pno.get().strip().upper()
-        roi = roi_state["roi"]
-        if not (pno and roi and len(refs) >= MIN_REFS):
+        rois = [r["roi"] for r in refs]
+        if not (pno and len(refs) >= MIN_REFS and all(rois)):
             return
-        if roi["width"] < RoiView.MIN_ROI or roi["height"] < RoiView.MIN_ROI:
+        if any(r["width"] < RoiView.MIN_ROI or r["height"] < RoiView.MIN_ROI
+               for r in rois):
             messagebox.showerror("Target Box",
-                                 "The box is too small to match reliably.", parent=win)
+                                 "One of the boxes is too small to match reliably.",
+                                 parent=win)
             return
+
+        odd = _odd_crops()
+        if odd:
+            listing = "\n".join("  •  Reference %d  (similarity %.2f)" % (i + 1, s)
+                                for i, s in odd)
+            if not messagebox.askyesno(
+                    "Check the Boxes",
+                    "These crops do not resemble the first one:\n\n%s\n\n"
+                    "That usually means the box missed the part on those images. "
+                    "A template of plain background will match the empty fixture "
+                    "and pass it.\n\nSave anyway?" % listing, parent=win):
+                return
+
         if not reteach and pno in existing_parts and not messagebox.askyesno(
                 "Replace Dataset",
                 "“%s” already has a vision dataset.\n\nReplace it?" % pno, parent=win):
@@ -1320,7 +1472,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         try:
             ctrl.build_and_save_model(
                 part_number=pno, images=[r["img"] for r in refs],
-                roi=roi, match_threshold=float(threshold))
+                roi=rois, match_threshold=float(threshold))
         except Exception as e:
             messagebox.showerror("Save Failed", str(e), parent=win)
             return
@@ -1378,6 +1530,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
     _paint_buttons()
     _roi_changed(None)
+    _paint_crops()
     _refresh_gates()
     _tick()
 

@@ -4,8 +4,11 @@ vision_engine/vision_controller.py
 Webcam-based part verification using Template Matching (Normalized Cross-Correlation).
 
 Methodology:
-  - Teach: the operator uploads reference images and draws a ROI around the part.
-    The image patch inside the ROI becomes the 'Template'.
+  - Teach: the operator collects reference images and boxes the part in each one.
+    The image patch inside each box becomes a 'Template'. Boxes are per image,
+    because a single box applied to every reference crops background wherever the
+    part happened to sit elsewhere — and a background template matches the live
+    background, which would pass an empty fixture.
   - Inspect: capture a live frame and search for the Template across it with
     cv2.matchTemplate.
   - Result: if the best match score >= threshold the part is present and correct.
@@ -15,7 +18,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -224,27 +227,43 @@ class VisionController:
     # ── Model Building ──────────────────────────────────────────────────────
 
     def build_and_save_model(
-        self, part_number: str, images: List[np.ndarray], roi: dict,
+        self, part_number: str, images: List[np.ndarray],
+        roi: Union[dict, List[dict]],
         match_threshold: float = DEFAULT_MATCH_THRESHOLD,
     ) -> str:
-        x, y, w, h = roi["x"], roi["y"], roi["width"], roi["height"]
-        if w < 10 or h < 10:
-            raise ValueError("ROI is too small for template matching.")
+        """Crop one template per reference image and save them as the part's model.
+
+        `roi` is either a single box applied to every image, or one box per image.
+        Per-image boxes matter whenever the part is not rigidly fixtured: a shared
+        box lands on background in any reference where the part sat elsewhere, and
+        a background template matches the live background at a high score — which
+        would pass an empty fixture.
+        """
+        rois = list(roi) if isinstance(roi, (list, tuple)) else [roi] * len(images)
+        if len(rois) != len(images):
+            raise ValueError(
+                f"Got {len(rois)} regions for {len(images)} reference images."
+            )
 
         templates = []
-        for img in images:
+        for n, (img, r) in enumerate(zip(images, rois), start=1):
+            if r is None:
+                raise ValueError(f"Reference image {n} has no region marked.")
+            x, y, w, h = r["x"], r["y"], r["width"], r["height"]
+            if w < 10 or h < 10:
+                raise ValueError(f"Region on reference image {n} is too small.")
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
             if y + h > gray.shape[0] or x + w > gray.shape[1]:
                 raise ValueError(
-                    "ROI falls outside one of the reference images. "
-                    "All references must share the camera resolution."
+                    f"Region on reference image {n} falls outside it."
                 )
             templates.append(gray[y:y + h, x:x + w])
 
         model_cfg = {
             "part_number": part_number,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "roi": roi,
+            "rois": rois,
+            "roi": rois[0],          # older readers expect a single region
             "match_threshold": match_threshold,
             "num_references": len(templates),
         }
@@ -279,15 +298,18 @@ class VisionController:
             return None
         templates = model.get("templates", [])
         roi = model.get("roi") or {}
+        rois = model.get("rois") or ([roi] if roi else [])
+        sizes = ([(t.shape[1], t.shape[0]) for t in templates] if templates else
+                 [(r.get("width", 0), r.get("height", 0)) for r in rois])
         return {
             "references": model.get("num_references", len(templates)),
             "created": model.get("created", "—"),
             "threshold": model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD)),
             "roi": roi,
-            "template_size": (
-                (templates[0].shape[1], templates[0].shape[0]) if templates else
-                (roi.get("width", 0), roi.get("height", 0))
-            ),
+            "rois": rois,
+            "template_size": sizes[0] if sizes else (0, 0),
+            "template_sizes": sizes,
+            "uniform_templates": len(set(sizes)) <= 1,
         }
 
     def set_model_threshold(self, part_number: str, threshold: float):
