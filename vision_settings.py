@@ -1172,6 +1172,27 @@ def _open_teach_wizard(parent, cam, part_number=None):
     stream = {"s": None}
     ref_size = {"wh": None}
 
+    # ── Footer: checklist + actions ────────────────────────────────────────
+    # Packed before the body: the packer serves slaves in packing order, so a
+    # body packed first claims the height it wants and leaves the footer with
+    # the remainder — which collapsed these buttons to a sliver as soon as the
+    # reference strip grew. Claiming the footer's space up front keeps them
+    # whole no matter how many references are loaded.
+    foot = tk.Frame(win, bg=PANEL)
+    foot.pack(side="bottom", fill="x")
+    tk.Frame(win, bg=LINE, height=1).pack(side="bottom", fill="x")
+    foot_in = tk.Frame(foot, bg=PANEL)
+    foot_in.pack(fill="x", padx=18, pady=12)
+
+    checklist = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Consolas", 9),
+                         anchor="w", justify="left")
+    checklist.pack(side="left")
+
+    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=10, pady=8)
+    btn_save.pack(side="right")
+    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_cancel.pack(side="right", padx=(0, 8))
+
     body = tk.Frame(win, bg=BG)
     body.pack(fill="both", expand=True, padx=14, pady=12)
     body.columnconfigure(0, weight=1)
@@ -1199,7 +1220,9 @@ def _open_teach_wizard(parent, cam, part_number=None):
     # ── Right: steps ───────────────────────────────────────────────────────
     rail = tk.Frame(body, bg=BG, width=320)
     rail.grid(row=0, column=1, sticky="ns")
-    rail.grid_propagate(False)
+    # pack_propagate, not grid_propagate: the steps inside are packed, so the
+    # grid call was a no-op and the rail grew with every reference added.
+    rail.pack_propagate(False)
 
     s1, b1 = _step(rail, 1, "Part number")
     master_parts = _fetch_master_parts()
@@ -1266,22 +1289,6 @@ def _open_teach_wizard(parent, cam, part_number=None):
              justify="left", anchor="w").pack(fill="x", pady=(0, 6))
     crops = tk.Frame(s3, bg=BG)
     crops.pack(fill="x")
-
-    # ── Footer: checklist + actions ────────────────────────────────────────
-    tk.Frame(win, bg=LINE, height=1).pack(fill="x")
-    foot = tk.Frame(win, bg=PANEL)
-    foot.pack(fill="x")
-    foot_in = tk.Frame(foot, bg=PANEL)
-    foot_in.pack(fill="x", padx=18, pady=12)
-
-    checklist = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Consolas", 9),
-                         anchor="w", justify="left")
-    checklist.pack(side="left")
-
-    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=10, pady=8)
-    btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=10, pady=8)
-    btn_cancel.pack(side="right", padx=(0, 8))
 
     result = {"saved": None}
 
