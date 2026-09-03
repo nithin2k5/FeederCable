@@ -1547,6 +1547,56 @@ def render(parent):
         ent_jig.focus_set()
     ent_pno.bind("<Return>", _on_pno_enter)
 
+    def _vision_check_loaded_part(pno: str):
+        """Verify the just-loaded part in front of the camera, before testing starts.
+
+        Runs the same inspect() path the cycle uses, so the operator finds out the
+        part is wrong (or the camera is blind) while they can still act on it —
+        not after committing to a run. Off the UI thread: a capture takes ~1.5s
+        and must not freeze the console.
+        """
+        base = f"Part '{pno}' loaded ({state['num_channels']} ch)"
+
+        def _paint(suffix, fg, bg="#001830"):
+            scan_lbl.config(text=f"{base} — {suffix}", bg=bg, fg=fg)
+
+        if not vision_ctrl:
+            _paint("Ready", "#4caf50"); return
+
+        vision_ctrl.reload_config()
+        if not vision_ctrl.has_model(pno):
+            _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
+            _paint("NO VISION MODEL", "#e8a000"); return
+
+        _paint("👁  Checking vision…", "#e8a000")
+
+        def _work():
+            try:
+                result = vision_ctrl.inspect(pno)
+            except Exception as ex:
+                # Never leave the operator staring at "Checking vision…" forever.
+                result = VisionResult(ok=False, judgement="ERROR", part_number=pno,
+                                      error=str(ex))
+
+            def _apply():
+                # The operator may have moved on to another part while the
+                # capture was in flight — a stale verdict must not overwrite it.
+                if state.get("pno") != pno: return
+                state["vision_result"] = result.judgement
+                if result.judgement == "OK":
+                    _log(f"Vision OK: score={result.match_score:.4f} in {result.processing_time_ms}ms")
+                    _paint(f"Vision OK ({result.match_score:.2f})", "#4caf50")
+                elif result.judgement == "NG":
+                    _log(f"Vision NG: {result.error} (score={result.match_score:.4f})")
+                    _paint(f"VISION NG ({result.match_score:.2f}) — check the part", "#ff5555", bg="#220000")
+                else:
+                    _log(f"Vision ERROR: {result.error}")
+                    _paint(f"VISION ERROR — {result.error}", "#e8a000")
+            try: parent.after(0, _apply)
+            except Exception: pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
     def _on_jig_enter(event=None):
         jig = ent_jig.get().strip().upper()
         if not jig: return
@@ -1566,17 +1616,7 @@ def render(parent):
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
             _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
-            # Same check the test cycle makes before inspecting — surfaced here,
-            # right after the part loads, instead of only being discovered deep
-            # into a running test.
-            ready_text, ready_fg = f"Part '{pno}' loaded ({state['num_channels']} ch) — Ready", "#4caf50"
-            if vision_ctrl:
-                vision_ctrl.reload_config()
-                if not vision_ctrl.has_model(pno):
-                    _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
-                    ready_text = f"Part '{pno}' loaded ({state['num_channels']} ch) — NO VISION MODEL"
-                    ready_fg = "#e8a000"
-            scan_lbl.config(text=ready_text, bg="#001830", fg=ready_fg)
+            _vision_check_loaded_part(pno)
             btn_start.focus_set(); parent.after(500, _input_poll_start)
         else:
             btn_start.config(bg="#1a1a1a", fg="#444"); _clear_all()
