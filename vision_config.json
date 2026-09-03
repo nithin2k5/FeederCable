@@ -3,8 +3,6 @@
     "camera_source": "cam1",
     "match_threshold": 0.75,
     "part_mapping": {
-        "12345": "12345.npz",
-        "12345678": "12345678.npz",
         "123": "123.npz"
     }
 }
