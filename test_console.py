@@ -1565,9 +1565,20 @@ def render(parent):
         
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
-            _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white"); scan_lbl.config(text=f"Part '{pno}' loaded ({state['num_channels']} ch) — Ready", bg="#001830", fg="#4caf50")
+            _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
+            # Same check the test cycle makes before inspecting — surfaced here,
+            # right after the part loads, instead of only being discovered deep
+            # into a running test.
+            ready_text, ready_fg = f"Part '{pno}' loaded ({state['num_channels']} ch) — Ready", "#4caf50"
+            if vision_ctrl:
+                vision_ctrl.reload_config()
+                if not vision_ctrl.has_model(pno):
+                    _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
+                    ready_text = f"Part '{pno}' loaded ({state['num_channels']} ch) — NO VISION MODEL"
+                    ready_fg = "#e8a000"
+            scan_lbl.config(text=ready_text, bg="#001830", fg=ready_fg)
             btn_start.focus_set(); parent.after(500, _input_poll_start)
-        else: 
+        else:
             btn_start.config(bg="#1a1a1a", fg="#444"); _clear_all()
     ent_jig.bind("<Return>", _on_jig_enter)
 
