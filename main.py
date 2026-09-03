@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+import datetime
 
 # Import our screen modules
 import test_console
@@ -84,8 +85,14 @@ class App:
         self.lbl_title = tk.Label(self.header, text="", fg="#e8a000", bg="black", font=('Arial', 15, 'bold'))
         self.lbl_title.pack(side="left", padx=25)
         
-        # Datetime
-        tk.Label(self.header, text="15/07/2025  15:05:07", fg="white", bg="black", font=('Arial', 10)).pack(side="right", padx=15)
+        # Datetime — was a hardcoded, frozen string; now a live clock.
+        self.lbl_datetime = tk.Label(self.header, text="", fg="white", bg="black", font=('Arial', 10))
+        self.lbl_datetime.pack(side="right", padx=15)
+        self._tick_clock()
+
+    def _tick_clock(self):
+        self.lbl_datetime.config(text=datetime.datetime.now().strftime("%d/%m/%Y  %H:%M:%S"))
+        self.root.after(1000, self._tick_clock)
 
     def build_body(self):
         self.body = tk.Frame(self.root, bg="black")
