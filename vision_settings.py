@@ -112,6 +112,87 @@ def _probe_cameras(max_index: int = 6):
     return found
 
 
+# ── Part master (settingmaster is the one real source of truth for part
+#    numbers — every spec, barcode and DB record keys off it) ──────────────────
+
+def _fetch_master_parts():
+    """[(pno, pname), ...] from settingmaster, or None if it can't be reached.
+
+    vision_settings.py otherwise has zero dependency on the database — it only
+    ever talks to the camera and the filesystem — so this stays a soft,
+    best-effort lookup rather than a hard requirement: callers fall back to
+    free-text entry when it returns None instead of blocking teaching.
+    """
+    try:
+        import db
+        with db.get_cursor() as cur:
+            cur.execute("SELECT pno, pname FROM settingmaster ORDER BY pno")
+            return [(str(r[0]), r[1] or "") for r in cur.fetchall()]
+    except Exception:
+        return None
+
+
+def _part_choice_label(pno, pname):
+    return "%s — %s" % (pno, pname) if pname else pno
+
+
+class _PnoField:
+    """Part-number input: a locked-to-the-master combobox when settingmaster is
+    reachable, a free-text Entry when it isn't. Exposes the same get / set /
+    lock / focus_set / bind / pack surface either way so call sites don't need
+    to know which one is live underneath.
+    """
+
+    def __init__(self, parent, master_parts, font_size=13):
+        self._by_label = {}
+        self.is_master_backed = master_parts is not None
+        if master_parts:
+            labels = []
+            for pno, pname in master_parts:
+                label = _part_choice_label(pno, pname)
+                self._by_label[label] = pno
+                labels.append(label)
+            self.widget = ttk.Combobox(parent, state="readonly", values=labels,
+                                       font=("Consolas", font_size))
+        else:
+            self.widget = tk.Entry(parent, bg=FIELD, fg=TXT,
+                                   font=("Consolas", font_size),
+                                   insertbackground=TXT, relief="flat",
+                                   highlightthickness=1, highlightbackground=LINE,
+                                   highlightcolor=ACCENT)
+
+    def get(self) -> str:
+        raw = self.widget.get().strip()
+        return self._by_label.get(raw, raw).strip().upper()
+
+    def set(self, pno):
+        if self.is_master_backed:
+            label = next((l for l, p in self._by_label.items() if p == pno), pno)
+            self.widget.set(label)
+        else:
+            self.widget.delete(0, "end")
+            self.widget.insert(0, pno)
+
+    def lock(self):
+        if self.is_master_backed:
+            self.widget.config(state="disabled")
+        else:
+            self.widget.config(state="readonly", readonlybackground=FIELD, fg=TXT_DIM)
+
+    def focus_set(self):
+        self.widget.focus_set()
+
+    def pack(self, **kw):
+        self.widget.pack(**kw)
+
+    def bind(self, sequence, func):
+        self.widget.bind(sequence, func)
+        # A readonly combobox never emits KeyRelease from a pick — it emits
+        # its own selection event — so route both through the same handler.
+        if self.is_master_backed and sequence == "<KeyRelease>":
+            self.widget.bind("<<ComboboxSelected>>", func)
+
+
 # ── Small widget helpers ───────────────────────────────────────────────────────
 
 def _btn(parent, text, kind=BTN_NEUTRAL, command=None, width=None, font_size=9, pady=6):
@@ -679,6 +760,7 @@ def render(parent):
             tree.selection_set(remembered)
             tree.see(remembered)
         _on_select()
+        _refresh_coverage()
 
     def _selection():
         """(kind, value) where kind is 'part', 'orphan' or None."""
@@ -752,6 +834,42 @@ def render(parent):
             _refresh_camera()
 
     btn_cam_cfg.config(command=_configure_camera)
+
+    # ── Right rail: part coverage ────────────────────────────────────────────
+    # The parts table above audits datasets — files that exist and whether
+    # they're wired up. This audits the other direction: real parts in the
+    # master that the line will build with no vision dataset at all, which is
+    # the actual production exposure, not a stray file on disk.
+    cov_card = _card(rail, "Part Coverage", "parts with no vision dataset")
+    cov_card.pack(fill="x", pady=(12, 0))
+    cvb = cov_card.body
+    cov_summary = tk.Label(cvb, text="Checking…", bg=PANEL, fg=TXT_DIM,
+                           font=("Arial", 9, "bold"), anchor="w")
+    cov_summary.pack(fill="x")
+    cov_list = tk.Listbox(cvb, bg=PANEL_ALT, fg=WARN, font=("Consolas", 9),
+                          bd=0, relief="flat", highlightthickness=0, height=6,
+                          selectmode="browse", activestyle="none")
+    cov_list.pack(fill="x", pady=(6, 0))
+
+    def _refresh_coverage():
+        if not alive["page"]:
+            return
+        master_parts = _fetch_master_parts()
+        cov_list.delete(0, "end")
+        if master_parts is None:
+            cov_summary.config(text="Part master unreachable", fg=WARN)
+            cov_list.insert("end", "  Could not reach settingmaster.")
+            return
+        if not master_parts:
+            cov_summary.config(text="No parts in the master yet", fg=TXT_FAINT)
+            return
+        mapped = set(ctrl.get_mapped_parts())
+        missing = [pno for pno, _ in master_parts if pno not in mapped]
+        covered = len(master_parts) - len(missing)
+        cov_summary.config(text="%d of %d parts have vision" % (covered, len(master_parts)),
+                           fg=OK_GREEN if not missing else WARN)
+        for pno in missing:
+            cov_list.insert("end", "  " + pno)
 
     # ── Right rail: inspection settings ────────────────────────────────────
     insp_card = _card(rail, "Inspection")
@@ -1084,17 +1202,20 @@ def _open_teach_wizard(parent, cam, part_number=None):
     rail.grid_propagate(False)
 
     s1, b1 = _step(rail, 1, "Part number")
-    ent_pno = tk.Entry(s1, bg=FIELD, fg=TXT, font=("Consolas", 13),
-                       insertbackground=TXT, relief="flat",
-                       highlightthickness=1, highlightbackground=LINE,
-                       highlightcolor=ACCENT)
+    master_parts = _fetch_master_parts()
+    ent_pno = _PnoField(s1, master_parts)
     ent_pno.pack(fill="x", ipady=5)
     pno_note = tk.Label(s1, text="", bg=BG, fg=TXT_FAINT, font=("Arial", 8),
                         anchor="w", wraplength=270, justify="left")
     pno_note.pack(fill="x", pady=(4, 0))
+    if master_parts is None:
+        tk.Label(s1, text="Could not reach the part master — typed value won't "
+                          "be checked against settingmaster.",
+                 bg=BG, fg=WARN, font=("Arial", 8), wraplength=270,
+                 justify="left", anchor="w").pack(fill="x", pady=(2, 0))
     if reteach:
-        ent_pno.insert(0, part_number)
-        ent_pno.config(state="readonly", readonlybackground=FIELD, fg=TXT_DIM)
+        ent_pno.set(part_number)
+        ent_pno.lock()
         pno_note.config(text="Saving replaces the existing dataset for this part.",
                         fg=WARN)
     else:
@@ -1823,38 +1944,48 @@ def _open_threshold_dialog(parent, ctrl, part_number, current, anchor=None):
 
 
 def _prompt_part_number(parent, title, prompt, taken=()):
-    """Ask for a part number. Returns the upper-cased value, or None."""
+    """Ask for a part number, backed by the part master when it's reachable.
+
+    Returns the upper-cased value, or None.
+    """
     win = _dialog(parent, title, 430, 250)
     _dialog_header(win, title, prompt)
 
     body = tk.Frame(win, bg=BG)
     body.pack(fill="both", expand=True, padx=20, pady=18)
-    ent = tk.Entry(body, bg=FIELD, fg=TXT, font=("Consolas", 14),
-                   insertbackground=TXT, relief="flat", highlightthickness=1,
-                   highlightbackground=LINE, highlightcolor=ACCENT)
-    ent.pack(fill="x", ipady=6)
-    ent.focus_set()
+    master_parts = _fetch_master_parts()
+    field = _PnoField(body, master_parts, font_size=14)
+    field.pack(fill="x", ipady=6)
+    field.focus_set()
     note = tk.Label(body, text="", bg=BG, fg=WARN, font=("Arial", 8), anchor="w",
                     wraplength=380, justify="left")
     note.pack(fill="x", pady=(6, 0))
+    if master_parts is None:
+        note.config(text="Could not reach the part master — typed value won't "
+                         "be checked against settingmaster.")
 
     out = {"v": None}
 
     def _check(*_a):
-        note.config(text="“%s” is already mapped — saving will re-point it."
-                         % ent.get().strip().upper()
-                    if ent.get().strip().upper() in taken else "")
+        v = field.get()
+        if v and v in taken:
+            note.config(text="“%s” is already mapped — saving will re-point it." % v)
+        elif master_parts is None:
+            note.config(text="Could not reach the part master — typed value "
+                             "won't be checked against settingmaster.")
+        else:
+            note.config(text="")
 
     def _ok(event=None):
-        v = ent.get().strip().upper()
+        v = field.get()
         if not v:
             note.config(text="Enter a part number.")
             return
         out["v"] = v
         win.destroy()
 
-    ent.bind("<KeyRelease>", _check)
-    ent.bind("<Return>", _ok)
+    field.bind("<KeyRelease>", _check)
+    field.bind("<Return>", _ok)
     win.bind("<Escape>", lambda e: win.destroy())
 
     tk.Frame(win, bg=LINE, height=1).pack(fill="x")
