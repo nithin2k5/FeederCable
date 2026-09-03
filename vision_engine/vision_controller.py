@@ -160,7 +160,13 @@ class VisionController:
 
     # ── Production Inspection ───────────────────────────────────────────────
 
-    def inspect(self, part_number: str) -> VisionResult:
+    def inspect(self, part_number: str, frame: Optional[np.ndarray] = None) -> VisionResult:
+        """Judge one frame against a taught part.
+
+        By default captures a fresh frame from the configured camera — the
+        same path production uses. Pass `frame` to judge a still image
+        instead, without needing the part in front of a camera at all.
+        """
         start = time.time()
 
         def _error(msg: str) -> VisionResult:
@@ -180,9 +186,10 @@ class VisionController:
         if not templates:
             return _error("Model contains no templates")
 
-        frame = self._capture_frame()
         if frame is None:
-            return _error("Camera not available")
+            frame = self._capture_frame()
+            if frame is None:
+                return _error("Camera not available")
 
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -201,9 +208,9 @@ class VisionController:
 
         if compared == 0:
             return _error(
-                f"Every template is larger than the captured frame "
+                f"Every template is larger than this frame "
                 f"({gray_frame.shape[1]}x{gray_frame.shape[0]}) — "
-                f"re-teach the part at the current camera resolution"
+                f"re-teach the part at this resolution, or use a larger test image"
             )
 
         threshold = model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))

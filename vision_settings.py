@@ -1563,10 +1563,11 @@ def _draw_score_meter(canvas, score, threshold, verdict_color):
 
 
 def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
-    """Run the production inspect() path and show what the camera actually saw."""
+    """Run the production inspect() path against the live camera, or a still image."""
     win = _dialog(parent, "Inspection Test", 900, 660)
     _dialog_header(win, "Inspection Test — %s" % part_number,
-                   "Runs the same capture-and-match path the test cycle uses.")
+                   "Runs the same match path the test cycle uses — against the "
+                   "live camera, or a still image you supply.")
 
     verdict = tk.Frame(win, bg="#1c1f25", height=54)
     verdict.pack(fill="x")
@@ -1596,9 +1597,10 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     metrics = _card(rail, "Result")
     metrics.pack(fill="x")
     mb = metrics.body
+    m_source = _kv_row(mb, "Source", "Live camera", mono=False)
     m_score = _kv_row(mb, "Score", "—", mono=True)
     m_thresh = _kv_row(mb, "Threshold", "—", mono=True)
-    m_time = _kv_row(mb, "Capture", "—", mono=True)
+    m_time = _kv_row(mb, "Time", "—", mono=True)
     m_refs = _kv_row(mb, "References", "—", mono=True)
     m_tmpl = _kv_row(mb, "Template", "—", mono=True)
 
@@ -1618,11 +1620,14 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     btn_close.pack(side="right")
     btn_rerun = _btn(foot_in, "Run Again", BTN_PRIMARY, font_size=10, pady=8)
     btn_rerun.pack(side="right", padx=(0, 8))
+    btn_source = _btn(foot_in, "Test Image…", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_source.pack(side="right", padx=(0, 8))
     btn_tune = _btn(foot_in, "Adjust Threshold…", BTN_NEUTRAL, font_size=10, pady=8)
     btn_tune.pack(side="left")
 
     alive = {"v": True}
     last = {"result": None}
+    source = {"kind": "camera", "image": None, "label": None}
 
     def _run():
         if not alive["v"]:
@@ -1635,7 +1640,10 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         win.update_idletasks()
 
         ctrl.reload_config()
-        result = ctrl.inspect(part_number)
+        if source["kind"] == "image":
+            result = ctrl.inspect(part_number, frame=source["image"])
+        else:
+            result = ctrl.inspect(part_number)
         last["result"] = result
         if not alive["v"]:
             return
@@ -1650,6 +1658,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         verdict_note.config(text=result.error or "Part found", fg=color)
 
         info = ctrl.model_info(part_number) or {}
+        m_source.config(text="Live camera" if source["kind"] == "camera" else source["label"])
         m_score.config(text="%.4f" % result.match_score if result.match_score > 0 else "—",
                        fg=color)
         m_thresh.config(text="%.2f" % result.threshold if result.threshold else
@@ -1665,7 +1674,8 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
             if result.match_box:
                 x, y, bw, bh = result.match_box
                 view.set_roi({"x": x, "y": y, "width": bw, "height": bh}, notify=False)
-            view.set_hint("Best match found in this frame")
+            view.set_hint("Best match found in this " +
+                          ("image" if source["kind"] == "image" else "frame"))
         else:
             view.set_image(None)
             view.set_placeholder(result.error or "No frame captured")
@@ -1688,6 +1698,29 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         _set_btn_enabled(btn_rerun, True)
         _set_btn_enabled(btn_tune, bool(info))
 
+    def _pick_image():
+        if source["kind"] == "image":
+            # Already testing an image — the button toggles back to the camera.
+            source["kind"], source["image"], source["label"] = "camera", None, None
+            btn_source.config(text="Test Image…")
+            _run()
+            return
+
+        path = filedialog.askopenfilename(
+            parent=win, title="Select Test Image",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
+        if not path:
+            return
+        img = cv2.imread(path)
+        if img is None:
+            messagebox.showerror("Test Image", "Could not read that image file.", parent=win)
+            return
+        source["kind"] = "image"
+        source["image"] = img
+        source["label"] = os.path.basename(path)
+        btn_source.config(text="Use Live Camera")
+        _run()
+
     def _tune():
         info = ctrl.model_info(part_number)
         if info and _open_threshold_dialog(parent, ctrl, part_number,
@@ -1705,6 +1738,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         win.destroy()
 
     btn_rerun.config(command=_run)
+    btn_source.config(command=_pick_image)
     btn_tune.config(command=_tune)
     btn_close.config(command=_close)
     win.protocol("WM_DELETE_WINDOW", _close)
