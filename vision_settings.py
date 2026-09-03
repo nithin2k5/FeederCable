@@ -1218,11 +1218,43 @@ def _open_teach_wizard(parent, cam, part_number=None):
     btn_import = _btn(view_bar, "Import Files…", BTN_NEUTRAL)
 
     # ── Right: steps ───────────────────────────────────────────────────────
-    rail = tk.Frame(body, bg=BG, width=320)
-    rail.grid(row=0, column=1, sticky="ns")
+    # Scrollable: at a full dozen references the thumbnail and crop strips are
+    # taller than the window, and the crops are the one place an operator can
+    # see that a box missed the part — they have to stay reachable.
+    # 356 = the 34px step indent + a 4-wide thumbnail strip (304px) + the
+    # scrollbar, so the fourth column isn't sliced off.
+    rail_wrap = tk.Frame(body, bg=BG, width=356)
+    rail_wrap.grid(row=0, column=1, sticky="ns")
     # pack_propagate, not grid_propagate: the steps inside are packed, so the
     # grid call was a no-op and the rail grew with every reference added.
-    rail.pack_propagate(False)
+    rail_wrap.pack_propagate(False)
+
+    rail_canvas = tk.Canvas(rail_wrap, bg=BG, highlightthickness=0, bd=0)
+    rail_sb = ttk.Scrollbar(rail_wrap, orient="vertical", command=rail_canvas.yview)
+    rail_canvas.configure(yscrollcommand=rail_sb.set)
+    rail_sb.pack(side="right", fill="y")
+    rail_canvas.pack(side="left", fill="both", expand=True)
+
+    rail = tk.Frame(rail_canvas, bg=BG)
+    rail_window = rail_canvas.create_window((0, 0), window=rail, anchor="nw")
+
+    def _rail_resized(_event=None):
+        rail_canvas.configure(scrollregion=rail_canvas.bbox("all"))
+        rail_canvas.itemconfigure(rail_window, width=rail_canvas.winfo_width())
+
+    rail.bind("<Configure>", _rail_resized)
+    rail_canvas.bind("<Configure>", _rail_resized)
+
+    def _rail_wheel(event):
+        try:
+            rail_canvas.yview_scroll(-1 * (event.delta // 120), "units")
+        except Exception:
+            pass
+
+    # Bound while the pointer is over the rail rather than globally, so the
+    # wheel keeps working normally everywhere else.
+    rail_canvas.bind("<Enter>", lambda e: rail_canvas.bind_all("<MouseWheel>", _rail_wheel))
+    rail_canvas.bind("<Leave>", lambda e: rail_canvas.unbind_all("<MouseWheel>"))
 
     s1, b1 = _step(rail, 1, "Part number")
     master_parts = _fetch_master_parts()
@@ -1617,6 +1649,12 @@ def _open_teach_wizard(parent, cam, part_number=None):
             except Exception:
                 pass
             stream["s"] = None
+        try:
+            # Closing with the pointer over the rail would otherwise leave the
+            # wheel bound to a destroyed canvas.
+            rail_canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
         try:
             win.grab_release()
         except Exception:
