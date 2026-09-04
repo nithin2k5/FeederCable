@@ -474,7 +474,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         seq = 1
     return f"{prefix}{seq}"
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, printer_name: str = "EOLPRINTER"):
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
@@ -482,9 +482,11 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
             cur.execute("SELECT lblsel FROM settingmaster WHERE pno=%s", (pno,))
             row = cur.fetchone()
             if row: lbl_sel = row[0] or ""
-    except Exception as ex: 
+    except Exception as ex:
         print(f"DB Error getting label: {ex}")
-    prn_file = os.path.join(base, f"{lbl_sel}R.prn") if lbl_sel else ""
+    # nice1.prn = regular-part template, nice1R.prn = rework-part template.
+    suffix = "R" if is_rework else ""
+    prn_file = os.path.join(base, f"{lbl_sel}{suffix}.prn") if lbl_sel else ""
     if not prn_file or not os.path.exists(prn_file): prn_file = os.path.join(base, "TEMPPRN.prn")
     if not os.path.exists(prn_file): return
     now = datetime.datetime.now()
@@ -606,7 +608,7 @@ def render(parent):
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
-        "last_vision_result": None,
+        "last_vision_result": None, "is_rework": False,
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
@@ -647,6 +649,8 @@ def render(parent):
     tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
     result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 36, "bold"), anchor="center")
     result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
+    rework_lbl = tk.Label(result_inner, text="", bg="black", fg="#ff9100", font=("Arial", 11, "bold"), anchor="center")
+    rework_lbl.pack(fill="x", padx=4, pady=(0, 2))
     tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
     lot_lbl = tk.Label(result_inner, text="â€”", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
     lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
@@ -1098,6 +1102,33 @@ def render(parent):
             if x4_lbl.winfo_exists(): x4_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
+    _rework_blink = {"active": False, "on": False}
+
+    def _rework_blink_tick():
+        if not _rework_blink["active"]:
+            try: rework_lbl.config(text="")
+            except Exception: pass
+            return
+        _rework_blink["on"] = not _rework_blink["on"]
+        try:
+            rework_lbl.config(text="⚠  REWORK PART  ⚠" if _rework_blink["on"] else "")
+        except Exception: pass
+        _after(500, _rework_blink_tick)
+
+    def _set_rework_active(active: bool):
+        """X3 (rework select) is high -- this cable is a rework part, not a
+        fresh one. Drives the blinking badge and, at test time, which barcode
+        template gets printed (plain vs. the R-suffixed rework template).
+        """
+        was_active = _rework_blink["active"]
+        state["is_rework"] = active
+        _rework_blink["active"] = active
+        if active and not was_active:
+            _rework_blink["on"] = False
+            _after(0, _rework_blink_tick)
+        elif not active:
+            _after(0, lambda: rework_lbl.config(text=""))
+
     def _clear_all_io_indicators():
         """Force every per-channel output/ack indicator back to its resting
         (off) look immediately, instead of waiting for the background poll
@@ -1521,7 +1552,16 @@ def render(parent):
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
         _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, scan_entry_frame.pack_forget)
         n_ch = state["num_channels"]; _log("── Test Started ──")
-        
+
+        # Re-check X3 (rework select) fresh for this cycle -- the background
+        # poll that normally tracks it is stopped for the whole test, and
+        # this flag decides which barcode template gets printed at the end.
+        if _plc_open():
+            is_rework = plc.is_rework_on()
+            plc.close()
+            _log(f"X3 (Rework select): {'ON — rework part' if is_rework else 'OFF — regular part'}")
+            _after(0, lambda a=is_rework: _set_rework_active(a))
+
         # --- VISION VERIFICATION (Contour Matching) ---
         _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
@@ -1578,7 +1618,7 @@ def render(parent):
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
             _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
-            threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"]), daemon=True).start()
+            threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
             _after(5000, _show_scan_entry)
         else:
             _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL â€” Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
@@ -1636,12 +1676,14 @@ def render(parent):
             m28_state = plc.read_coil(0x081C)
             _after(0, lambda a=m28_state: _set_safety_indicator(a))
             
-            # Sync X0-X7 to get X0 (START), X2 (Contact OK) and X4 (Safety ACK)
+            # Sync X0-X7 to get X0 (START), X2 (Contact OK), X3 (Rework select) and X4 (Safety ACK)
             x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
             pressed = x0_7_bits[0] if x0_7_bits else False
             x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
+            x3_state = x0_7_bits[3] if x0_7_bits and len(x0_7_bits) > 3 else False
             x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
             _after(0, lambda a=x2_state: _set_x2_indicator(a))
+            _after(0, lambda a=x3_state: _set_rework_active(a))
             _after(0, lambda a=x4_state: _set_x4_indicator(a))
         except Exception: pass
         finally: plc.close()
