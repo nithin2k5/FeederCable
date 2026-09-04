@@ -1003,6 +1003,17 @@ def render(parent):
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
     io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=4); io_inner.pack(fill="both", expand=True)
 
+    # ── ROW 0: channel-number header, aligned with the M/X columns below ──
+    # so a lit cell reads as "channel N", not "go look up what M32 means".
+    hdr_row = tk.Frame(io_inner, bg="black"); hdr_row.pack(anchor="w")
+    tk.Label(hdr_row, text="CH #:", bg="black", fg="#555", font=("Arial", 7), width=11, anchor="w").pack(side="left")
+    tk.Label(hdr_row, text="", bg="black", width=4).pack(side="left", padx=(0, 8))  # spacer over Safety/ACK cell
+    for ch in range(1, 9):
+        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=4).pack(side="left", padx=1)
+    tk.Frame(hdr_row, bg="black", width=8).pack(side="left")
+    for ch in range(1, 9):
+        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=4).pack(side="left", padx=1)
+
     # ── ROW 1: PLC Outputs (M Coils) ──
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 6))
     tk.Label(out_row, text="OUTPUTS (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
@@ -1053,13 +1064,15 @@ def render(parent):
         io_in_labels.append(lbl)
     
     def _set_io(io_list, ch_idx, active):
+        # Off = neutral dim gray, not red -- red reads as a fault, but "off" is
+        # this panel's normal resting state between/after tests, not an alarm.
         try:
-            if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists(): io_list[ch_idx].config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
+            if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists(): io_list[ch_idx].config(bg="#1b5e20" if active else "#1a1a1a", fg="#76ff03" if active else "#666")
         except Exception: pass
-        
+
     def _set_safety_indicator(active):
         try:
-            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#1b5e20" if active else "#b71c1c", fg="#76ff03" if active else "#ff5555")
+            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#1b5e20" if active else "#1a1a1a", fg="#76ff03" if active else "#666")
         except Exception: pass
 
     def _set_x2_indicator(active):
@@ -1071,6 +1084,19 @@ def render(parent):
         try:
             if x4_lbl.winfo_exists(): x4_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
         except Exception: pass
+
+    def _clear_all_io_indicators():
+        """Force every per-channel output/ack indicator back to its resting
+        (off) look immediately, instead of waiting for the background poll
+        loop to notice the PLC is idle -- that gap is exactly the window
+        where a just-finished test still shows stale "glowing" pins, most
+        visibly after a PASS since polling doesn't resume until the operator
+        scans the label.
+        """
+        for i in range(8):
+            _after(0, lambda idx=i: (_set_io(io_contact_labels, idx, False),
+                                      _set_io(io_ir_acw_labels, idx, False),
+                                      _set_io(io_in_labels, idx, False)))
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=1, sticky="nsew")
     log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
@@ -1350,7 +1376,7 @@ def render(parent):
                 _after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+                for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
             _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1376,7 +1402,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
+                    _after(0, lambda idx=ch-1: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
                     time.sleep(0.05)
             _log(f"IR (Individual): {'PASS' if all_pass else 'FAIL'}")
 
@@ -1428,7 +1454,7 @@ def render(parent):
                 _after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+                for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
             _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1454,7 +1480,7 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
+                    _after(0, lambda idx=ch-1: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
                     time.sleep(0.05)
             _log(f"ACW (Individual): {'PASS' if all_pass else 'FAIL'}")
 
@@ -1468,7 +1494,7 @@ def render(parent):
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             _after(0, lambda a=x4_ack: _set_x4_indicator(a))
             plc.close()
-        for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+        for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
         _after(0, lambda: _set_safety_indicator(True))
         _after(0, lambda p=all_pass: _set_row_result("ACW", p))
         return all_pass, acw_res
@@ -1512,6 +1538,7 @@ def render(parent):
         if _modbus_ok:
             if not _run_contact_ch1_check():
                 _log("Contact NOT OK (X2) — aborting"); _after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); _after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); _after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
+                _clear_all_io_indicators()
                 state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
@@ -1522,11 +1549,13 @@ def render(parent):
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
     def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict):
+        _clear_all_io_indicators()
         if _plc_open():
             _log("Resetting all PLC pins (Contact + IR/ACW + Safety Relay)...")
             plc.reset_all_channels()
             plc.safety_relay_to_hv() # Resets M28 to False (default state)
             plc.close()
+        _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
         elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
