@@ -46,7 +46,7 @@ def render(parent):
 
     filter_bar = tk.Frame(content, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
     filter_bar.pack(fill="x", padx=10, pady=5)
-    filter_inner = tk.Frame(filter_bar, bg=bg_color, pady=15); filter_inner.pack(expand=True) 
+    filter_inner = tk.Frame(filter_bar, bg=bg_color, pady=15); filter_inner.pack(side="left", expand=True)
 
     def mk_lbl(parent, txt):
         return tk.Label(parent, text=txt, bg=bg_color, fg="white", font=('Arial', 9, 'bold'))
@@ -83,41 +83,37 @@ def render(parent):
     ent_end.grid(row=1, column=3, sticky="w", padx=(0, 30), pady=5)
 
     btn_frame = tk.Frame(filter_inner, bg=bg_color); btn_frame.grid(row=0, column=4, rowspan=2, padx=10)
-    
-    table_outer = tk.Frame(content, bg=bg_color)
-    table_outer.pack(fill="both", expand=True, padx=10, pady=(5, 10))
-    table_outer.config(bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
-
-    tree_outer = tk.Frame(table_outer, bg=bg_color)
-    tree_outer.pack(side="left", fill="both", expand=True)
 
     # Vision image preview -- shows the frame that was judged (match box already
     # drawn on it, saved by test_console at PASS-with-vision-OK time), for
-    # whichever row is selected. Lives inside the same outer box as the table,
-    # separated by a thin divider rather than being its own separate box.
-    tk.Frame(table_outer, bg=border_color, width=1).pack(side="left", fill="y")
-    PREVIEW_W, PREVIEW_H = 174, 140  # fixed image box -- keeps the thumbnail predictable and centered
-    preview_outer = tk.Frame(table_outer, bg=bg_color, width=190)
-    preview_outer.pack(side="left", fill="y")
+    # whichever row is selected. Lives in the same filter bar box as Part
+    # Number / Result / Start Date / End Date, on the right.
+    tk.Frame(filter_bar, bg=border_color, width=1).pack(side="left", fill="y", pady=8)
+    PREVIEW_W, PREVIEW_H = 150, 100  # fixed image box -- keeps the thumbnail predictable and centered
+    preview_outer = tk.Frame(filter_bar, bg=bg_color, width=170)
+    preview_outer.pack(side="left", fill="y", padx=(10, 10), pady=8)
     preview_outer.pack_propagate(False)
-    tk.Label(preview_outer, text="VISION IMAGE", bg=bg_color, fg="#777", font=('Arial', 9, 'bold')).pack(fill="x", padx=8, pady=(8, 6))
+    tk.Label(preview_outer, text="VISION IMAGE", bg=bg_color, fg="#777", font=('Arial', 9, 'bold')).pack(fill="x", pady=(0, 4))
     img_box = tk.Frame(preview_outer, bg="#05080a", width=PREVIEW_W, height=PREVIEW_H)
-    img_box.pack(padx=8)
+    img_box.pack()
     img_box.pack_propagate(False)
     preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 8),
                                text="Select a row to view its vision image", wraplength=PREVIEW_W - 16, justify="center")
     preview_img_lbl.pack(fill="both", expand=True)
-    preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 9),
-                               wraplength=170, justify="center", anchor="center")
-    preview_lot_lbl.pack(fill="x", padx=8, pady=8)
+    preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 8),
+                               wraplength=PREVIEW_W, justify="center", anchor="center")
+    preview_lot_lbl.pack(fill="x", pady=(4, 0))
+
+    table_outer = tk.Frame(content, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    table_outer.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
     cols = ("SNO", "DATE", "TIME", "CUSTOMER NAME", "MODEL", "P/NUMBER", "P/NAME", "LOTNO", "ALC", "RESULT", "CHANNEL", "IR_VAL", "ACW_VAL", "CONTACT")
-    tree = ttk.Treeview(tree_outer, columns=cols, show="headings")
-    hsb = ttk.Scrollbar(tree_outer, orient="horizontal", command=tree.xview)
+    tree = ttk.Treeview(table_outer, columns=cols, show="headings")
+    hsb = ttk.Scrollbar(table_outer, orient="horizontal", command=tree.xview)
     tree.configure(xscrollcommand=hsb.set)
     hsb.pack(side="bottom", fill="x")
 
-    vsb = ttk.Scrollbar(tree_outer, orient="vertical", command=tree.yview)
+    vsb = ttk.Scrollbar(table_outer, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=vsb.set)
     vsb.pack(side="right", fill="y")
     tree.pack(side="top", fill="both", expand=True)
