@@ -505,12 +505,20 @@ class CameraFeed:
         self._cap = None
         self._running = False
         self._photo = None
+        self._paused = False
 
     def start(self):
         if not _cv2_ok or not _pil_ok or self._cam_index < 0:
             return
         self._running = True
         threading.Thread(target=self._open_camera, daemon=True).start()
+
+    def pause(self):
+        """Freeze the live feed so a still (e.g. a vision-check overlay) stays put."""
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
 
     def _open_camera(self):
         self._cap = cv2.VideoCapture(self._cam_index, cv2.CAP_DSHOW)
@@ -526,6 +534,12 @@ class CameraFeed:
 
     def _stream(self):
         if not self._running or self._cap is None or not self._cap.isOpened():
+            return
+        if self._paused:
+            try:
+                self._label.after(33, self._stream)
+            except Exception:
+                self.stop()
             return
         ret, frame = self._cap.read()
         if ret:
@@ -638,6 +652,9 @@ def render(parent):
     cam_frame = tk.Frame(right_panel, bg="black")
     cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
     _cam_feeds = []  # track for cleanup
+    cam_labels = {}       # cam_id -> preview Label
+    cam_feeds_by_id = {}  # cam_id -> CameraFeed (only when a live feed is running)
+    cam_default_text = {}  # cam_id -> the label's placeholder text
 
 
     def _open_camera_popup(e, cam_id):
@@ -776,11 +793,14 @@ def render(parent):
         lbl.pack(fill="both", expand=True)
         container.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
         lbl.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
+        cam_labels[cam_id] = lbl
+        cam_default_text[cam_id] = lbl.cget("text")
 
         if enabled and cam_index >= 0 and _cv2_ok and _pil_ok:
             feed = CameraFeed(lbl, cam_index, display_w=208, display_h=113)
             feed.start()
             _cam_feeds.append(feed)
+            cam_feeds_by_id[cam_id] = feed
 
         return container, lbl
 
@@ -1410,6 +1430,7 @@ def render(parent):
                 # Run inspection (capture frame + contour match)
                 vision_result = vision_ctrl.inspect(state["pno"])
                 state["vision_result"] = vision_result.judgement
+                parent.after(0, lambda r=vision_result: _show_vision_frame(r))
 
                 if vision_result.judgement == "ERROR":
                     _log(f"Vision ERROR: {vision_result.error}. Skipping vision.")
@@ -1547,6 +1568,63 @@ def render(parent):
         ent_jig.focus_set()
     ent_pno.bind("<Return>", _on_pno_enter)
 
+    _overlay_jobs = {}  # cam_id -> pending parent.after() id for reverting the overlay
+
+    def _restore_cam(cam_id):
+        lbl = cam_labels.get(cam_id)
+        if lbl is None:
+            return
+        feed = cam_feeds_by_id.get(cam_id)
+        if feed:
+            feed.resume()
+        else:
+            try:
+                lbl.config(image="", text=cam_default_text.get(cam_id, ""))
+                lbl.image = None
+            except Exception:
+                pass
+
+    def _show_vision_frame(result):
+        """Paint the frame vision judged, with the detected match boxed on it,
+        into that camera's preview panel — so the operator sees *what* the
+        matcher found, not just a score. Reverts to the live feed a few
+        seconds later.
+        """
+        if not (_cv2_ok and _pil_ok) or result.frame is None or not vision_ctrl:
+            return
+        cam_id = 2 if vision_ctrl.config.get("camera_source", "cam1") == "cam2" else 1
+        lbl = cam_labels.get(cam_id)
+        if lbl is None:
+            return
+
+        colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
+        color = colors.get(result.judgement, (0, 165, 255))
+        frame = result.frame.copy()
+        if result.match_box:
+            x, y, w, h = result.match_box
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+            cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",
+                        (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+
+        feed = cam_feeds_by_id.get(cam_id)
+        if feed:
+            feed.pause()
+
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            rgb = cv2.resize(rgb, (208, 113))
+            photo = ImageTk.PhotoImage(Image.fromarray(rgb))
+            lbl.config(image=photo, text="")
+            lbl.image = photo
+        except Exception:
+            return
+
+        prev_job = _overlay_jobs.get(cam_id)
+        if prev_job is not None:
+            try: parent.after_cancel(prev_job)
+            except Exception: pass
+        _overlay_jobs[cam_id] = parent.after(4000, lambda cid=cam_id: _restore_cam(cid))
+
     def _vision_check_loaded_part(pno: str):
         """Verify the just-loaded part in front of the camera, before testing starts.
 
@@ -1583,6 +1661,7 @@ def render(parent):
                 # capture was in flight — a stale verdict must not overwrite it.
                 if state.get("pno") != pno: return
                 state["vision_result"] = result.judgement
+                _show_vision_frame(result)
                 if result.judgement == "OK":
                     _log(f"Vision OK: score={result.match_score:.4f} in {result.processing_time_ms}ms")
                     _paint(f"Vision OK ({result.match_score:.2f})", "#4caf50")
