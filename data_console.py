@@ -5,6 +5,12 @@ import datetime
 import csv
 import os
 
+try:
+    from PIL import Image, ImageTk
+    _pil_ok = True
+except ImportError:
+    _pil_ok = False
+
 import db
 
 def _get_conn():
@@ -75,32 +81,94 @@ def render(parent):
     
     btn_frame = tk.Frame(filter_inner, bg=bg_color); btn_frame.grid(row=0, column=6, rowspan=2, padx=10)
     
-    table_outer = tk.Frame(content, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    table_outer = tk.Frame(content, bg=bg_color)
     table_outer.pack(fill="both", expand=True, padx=10, pady=(5, 10))
-    
+
+    # Vision image preview -- shows the frame that was judged (match box already
+    # drawn on it, saved by test_console at PASS-with-vision-OK time), for
+    # whichever row is selected. Sits above the table, full width, since these
+    # frames are landscape (camera-shaped) and a narrow side panel squeezed them.
+    preview_outer = tk.Frame(table_outer, bg=bg_color, height=200, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    preview_outer.pack(side="top", fill="x", pady=(0, 6))
+    preview_outer.pack_propagate(False)
+    preview_inner = tk.Frame(preview_outer, bg=bg_color)
+    preview_inner.pack(fill="both", expand=True, padx=8, pady=8)
+    preview_img_lbl = tk.Label(preview_inner, bg="#05080a", fg="#555", font=('Arial', 9),
+                               text="Select a row to view its vision image", wraplength=340, justify="center")
+    preview_img_lbl.pack(side="left", fill="both", expand=True)
+    preview_lot_lbl = tk.Label(preview_inner, bg=bg_color, fg="#999", font=('Consolas', 9),
+                               width=26, justify="left", anchor="n")
+    preview_lot_lbl.pack(side="left", fill="y", padx=(10, 0))
+
+    tree_outer = tk.Frame(table_outer, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    tree_outer.pack(side="top", fill="both", expand=True)
+
     cols = ("SNO", "DATE", "TIME", "CUSTOMER NAME", "MODEL", "P/NUMBER", "P/NAME", "LOTNO", "ALC", "RESULT", "CHANNEL", "IR_VAL", "ACW_VAL", "CONTACT")
-    tree = ttk.Treeview(table_outer, columns=cols, show="headings")
-    hsb = ttk.Scrollbar(table_outer, orient="horizontal", command=tree.xview)
+    tree = ttk.Treeview(tree_outer, columns=cols, show="headings")
+    hsb = ttk.Scrollbar(tree_outer, orient="horizontal", command=tree.xview)
     tree.configure(xscrollcommand=hsb.set)
     hsb.pack(side="bottom", fill="x")
-    
-    vsb = ttk.Scrollbar(table_outer, orient="vertical", command=tree.yview)
+
+    vsb = ttk.Scrollbar(tree_outer, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=vsb.set)
     vsb.pack(side="right", fill="y")
     tree.pack(side="top", fill="both", expand=True)
-    
+
     col_widths = {"SNO": 40, "DATE": 80, "TIME": 70, "CUSTOMER NAME": 100, "MODEL": 80, "P/NUMBER": 100, "P/NAME": 100, "LOTNO": 140, "ALC": 50, "RESULT": 60, "CHANNEL": 60, "IR_VAL": 70, "ACW_VAL": 70, "CONTACT": 70}
     for col in cols: tree.heading(col, text=col); tree.column(col, width=col_widths.get(col, 80), anchor="center")
 
+    row_images = {}  # tree item id -> visionimg path from the DB (or "")
+    preview_photo = {"img": None}  # keep a reference so Tk doesn't garbage-collect it
+
+    def _show_preview(path, lot_no=""):
+        preview_lot_lbl.config(text=f"LOT {lot_no}" if lot_no else "")
+        if not path:
+            preview_photo["img"] = None
+            preview_img_lbl.config(image="", text="No vision image for this record", fg="#555")
+            return
+        if not _pil_ok:
+            preview_photo["img"] = None
+            preview_img_lbl.config(image="", text="Pillow not installed -- can't preview images", fg="#e8a000")
+            return
+        if not os.path.exists(path):
+            preview_photo["img"] = None
+            preview_img_lbl.config(image="", text=f"Image file missing:\n{os.path.basename(path)}", fg="#ff5555")
+            return
+        try:
+            img = Image.open(path)
+            box_w = max(preview_img_lbl.winfo_width(), 220)
+            box_h = max(preview_img_lbl.winfo_height(), 165)
+            img.thumbnail((box_w, box_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            preview_photo["img"] = photo  # hold a reference
+            preview_img_lbl.config(image=photo, text="")
+        except Exception as ex:
+            preview_photo["img"] = None
+            preview_img_lbl.config(image="", text=f"Couldn't open image:\n{ex}", fg="#ff5555")
+
+    def _on_row_select(event=None):
+        sel = tree.selection()
+        if not sel:
+            _show_preview("")
+            return
+        iid = sel[0]
+        vals = tree.item(iid)["values"]
+        lot_no = vals[7] if len(vals) > 7 else ""
+        _show_preview(row_images.get(iid, ""), lot_no)
+
+    tree.bind("<<TreeviewSelect>>", _on_row_select)
+
     def _do_search():
         tree.delete(*tree.get_children())
+        row_images.clear()
+        _show_preview("")
         pno = cb_pno.get(); start = ent_start.get(); end = ent_end.get(); res = cb_result.get()
         try:
             with db.get_cursor() as cur:
                 query = """
-                    SELECT m.date, m.time, (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) as cname, 
-                           m.model, m.pno, m.pname, m.lotno, m.alc, m.result, 
-                           r.channel, r.ir_resistance, r.acw_current, r.contact_result
+                    SELECT m.date, m.time, (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) as cname,
+                           m.model, m.pno, m.pname, m.lotno, m.alc, m.result,
+                           r.channel, r.ir_resistance, r.acw_current, r.contact_result, m.visionimg
                     FROM testmaster m
                     LEFT JOIN testresult r ON m.lotno = r.lotno
                     WHERE m.date >= %s AND m.date <= %s
@@ -109,10 +177,11 @@ def render(parent):
                 if pno != "ALL": query += " AND m.pno = %s"; params.append(pno)
                 if res != "ALL": query += " AND m.result = %s"; params.append(res)
                 query += " ORDER BY m.date DESC, m.time DESC, m.lotno, r.channel"
-                
+
                 cur.execute(query, tuple(params))
                 for idx, row in enumerate(cur.fetchall(), start=1):
-                    tree.insert("", "end", values=(idx, row[0], row[1], row[2] or "", row[3], row[4], row[5], row[6], row[7], row[8], row[9] or "", row[10] or "", row[11] or "", row[12] or ""))
+                    iid = tree.insert("", "end", values=(idx, row[0], row[1], row[2] or "", row[3], row[4], row[5], row[6], row[7], row[8], row[9] or "", row[10] or "", row[11] or "", row[12] or ""))
+                    row_images[iid] = row[13] or ""
         except Exception as ex: messagebox.showerror("DB Error", f"Failed to search: {ex}")
 
     def _do_export():
