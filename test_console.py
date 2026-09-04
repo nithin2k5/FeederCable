@@ -1019,22 +1019,22 @@ def render(parent):
     tk.Label(out_row, text="OUTPUTS (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
     
     # Safety Relay
-    safety_lbl = tk.Label(out_row, text="M28", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    safety_lbl = tk.Label(out_row, text="M28", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     safety_lbl.pack(side="left", padx=(0, 8))
 
     # Contact Relays
     io_contact_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_contact_labels.append(lbl)
-        
+
     tk.Frame(out_row, bg="black", width=8).pack(side="left")
 
     # HV Relays
     io_ir_acw_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_ir_acw_labels.append(lbl)
 
@@ -1043,46 +1043,53 @@ def render(parent):
     tk.Label(in_row, text="INPUTS (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
 
     # Safety ACK
-    x4_lbl = tk.Label(in_row, text="X4", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x4_lbl = tk.Label(in_row, text="X4", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x4_lbl.pack(side="left", padx=(0, 8))
 
     # Contact OK (aligns under M30)
-    x2_lbl = tk.Label(in_row, text="X2", bg="#1a1a00", fg="#555500", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x2_lbl = tk.Label(in_row, text="X2", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x2_lbl.pack(side="left", padx=1)
-    
+
     # Empty space to pad under M31-M37
     for i in range(2, 9):
         tk.Label(in_row, text="", bg="black", width=4).pack(side="left", padx=1)
-        
+
     tk.Frame(in_row, bg="black", width=8).pack(side="left")
 
     # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#0a1a0a", fg="#2e7d32", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
     
+    # Off = flat near-black, blending into the panel like an unlit bulb.
+    # On = a solid, vivid green fill with dark text -- meant to visibly pop,
+    # not just shift to a slightly different shade of dark. Two dark shades
+    # (dark green vs dark gray) read as "the same" at a glance; this doesn't.
+    _IO_OFF_BG, _IO_OFF_FG = "#0d0d0d", "#3a3a3a"
+    _IO_ON_BG,  _IO_ON_FG  = "#00e676", "#003d14"
+    _IO_ACK_ON_BG, _IO_ACK_ON_FG = "#ffea00", "#3d3300"  # X2/X4 acks: vivid amber, same off state
+
     def _set_io(io_list, ch_idx, active):
-        # Off = neutral dim gray, not red -- red reads as a fault, but "off" is
-        # this panel's normal resting state between/after tests, not an alarm.
         try:
-            if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists(): io_list[ch_idx].config(bg="#1b5e20" if active else "#1a1a1a", fg="#76ff03" if active else "#666")
+            if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists():
+                io_list[ch_idx].config(bg=_IO_ON_BG if active else _IO_OFF_BG, fg=_IO_ON_FG if active else _IO_OFF_FG)
         except Exception: pass
 
     def _set_safety_indicator(active):
         try:
-            if safety_lbl.winfo_exists(): safety_lbl.config(bg="#1b5e20" if active else "#1a1a1a", fg="#76ff03" if active else "#666")
+            if safety_lbl.winfo_exists(): safety_lbl.config(bg=_IO_ON_BG if active else _IO_OFF_BG, fg=_IO_ON_FG if active else _IO_OFF_FG)
         except Exception: pass
 
     def _set_x2_indicator(active):
         try:
-            if x2_lbl.winfo_exists(): x2_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
+            if x2_lbl.winfo_exists(): x2_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_OFF_FG)
         except Exception: pass
 
     def _set_x4_indicator(active):
         try:
-            if x4_lbl.winfo_exists(): x4_lbl.config(bg="#9e8500" if active else "#1a1a00", fg="#fff59d" if active else "#555500")
+            if x4_lbl.winfo_exists(): x4_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_OFF_FG)
         except Exception: pass
 
     def _clear_all_io_indicators():
