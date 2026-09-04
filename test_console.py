@@ -1043,11 +1043,11 @@ def render(parent):
     tk.Label(in_row, text="INPUTS (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
 
     # Safety ACK
-    x4_lbl = tk.Label(in_row, text="X4", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x4_lbl = tk.Label(in_row, text="X4", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x4_lbl.pack(side="left", padx=(0, 8))
 
     # Contact OK (aligns under M30)
-    x2_lbl = tk.Label(in_row, text="X2", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
     x2_lbl.pack(side="left", padx=1)
 
     # Empty space to pad under M31-M37
@@ -1059,22 +1059,28 @@ def render(parent):
     # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#141008", fg="#4a3f26", font=("Arial", 7), bd=1, relief="solid", width=4)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
     
     # Off = flat near-black, blending into the panel like an unlit bulb.
-    # On = a solid, vivid green fill with dark text -- meant to visibly pop,
-    # not just shift to a slightly different shade of dark. Two dark shades
-    # (dark green vs dark gray) read as "the same" at a glance; this doesn't.
-    _IO_OFF_BG, _IO_OFF_FG = "#0d0d0d", "#3a3a3a"
-    _IO_ON_BG,  _IO_ON_FG  = "#00e676", "#003d14"
-    _IO_ACK_ON_BG, _IO_ACK_ON_FG = "#ffea00", "#3d3300"  # X2/X4 acks: vivid amber, same off state
+    # On = a solid, vivid fill with dark text -- meant to visibly pop, not
+    # just shift to a slightly different shade of dark. Relays (M coils) and
+    # acks (X inputs) keep their own colors in both states -- green-family
+    # for relays, amber-family for acks -- so the two stay visually separate
+    # categories even when both are off, not just two shades of "off".
+    _IO_OFF_BG,     _IO_OFF_FG     = "#0d0d0d", "#3a3a3a"    # relays, off
+    _IO_ON_BG,      _IO_ON_FG      = "#00e676", "#003d14"    # relays, on (vivid green)
+    _IO_ACK_OFF_BG, _IO_ACK_OFF_FG = "#141008", "#4a3f26"    # acks, off (dark amber tint)
+    _IO_ACK_ON_BG,  _IO_ACK_ON_FG  = "#ffea00", "#3d3300"    # acks, on (vivid amber)
 
     def _set_io(io_list, ch_idx, active):
+        is_ack = io_list is io_in_labels
+        on_bg, on_fg = (_IO_ACK_ON_BG, _IO_ACK_ON_FG) if is_ack else (_IO_ON_BG, _IO_ON_FG)
+        off_bg, off_fg = (_IO_ACK_OFF_BG, _IO_ACK_OFF_FG) if is_ack else (_IO_OFF_BG, _IO_OFF_FG)
         try:
             if ch_idx < len(io_list) and io_list[ch_idx].winfo_exists():
-                io_list[ch_idx].config(bg=_IO_ON_BG if active else _IO_OFF_BG, fg=_IO_ON_FG if active else _IO_OFF_FG)
+                io_list[ch_idx].config(bg=on_bg if active else off_bg, fg=on_fg if active else off_fg)
         except Exception: pass
 
     def _set_safety_indicator(active):
@@ -1084,12 +1090,12 @@ def render(parent):
 
     def _set_x2_indicator(active):
         try:
-            if x2_lbl.winfo_exists(): x2_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_OFF_FG)
+            if x2_lbl.winfo_exists(): x2_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
     def _set_x4_indicator(active):
         try:
-            if x4_lbl.winfo_exists(): x4_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_OFF_FG)
+            if x4_lbl.winfo_exists(): x4_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
     def _clear_all_io_indicators():
