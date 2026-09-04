@@ -210,6 +210,7 @@ class DeltaPLC:
             return ok
         except Exception as e:
             print(f"[PLC DEBUG] write_coil EXCEPTION: {e}")
+            self.close()  # drop a dead handle now, instead of retrying it on every call after
             return False
 
     def read_input(self, address: int) -> bool:
@@ -236,6 +237,7 @@ class DeltaPLC:
             return result.bits[offset] if 0 <= offset < len(result.bits) else False
         except Exception as e:
             print(f"[PLC DEBUG] read_input EXCEPTION: {e}")
+            self.close()
             return False
 
     def read_inputs_bulk(self, address: int, count: int) -> list:
@@ -253,6 +255,7 @@ class DeltaPLC:
                 return list(result.bits[offset:offset + count])
             return list(result.bits[:count])
         except Exception:
+            self.close()
             return [False] * count
 
     def read_coil(self, address: int) -> bool:
@@ -265,6 +268,7 @@ class DeltaPLC:
                 return False
             return result.bits[0]
         except Exception:
+            self.close()
             return False
 
     def read_coils_bulk(self, address: int, count: int) -> list:
@@ -277,6 +281,7 @@ class DeltaPLC:
                 return [False] * count
             return list(result.bits[:count])
         except Exception:
+            self.close()
             return [False] * count
 
     # ── Channel relay control ────────────────────────────────────────────
@@ -590,6 +595,22 @@ def render(parent):
 
     content = tk.Frame(parent, bg="black")
     content.pack(fill="both", expand=True, padx=4, pady=2)
+
+    _real_after = parent.after
+    def _after(delay, fn=None, *args):
+        """_after(), but the callback is dropped if this page has since
+        been navigated away from. Background threads (the test sequence, PLC
+        polling) schedule their UI updates with this — without the guard, a
+        callback that outlives page navigation hits a destroyed widget and
+        throws 'invalid command name', which cascades into a flood of
+        Tkinter callback errors.
+        """
+        if fn is None:
+            return _real_after(delay)
+        def _guarded(*a):
+            if content.winfo_exists():
+                fn(*a)
+        return _real_after(delay, _guarded, *args)
     content.rowconfigure(0, weight=1); content.rowconfigure(1, weight=0); content.columnconfigure(0, weight=1)
     upper = tk.Frame(content, bg="black"); upper.grid(row=0, column=0, sticky="nsew")
     upper.columnconfigure(0, weight=1); upper.columnconfigure(1, weight=0); upper.rowconfigure(0, weight=1)
@@ -644,7 +665,7 @@ def render(parent):
                 if lbl.winfo_exists(): lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
             except Exception: pass
         if lbl:
-            try: parent.after(0, _update)
+            try: _after(0, _update)
             except Exception: pass
 
     # Camera frames — live feed from OpenCV
@@ -1043,7 +1064,7 @@ def render(parent):
                 if log_txt.winfo_exists():
                     log_txt.config(state="normal"); log_txt.insert("end", f"{ts}  {msg}\n"); log_txt.see("end"); log_txt.config(state="disabled")
             except Exception: pass
-        try: parent.after(0, _do_log)
+        try: _after(0, _do_log)
         except Exception: pass
     def _load_specs(pno: str) -> bool:
         try:
@@ -1109,7 +1130,7 @@ def render(parent):
                 q2 = "SELECT COUNT(*) FROM testmaster WHERE result='FAIL' AND DATE(date)=CURDATE()" + (f" AND pno='{pno}'" if pno else "")
                 cur2.execute(q2); ng = cur2.fetchone()[0] or 0
         except Exception: ng = 0
-        state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; parent.after(0, _update_counts)
+        state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
             tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "â€”", row[3] or "â€”", row[4], row[5]))
 
@@ -1152,18 +1173,18 @@ def render(parent):
         # Ensure safety relay is in Contact Test mode
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
-        parent.after(0, lambda: _set_safety_indicator(True))
+        _after(0, lambda: _set_safety_indicator(True))
         time.sleep(0.5)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
-        parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+        _after(0, lambda a=x4_ack: _set_x4_indicator(a))
         contact_res = {}; all_pass = True
         for ch in range(1, n_ch + 1):
             _log(f"Contact Test: Testing CH{ch}...")
             # Turn ON channel coil
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
-            parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
+            _after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
             time.sleep(0.5)
             # Verify X2 is still True (Contact OK)
             # Note: X20-X27 are hardware-linked to IR/ACW relays only, so we do not check them here.
@@ -1175,14 +1196,14 @@ def render(parent):
             if not passed:
                 all_pass = False
                 _log(f"Contact (CH{ch}): Failed — X2 (Contact OK) went Low!")
-            parent.after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
+            _after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
             # Turn OFF channel coil before next
             _log(f"CH{ch} -> OFF")
             plc.set_channel(ch, False)
-            parent.after(0, lambda c=ch-1: _set_io(io_contact_labels, c, False))
+            _after(0, lambda c=ch-1: _set_io(io_contact_labels, c, False))
             time.sleep(0.5)
         plc.close()
-        parent.after(0, lambda p=all_pass: _set_row_result("Contact", p))
+        _after(0, lambda p=all_pass: _set_row_result("Contact", p))
         _log(f"Contact: {'PASS' if all_pass else 'FAIL'}"); return all_pass, contact_res
 
     def _run_contact_ch1_check() -> bool:
@@ -1198,18 +1219,18 @@ def render(parent):
         time.sleep(0.5)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
-        parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+        _after(0, lambda a=x4_ack: _set_x4_indicator(a))
         
         # 2) Turn on CH1 and read X2
         plc.set_channel(1, True)
-        parent.after(0, lambda: _set_io(io_contact_labels, 0, True))
+        _after(0, lambda: _set_io(io_contact_labels, 0, True))
         time.sleep(0.5)
         passed_ack = plc.read_channel_ack(1)
         passed_x2 = plc.is_contact_ok()
-        parent.after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
+        _after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
         
         plc.set_channel(1, False)
-        parent.after(0, lambda: _set_io(io_contact_labels, 0, False))
+        _after(0, lambda: _set_io(io_contact_labels, 0, False))
         
         if not passed_x2:
             _log("CH1 contact: NG — X2 (Contact OK) is False. Cable not detected.")
@@ -1221,11 +1242,11 @@ def render(parent):
         # 3) Turn off safety relay M28 and ensure no X4 feedback is received
         _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
         plc.safety_relay_to_hv()
-        parent.after(0, lambda: _set_safety_indicator(False))
+        _after(0, lambda: _set_safety_indicator(False))
         time.sleep(0.5)
         x4_off = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'Still ON! (WARNING)' if x4_off else 'OFF (Low - OK)'}")
-        parent.after(0, lambda a=x4_off: _set_x4_indicator(a))
+        _after(0, lambda a=x4_off: _set_x4_indicator(a))
         
         plc.close()
         return True
@@ -1260,22 +1281,22 @@ def render(parent):
         if _plc_open():
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
-            parent.after(0, lambda: _set_safety_indicator(False))
+            _after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
-            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+            _after(0, lambda a=x4_ack: _set_x4_indicator(a))
             
         all_pass = True; ir_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
             _log("IR Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
+                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
                 time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
-                    parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
+                    _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
                     if not ack:
                         _log(f"IR (Combined): Channel {ch} ACK failed!")
                         all_pass = False
@@ -1285,10 +1306,10 @@ def render(parent):
                 s = state["spec_ir"].get(ch, {}); passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
                 if not passed: all_pass = False
                 ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+                _after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
             _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1297,10 +1318,10 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
+                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
                     time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
-                    parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
+                    _after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
                         _log(f"IR (Individual): Channel {ch} ACK failed!")
                         all_pass = False
@@ -1309,17 +1330,17 @@ def render(parent):
                 passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
                 if not passed or not ack_ok: all_pass = False
                 ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=(passed and ack_ok): _set_cell("IR", c, v, p))
+                _after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
+                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
                     time.sleep(0.05)
             _log(f"IR (Individual): {'PASS' if all_pass else 'FAIL'}")
 
         hipot.close()
         if plc.is_open: plc.close()
-        parent.after(0, lambda p=all_pass: _set_row_result("IR", p))
+        _after(0, lambda p=all_pass: _set_row_result("IR", p))
         return all_pass, ir_res
 
     def _run_acw_test(n_ch: int) -> tuple:
@@ -1336,22 +1357,22 @@ def render(parent):
         if _plc_open():
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
-            parent.after(0, lambda: _set_safety_indicator(False))
+            _after(0, lambda: _set_safety_indicator(False))
             time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
-            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+            _after(0, lambda a=x4_ack: _set_x4_indicator(a))
             
         all_pass = True; acw_res = {}
         if state.get("testmode", "Combined").strip().lower() == "combined":
             _log("ACW Test: Testing all channels (Combined)...")
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
+                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
                 time.sleep(0.5)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
-                    parent.after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
+                    _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
                     if not ack:
                         _log(f"ACW (Combined): Channel {ch} ACK failed!")
                         all_pass = False
@@ -1361,10 +1382,10 @@ def render(parent):
                 s = state["spec_acw"].get(ch, {}); passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed: all_pass = False
                 acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
+                _after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
-                for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+                for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
             _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
@@ -1373,10 +1394,10 @@ def render(parent):
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
+                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
                     time.sleep(0.5)
                     ack_ok = plc.read_channel_ack(ch)
-                    parent.after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
+                    _after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
                         _log(f"ACW (Individual): Channel {ch} ACK failed!")
                         all_pass = False
@@ -1385,11 +1406,11 @@ def render(parent):
                 passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed or not ack_ok: all_pass = False
                 acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
-                parent.after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=(passed and ack_ok): _set_cell("ACW", c, v, p))
+                _after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
-                    parent.after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
+                    _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, False))
                     time.sleep(0.05)
             _log(f"ACW (Individual): {'PASS' if all_pass else 'FAIL'}")
 
@@ -1401,25 +1422,25 @@ def render(parent):
             time.sleep(0.5)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
-            parent.after(0, lambda a=x4_ack: _set_x4_indicator(a))
+            _after(0, lambda a=x4_ack: _set_x4_indicator(a))
             plc.close()
-        for i in range(n_ch): parent.after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
-        parent.after(0, lambda: _set_safety_indicator(True))
-        parent.after(0, lambda p=all_pass: _set_row_result("ACW", p))
+        for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, False))
+        _after(0, lambda: _set_safety_indicator(True))
+        _after(0, lambda p=all_pass: _set_row_result("ACW", p))
         return all_pass, acw_res
 
     def _run_test_sequence():
-        if not state["pno"]: parent.after(0, lambda: _log("No part loaded.")); return
+        if not state["pno"]: _after(0, lambda: _log("No part loaded.")); return
         emp = ent_emp.get().strip()
-        if not emp: parent.after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID.")); return
-        if not _validate_employee(emp): parent.after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
+        if not emp: _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID.")); return
+        if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True
-        parent.after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); parent.after(0, _reset_test_display); parent.after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); parent.after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); parent.after(0, scan_entry_frame.pack_forget)
+        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, scan_entry_frame.pack_forget)
         n_ch = state["num_channels"]; _log("── Test Started ──")
         
         # --- VISION VERIFICATION (Contour Matching) ---
-        parent.after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
+        _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
             
             vision_ctrl.reload_config()
@@ -1430,7 +1451,7 @@ def render(parent):
                 # Run inspection (capture frame + contour match)
                 vision_result = vision_ctrl.inspect(state["pno"])
                 state["vision_result"] = vision_result.judgement
-                parent.after(0, lambda r=vision_result: _show_vision_frame(r))
+                _after(0, lambda r=vision_result: _show_vision_frame(r))
 
                 if vision_result.judgement == "ERROR":
                     _log(f"Vision ERROR: {vision_result.error}. Skipping vision.")
@@ -1442,16 +1463,16 @@ def render(parent):
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
 
-        parent.after(0, lambda: scan_lbl.config(text="Checking contact (CH1)...", bg="#001830", fg="#e8a000"))
+        _after(0, lambda: scan_lbl.config(text="Checking contact (CH1)...", bg="#001830", fg="#e8a000"))
         if _modbus_ok:
             if not _run_contact_ch1_check():
-                _log("Contact NOT OK (X2) — aborting"); parent.after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); parent.after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); parent.after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
-                state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); parent.after(0, _input_poll_start); return
-        parent.after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
+                _log("Contact NOT OK (X2) — aborting"); _after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); _after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); _after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
+                state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
+        _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
-        parent.after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
+        _after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return
-        parent.after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
+        _after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
@@ -1465,17 +1486,17 @@ def render(parent):
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
         elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
-        parent.after(0, _update_counts); parent.after(0, lambda l=lot_no: lot_lbl.config(text=l)); parent.after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); parent.after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
+        _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch)
         if overall == "PASS":
-            parent.after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); parent.after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
+            _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"]), daemon=True).start()
-            parent.after(5000, _show_scan_entry)
+            _after(5000, _show_scan_entry)
         else:
-            parent.after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); parent.after(0, lambda: scan_lbl.config(text="âŒ  FAIL â€” Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
-        parent.after(0, lambda: _load_today_pass(pno)); parent.after(0, lambda: _load_history(pno)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
-        state["test_running"] = False; parent.after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
-        if overall == "FAIL": parent.after(200, _input_poll_start)
+            _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL â€” Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+        _after(0, lambda: _load_today_pass(pno)); _after(0, lambda: _load_history(pno)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
+        state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
+        if overall == "FAIL": _after(200, _input_poll_start)
 
     def _show_scan_entry(): scan_entry_frame.pack(fill="x", pady=(0, 3)); ent_scan.delete(0, "end"); ent_scan.focus_set(); scan_result_lbl.config(text="", fg="white")
     def _on_scan_enter(event=None):
@@ -1483,16 +1504,16 @@ def render(parent):
         if not scanned: return
         if labelstr and labelstr in scanned: res_str = "OK"; scan_result_lbl.config(text="âœ…  OK", fg="#76ff03"); _log(f"Scan verify: OK ({scanned})")
         else: res_str = "NG"; scan_result_lbl.config(text="âŒ  NG", fg="#ff5555"); _log(f"Scan verify: NG (expected '{labelstr}', got '{scanned}')")
-        _update_scan_result(state["lot_no"], res_str); parent.after(2000, scan_entry_frame.pack_forget); parent.after(2100, _input_poll_start)
+        _update_scan_result(state["lot_no"], res_str); _after(2000, scan_entry_frame.pack_forget); _after(2100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     def _input_poll_once():
         if not state.get("input_polling"): return
-        if state["test_running"] or not state["pno"]: parent.after(500, _input_poll_once); return
+        if state["test_running"] or not state["pno"]: _after(500, _input_poll_once); return
         def _poll():
             pressed = _update_io_display()
-            if pressed: _log("START button pressed (PLC X1)"); parent.after(0, _trigger_test)
-            else: parent.after(500, _input_poll_once)
+            if pressed: _log("START button pressed (PLC X1)"); _after(0, _trigger_test)
+            else: _after(500, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
     def _input_poll_start():
         if not _modbus_ok or state.get("input_polling"): return
@@ -1514,26 +1535,26 @@ def render(parent):
         try:
             # Sync inputs (X20-X27)
             bits = plc.read_inputs_bulk(0x0410, 8)
-            for i in range(8): parent.after(0, lambda idx=i, a=bits[i]: _set_io(io_in_labels, idx, a))
+            for i in range(8): _after(0, lambda idx=i, a=bits[i]: _set_io(io_in_labels, idx, a))
             # Sync actual outputs (M20-M27 and M30-M37)
             ir_acw_bits = plc.read_coils_bulk(0x0814, 8)
             contact_bits = plc.read_coils_bulk(0x081E, 8)
             for ch in range(1, 9):
                 o_ir = ir_acw_bits[ch-1] if ir_acw_bits and len(ir_acw_bits) >= ch else False
                 o_cont = contact_bits[ch-1] if contact_bits and len(contact_bits) >= ch else False
-                parent.after(0, lambda idx=ch-1, o_ir=o_ir, o_cont=o_cont: (_set_io(io_ir_acw_labels, idx, o_ir), _set_io(io_contact_labels, idx, o_cont)))
+                _after(0, lambda idx=ch-1, o_ir=o_ir, o_cont=o_cont: (_set_io(io_ir_acw_labels, idx, o_ir), _set_io(io_contact_labels, idx, o_cont)))
                 
             # Sync safety relay (M28)
             m28_state = plc.read_coil(0x081C)
-            parent.after(0, lambda a=m28_state: _set_safety_indicator(a))
+            _after(0, lambda a=m28_state: _set_safety_indicator(a))
             
             # Sync X0-X7 to get X0 (START), X2 (Contact OK) and X4 (Safety ACK)
             x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
             pressed = x0_7_bits[0] if x0_7_bits else False
             x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
             x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
-            parent.after(0, lambda a=x2_state: _set_x2_indicator(a))
-            parent.after(0, lambda a=x4_state: _set_x4_indicator(a))
+            _after(0, lambda a=x2_state: _set_x2_indicator(a))
+            _after(0, lambda a=x4_state: _set_x4_indicator(a))
         except Exception: pass
         finally: plc.close()
         return pressed
@@ -1541,7 +1562,7 @@ def render(parent):
     def _trigger_test():
         if state["test_running"]: return
         if not state["pno"]: _log("No part number loaded."); return
-        if not ent_emp.get().strip(): parent.after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID before testing.")); return
+        if not ent_emp.get().strip(): _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID before testing.")); return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
 
@@ -1579,7 +1600,7 @@ def render(parent):
         ent_jig.focus_set()
     ent_pno.bind("<Return>", _on_pno_enter)
 
-    _overlay_jobs = {}  # cam_id -> pending parent.after() id for reverting the overlay
+    _overlay_jobs = {}  # cam_id -> pending _after() id for reverting the overlay
 
     def _restore_cam(cam_id):
         lbl = cam_labels.get(cam_id)
@@ -1634,7 +1655,7 @@ def render(parent):
         if prev_job is not None:
             try: parent.after_cancel(prev_job)
             except Exception: pass
-        _overlay_jobs[cam_id] = parent.after(4000, lambda cid=cam_id: _restore_cam(cid))
+        _overlay_jobs[cam_id] = _after(4000, lambda cid=cam_id: _restore_cam(cid))
 
     def _vision_check_loaded_part(pno: str):
         """Verify the just-loaded part in front of the camera, before testing starts.
@@ -1682,7 +1703,7 @@ def render(parent):
                 else:
                     _log(f"Vision ERROR: {result.error}")
                     _paint(f"VISION ERROR — {result.error}", "#e8a000")
-            try: parent.after(0, _apply)
+            try: _after(0, _apply)
             except Exception: pass
 
         threading.Thread(target=_work, daemon=True).start()
@@ -1707,7 +1728,7 @@ def render(parent):
         if _load_specs(pno):
             _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
             _vision_check_loaded_part(pno)
-            btn_start.focus_set(); parent.after(500, _input_poll_start)
+            btn_start.focus_set(); _after(500, _input_poll_start)
         else:
             btn_start.config(bg="#1a1a1a", fg="#444"); _clear_all()
     ent_jig.bind("<Return>", _on_jig_enter)
