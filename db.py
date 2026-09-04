@@ -13,6 +13,20 @@ def get_connection():
     """Returns a new connection to the database."""
     return mysql.connector.connect(**DB_CONFIG)
 
+def ensure_column(table: str, column: str, coltype: str):
+    """Add a column to an existing table if it isn't there yet.
+
+    Idempotent and safe to call on every startup against a live DB that
+    predates the column -- init_db.py's CREATE TABLE IF NOT EXISTS only
+    covers a fresh install, it never alters a table that already exists.
+    """
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    except mysql.connector.Error as e:
+        if e.errno != 1060:  # 1060 = ER_DUP_FIELDNAME, i.e. already added
+            raise
+
 @contextmanager
 def get_cursor(commit=False):
     """

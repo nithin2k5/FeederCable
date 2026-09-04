@@ -4,3 +4,6 @@ Feeder Cable (2)/
 # Python
 __pycache__/
 *.pyc
+
+# Per-lot vision pass images -- operational data, one file per test run
+vision_captures/

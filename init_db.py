@@ -62,7 +62,8 @@ def init_db():
             empcode VARCHAR(50),
             result VARCHAR(20),
             scanresult VARCHAR(20),
-            machine VARCHAR(50)
+            machine VARCHAR(50),
+            visionimg VARCHAR(255)
         )''')
 
         print("Creating testresult table...")

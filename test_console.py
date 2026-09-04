@@ -597,10 +597,16 @@ def render(parent):
     style.map("Hist.Treeview", background=[("selected", "#1c3a5e")])
     style.map("Lot.Treeview",  background=[("selected", "#1c3a5e")])
 
+    try:
+        db.ensure_column("testmaster", "visionimg", "VARCHAR(255)")
+    except Exception:
+        pass  # DB may be unreachable right now -- don't block the page for it
+
     state = {
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
+        "last_vision_result": None,
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
@@ -1146,11 +1152,33 @@ def render(parent):
         for idx, row in enumerate(rows, start=1):
             tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "â€”", row[3] or "â€”", row[4], row[5]))
 
-    def _save_result(lot_no: str, overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict):
+    _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
+
+    def _save_vision_pass_image(lot_no: str) -> str:
+        """If vision passed on this cycle, save the judged (boxed) frame to
+        vision_captures/<lotno>.jpg and return its path, else None.
+        """
+        result = state.get("last_vision_result")
+        if result is None or result.judgement != "OK" or not _cv2_ok:
+            return None
+        frame = _annotate_vision_frame(result)
+        if frame is None:
+            return None
+        try:
+            os.makedirs(_VISION_IMG_DIR, exist_ok=True)
+            path = os.path.join(_VISION_IMG_DIR, f"{lot_no}.jpg")
+            cv2.imwrite(path, frame)
+            _log(f"Vision pass image saved: {path}")
+            return path
+        except Exception as ex:
+            _log(f"Vision image save error: {ex}")
+            return None
+
+    def _save_result(lot_no: str, overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, vision_img: str = None):
         try:
             with db.get_cursor(commit=True) as cur:
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
-                cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"]))
+                cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img))
                 for ch in range(1, state["num_channels"] + 1):
                     cur.execute("INSERT INTO testresult (lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} â†’ {lot_no}")
@@ -1451,7 +1479,7 @@ def render(parent):
         if not emp: _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID.")); return
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
-        state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True
+        state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
         _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, scan_entry_frame.pack_forget)
         n_ch = state["num_channels"]; _log("── Test Started ──")
         
@@ -1467,6 +1495,7 @@ def render(parent):
                 # Run inspection (capture frame + contour match)
                 vision_result = vision_ctrl.inspect(state["pno"])
                 state["vision_result"] = vision_result.judgement
+                state["last_vision_result"] = vision_result
                 _after(0, lambda r=vision_result: _show_vision_frame(r))
 
                 if vision_result.judgement == "ERROR":
@@ -1503,7 +1532,8 @@ def render(parent):
         elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
-        _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch)
+        vision_img_path = _save_vision_pass_image(lot_no)
+        _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
             _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"]), daemon=True).start()
@@ -1590,7 +1620,7 @@ def render(parent):
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); tree_lot.delete(*tree_lot.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); scan_entry_frame.pack_forget()
-        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True})
+        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None})
         btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_emp.focus_set()
     tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
 
@@ -1632,6 +1662,23 @@ def render(parent):
             except Exception:
                 pass
 
+    def _annotate_vision_frame(result):
+        """The frame vision judged, with the detected match boxed and scored
+        on it (green=OK, red=NG, orange=ERROR). Shared by the live camera-panel
+        overlay and the pass-image saved to disk, so both show the same thing.
+        """
+        if not _cv2_ok or result.frame is None:
+            return None
+        colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
+        color = colors.get(result.judgement, (0, 165, 255))
+        frame = result.frame.copy()
+        if result.match_box:
+            x, y, w, h = result.match_box
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+            cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",
+                        (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+        return frame
+
     def _show_vision_frame(result):
         """Paint the frame vision judged, with the detected match boxed on it,
         into that camera's preview panel — so the operator sees *what* the
@@ -1645,15 +1692,7 @@ def render(parent):
         if lbl is None:
             return
 
-        colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
-        color = colors.get(result.judgement, (0, 165, 255))
-        frame = result.frame.copy()
-        if result.match_box:
-            x, y, w, h = result.match_box
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
-            cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",
-                        (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
-
+        frame = _annotate_vision_frame(result)
         feed = cam_feeds_by_id.get(cam_id)
         if feed:
             feed.pause()
