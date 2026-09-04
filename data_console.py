@@ -89,16 +89,15 @@ def render(parent):
     # whichever row is selected. Lives in the same filter bar box as Part
     # Number / Result / Start Date / End Date, on the right.
     tk.Frame(filter_bar, bg=border_color, width=1).pack(side="left", fill="y", pady=8)
-    PREVIEW_W, PREVIEW_H = 150, 100  # fixed image box -- keeps the thumbnail predictable and centered
-    preview_outer = tk.Frame(filter_bar, bg=bg_color, width=170)
+    PREVIEW_W, PREVIEW_H = 230, 150  # fixed image box -- keeps the thumbnail predictable and centered
+    preview_outer = tk.Frame(filter_bar, bg=bg_color, width=250)
     preview_outer.pack(side="left", fill="y", padx=(10, 10), pady=8)
     preview_outer.pack_propagate(False)
-    tk.Label(preview_outer, text="VISION IMAGE", bg=bg_color, fg="#777", font=('Arial', 9, 'bold')).pack(fill="x", pady=(0, 4))
     img_box = tk.Frame(preview_outer, bg="#05080a", width=PREVIEW_W, height=PREVIEW_H)
     img_box.pack()
     img_box.pack_propagate(False)
-    preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 8),
-                               text="Select a row to view its vision image", wraplength=PREVIEW_W - 16, justify="center")
+    preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 9, 'bold'),
+                               text="Vision Result", wraplength=PREVIEW_W - 16, justify="center")
     preview_img_lbl.pack(fill="both", expand=True)
     preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 8),
                                wraplength=PREVIEW_W, justify="center", anchor="center")
@@ -128,7 +127,8 @@ def render(parent):
         preview_lot_lbl.config(text=f"LOT {lot_no}" if lot_no else "")
         if not path:
             preview_photo["img"] = None
-            preview_img_lbl.config(image="", text="No vision image for this record", fg="#555")
+            msg = "No vision image for this record" if lot_no else "Vision Result"
+            preview_img_lbl.config(image="", text=msg, fg="#555")
             return
         if not _pil_ok:
             preview_photo["img"] = None
