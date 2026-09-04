@@ -807,11 +807,18 @@ def render(parent):
     _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"], 1)
     _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"], 2)
 
-    # Cleanup camera feeds when page is destroyed
+    # Cleanup camera feeds and the PLC input-polling loop when the page is destroyed.
+    # Without this, navigating away (e.g. to COM Port Settings) left the X0
+    # "waiting for physical START" poll looping forever in the background,
+    # opening/closing the same COM port every ~500ms and fighting any other
+    # page's own attempt to open it.
     def _on_page_destroy(e):
         if e.widget == content:
             for feed in _cam_feeds:
                 feed.stop()
+            state["input_polling"] = False
+            try: plc.close()
+            except Exception: pass
     content.bind("<Destroy>", _on_page_destroy)
 
     def blink_start(): pass
@@ -1130,7 +1137,7 @@ def render(parent):
     def _plc_open() -> bool:
         """Open PLC Modbus RTU connection."""
         if not _modbus_ok: return False
-        if plc.is_open: plc.close(); time.sleep(0.015)
+        if plc.is_open: plc.close(); time.sleep(0.05)
         ok = plc.open()
         if not ok: _log("PLC: could not open Modbus RTU port"); set_com_status("IO Ctrl", False)
         else: set_com_status("IO Ctrl", True)
@@ -1236,13 +1243,6 @@ def render(parent):
         connected = plc.is_contact_ok()
         plc.close()
         return connected
-
-    def _check_start_pressed() -> bool:
-        """Check if physical START button is pressed via PLC input."""
-        if not _plc_open(): return False
-        pressed = plc.is_start_pressed()
-        plc.close()
-        return pressed
 
 
 
@@ -1490,8 +1490,7 @@ def render(parent):
         if not state.get("input_polling"): return
         if state["test_running"] or not state["pno"]: parent.after(500, _input_poll_once); return
         def _poll():
-            pressed = _check_start_pressed()
-            _update_io_display()
+            pressed = _update_io_display()
             if pressed: _log("START button pressed (PLC X1)"); parent.after(0, _trigger_test)
             else: parent.after(500, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
@@ -1499,9 +1498,19 @@ def render(parent):
         if not _modbus_ok or state.get("input_polling"): return
         state["input_polling"] = True; _input_poll_once()
     def _input_poll_stop(): state["input_polling"] = False
-    def _update_io_display():
-        """Refresh IO indicators from PLC (reads X20~X27 inputs and actual channel coils)."""
-        if not _plc_open(): return
+    def _update_io_display() -> bool:
+        """Refresh IO indicators from PLC (reads X0~X7 and X20~X27 inputs and
+        actual channel coils) in a single open/close cycle, and report whether
+        the physical START button (X0) is pressed.
+
+        This used to be two separate open/close cycles per poll tick (one just
+        to check X0, another for everything else) — reopening the port only
+        ~15ms after closing it was flaky on this USB-serial adapter and was
+        the main source of intermittent "could not open Modbus RTU port"
+        errors, including fighting a manual test from COM Port Settings.
+        """
+        if not _plc_open(): return False
+        pressed = False
         try:
             # Sync inputs (X20-X27)
             bits = plc.read_inputs_bulk(0x0410, 8)
@@ -1518,14 +1527,16 @@ def render(parent):
             m28_state = plc.read_coil(0x081C)
             parent.after(0, lambda a=m28_state: _set_safety_indicator(a))
             
-            # Sync X0-X7 to get X2 (Contact OK) and X4 (Safety ACK)
+            # Sync X0-X7 to get X0 (START), X2 (Contact OK) and X4 (Safety ACK)
             x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
+            pressed = x0_7_bits[0] if x0_7_bits else False
             x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
             x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
             parent.after(0, lambda a=x2_state: _set_x2_indicator(a))
             parent.after(0, lambda a=x4_state: _set_x4_indicator(a))
         except Exception: pass
         finally: plc.close()
+        return pressed
 
     def _trigger_test():
         if state["test_running"]: return
