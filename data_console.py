@@ -59,49 +59,57 @@ def render(parent):
     except Exception:
         pno_list = ["ALL"]
 
-    mk_lbl(filter_inner, "PART NUMBER :").grid(row=0, column=0, sticky="e", padx=(0, 10))
-    cb_pno = ttk.Combobox(filter_inner, values=pno_list, font=('Arial', 10), width=20, state="readonly")
+    # Two evenly-filled rows -- (Part Number, Result) then (Start Date, End Date)
+    # -- instead of the old layout where row 0 held three fields and row 1 held
+    # only End Date, leaving it looking lopsided.
+    mk_lbl(filter_inner, "PART NUMBER :").grid(row=0, column=0, sticky="e", padx=(0, 10), pady=5)
+    cb_pno = ttk.Combobox(filter_inner, values=pno_list, font=('Arial', 10), width=18, state="readonly")
     cb_pno.current(0)
-    cb_pno.grid(row=0, column=1, sticky="w", padx=(0, 30))
-    
-    mk_lbl(filter_inner, "START DATE :").grid(row=0, column=2, sticky="e", padx=(0, 10), pady=5)
-    ent_start = tk.Entry(filter_inner, font=('Arial', 10), width=18, bg="#111", fg="white", insertbackground="white")
+    cb_pno.grid(row=0, column=1, sticky="w", padx=(0, 30), pady=5)
+
+    mk_lbl(filter_inner, "RESULT :").grid(row=0, column=2, sticky="e", padx=(0, 10), pady=5)
+    cb_result = ttk.Combobox(filter_inner, values=["ALL", "PASS", "FAIL"], font=('Arial', 10), width=18, state="readonly")
+    cb_result.current(0)
+    cb_result.grid(row=0, column=3, sticky="w", padx=(0, 30), pady=5)
+
+    mk_lbl(filter_inner, "START DATE :").grid(row=1, column=0, sticky="e", padx=(0, 10), pady=5)
+    ent_start = tk.Entry(filter_inner, font=('Arial', 10), width=20, bg="#111", fg="white", insertbackground="white")
     ent_start.insert(0, (datetime.datetime.now() - datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
-    ent_start.grid(row=0, column=3, sticky="w", padx=(0, 30), pady=5)
-    
+    ent_start.grid(row=1, column=1, sticky="w", padx=(0, 30), pady=5)
+
     mk_lbl(filter_inner, "END DATE :").grid(row=1, column=2, sticky="e", padx=(0, 10), pady=5)
-    ent_end = tk.Entry(filter_inner, font=('Arial', 10), width=18, bg="#111", fg="white", insertbackground="white")
+    ent_end = tk.Entry(filter_inner, font=('Arial', 10), width=20, bg="#111", fg="white", insertbackground="white")
     ent_end.insert(0, datetime.datetime.now().strftime("%Y-%m-%d"))
     ent_end.grid(row=1, column=3, sticky="w", padx=(0, 30), pady=5)
-    
-    mk_lbl(filter_inner, "RESULT :").grid(row=0, column=4, sticky="e", padx=(0, 10))
-    cb_result = ttk.Combobox(filter_inner, values=["ALL", "PASS", "FAIL"], font=('Arial', 10), width=15, state="readonly")
-    cb_result.current(0)
-    cb_result.grid(row=0, column=5, sticky="w", padx=(0, 30))
-    
-    btn_frame = tk.Frame(filter_inner, bg=bg_color); btn_frame.grid(row=0, column=6, rowspan=2, padx=10)
+
+    btn_frame = tk.Frame(filter_inner, bg=bg_color); btn_frame.grid(row=0, column=4, rowspan=2, padx=10)
     
     table_outer = tk.Frame(content, bg=bg_color)
     table_outer.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+    table_outer.config(bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+
+    tree_outer = tk.Frame(table_outer, bg=bg_color)
+    tree_outer.pack(side="left", fill="both", expand=True)
 
     # Vision image preview -- shows the frame that was judged (match box already
     # drawn on it, saved by test_console at PASS-with-vision-OK time), for
-    # whichever row is selected. Sits above the table, full width, since these
-    # frames are landscape (camera-shaped) and a narrow side panel squeezed them.
-    preview_outer = tk.Frame(table_outer, bg=bg_color, height=200, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
-    preview_outer.pack(side="top", fill="x", pady=(0, 6))
+    # whichever row is selected. Lives inside the same outer box as the table,
+    # separated by a thin divider rather than being its own separate box.
+    tk.Frame(table_outer, bg=border_color, width=1).pack(side="left", fill="y")
+    PREVIEW_W, PREVIEW_H = 174, 140  # fixed image box -- keeps the thumbnail predictable and centered
+    preview_outer = tk.Frame(table_outer, bg=bg_color, width=190)
+    preview_outer.pack(side="left", fill="y")
     preview_outer.pack_propagate(False)
-    preview_inner = tk.Frame(preview_outer, bg=bg_color)
-    preview_inner.pack(fill="both", expand=True, padx=8, pady=8)
-    preview_img_lbl = tk.Label(preview_inner, bg="#05080a", fg="#555", font=('Arial', 9),
-                               text="Select a row to view its vision image", wraplength=340, justify="center")
-    preview_img_lbl.pack(side="left", fill="both", expand=True)
-    preview_lot_lbl = tk.Label(preview_inner, bg=bg_color, fg="#999", font=('Consolas', 9),
-                               width=26, justify="left", anchor="n")
-    preview_lot_lbl.pack(side="left", fill="y", padx=(10, 0))
-
-    tree_outer = tk.Frame(table_outer, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
-    tree_outer.pack(side="top", fill="both", expand=True)
+    tk.Label(preview_outer, text="VISION IMAGE", bg=bg_color, fg="#777", font=('Arial', 9, 'bold')).pack(fill="x", padx=8, pady=(8, 6))
+    img_box = tk.Frame(preview_outer, bg="#05080a", width=PREVIEW_W, height=PREVIEW_H)
+    img_box.pack(padx=8)
+    img_box.pack_propagate(False)
+    preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 8),
+                               text="Select a row to view its vision image", wraplength=PREVIEW_W - 16, justify="center")
+    preview_img_lbl.pack(fill="both", expand=True)
+    preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 9),
+                               wraplength=170, justify="center", anchor="center")
+    preview_lot_lbl.pack(fill="x", padx=8, pady=8)
 
     cols = ("SNO", "DATE", "TIME", "CUSTOMER NAME", "MODEL", "P/NUMBER", "P/NAME", "LOTNO", "ALC", "RESULT", "CHANNEL", "IR_VAL", "ACW_VAL", "CONTACT")
     tree = ttk.Treeview(tree_outer, columns=cols, show="headings")
@@ -136,9 +144,9 @@ def render(parent):
             return
         try:
             img = Image.open(path)
-            box_w = max(preview_img_lbl.winfo_width(), 220)
-            box_h = max(preview_img_lbl.winfo_height(), 165)
-            img.thumbnail((box_w, box_h), Image.LANCZOS)
+            # Fit inside the fixed image box (a few px of margin) -- never larger,
+            # so it always lands centered and fully inside img_box, not clipped.
+            img.thumbnail((PREVIEW_W - 8, PREVIEW_H - 8), Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             preview_photo["img"] = photo  # hold a reference
             preview_img_lbl.config(image=photo, text="")
