@@ -37,12 +37,14 @@ class CameraStream:
         self._refs = 0
         self._opened = threading.Event()
         self._open_ok = False
+        self._thread = None
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
     def _start(self):
         self._running = True
-        threading.Thread(target=self._loop, daemon=True).start()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
 
     def _loop(self):
         cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
@@ -94,6 +96,15 @@ class CameraStream:
                 return
             _STREAMS.pop(self.index, None)
         self._running = False
+        # Block until this device's cv2.VideoCapture is actually closed before
+        # returning. DirectShow tolerates only one capture per device -- without
+        # this, a caller that immediately re-acquires the same index (a new
+        # CameraStream, on a new thread) can open a second cv2.VideoCapture
+        # while this one is still mid-read or mid-release, which is a known way
+        # to hard-crash (segfault) the process rather than raise a catchable
+        # Python exception.
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
 
     # ── frames ──────────────────────────────────────────────────────────────
 
