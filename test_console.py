@@ -400,12 +400,22 @@ class HiPotSerial:
     def is_open(self): return self._ser is not None and self._ser.is_open
     def write_line(self, cmd: str):
         if not self.is_open: return
-        self._ser.write((cmd + "\r\n").encode("ascii"))
+        try:
+            self._ser.write((cmd + "\r\n").encode("ascii"))
+            print(f"[HIPOT DEBUG] >> {cmd}")
+        except Exception as e:
+            print(f"[HIPOT DEBUG] write_line EXCEPTION on '{cmd}': {e}")
+            self.close()
         time.sleep(0.025)
     def read_line(self) -> str:
         if not self.is_open: return ""
-        try: return self._ser.readline().decode("ascii", errors="ignore").strip()
-        except Exception: return ""
+        try:
+            line = self._ser.readline().decode("ascii", errors="ignore").strip()
+            print(f"[HIPOT DEBUG] << {line!r}")
+            return line
+        except Exception as e:
+            print(f"[HIPOT DEBUG] read_line EXCEPTION: {e}")
+            return ""
     def flush(self):
         if self.is_open:
             self._ser.reset_input_buffer()
@@ -427,6 +437,7 @@ class HiPotSerial:
             parts = response.split(",")
             if len(parts) > 3: ir_val = float(parts[3][:4])
         except (ValueError, IndexError): ir_val = 0.0
+        print(f"[HIPOT DEBUG] IR: commanded {ir_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={ir_val}")
         return ir_min <= ir_val <= ir_max, ir_val
     def run_acw_test(self, acw_volt_kv: float, acw_time_s: float, acw_min: float, acw_max: float) -> tuple:
         instr = [
@@ -445,6 +456,7 @@ class HiPotSerial:
             parts = response.split(",")
             if len(parts) > 3: acw_val = float(parts[3][:5])
         except (ValueError, IndexError): acw_val = 0.0
+        print(f"[HIPOT DEBUG] ACW: commanded {acw_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={acw_val}")
         return acw_min <= acw_val <= acw_max, acw_val
 
 def _generate_lot_number(pno: str, machine_id: str) -> str:
@@ -1301,6 +1313,7 @@ def render(parent):
                         _log(f"IR (Combined): Channel {ch} ACK failed!")
                         all_pass = False
             s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
+            _log(f"IR: commanding {s0.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
             for ch in range(1, n_ch + 1):
                 s = state["spec_ir"].get(ch, {}); passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
@@ -1326,6 +1339,7 @@ def render(parent):
                         _log(f"IR (Individual): Channel {ch} ACK failed!")
                         all_pass = False
                 s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
+                _log(f"IR CH{ch}: commanding {s.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
                 passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
                 if not passed or not ack_ok: all_pass = False
@@ -1377,6 +1391,7 @@ def render(parent):
                         _log(f"ACW (Combined): Channel {ch} ACK failed!")
                         all_pass = False
             s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
+            _log(f"ACW: commanding {s0.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
             for ch in range(1, n_ch + 1):
                 s = state["spec_acw"].get(ch, {}); passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
@@ -1402,6 +1417,7 @@ def render(parent):
                         _log(f"ACW (Individual): Channel {ch} ACK failed!")
                         all_pass = False
                 s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = float(s.get("min", 0.0)); v_max = float(s.get("max", 10.0))
+                _log(f"ACW CH{ch}: commanding {s.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
                 passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed or not ack_ok: all_pass = False
