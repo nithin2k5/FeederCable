@@ -665,6 +665,13 @@ class CameraFeed:
 def render(parent):
     cfg = _load_cfg()
     style = ttk.Style()
+    # Windows' native ttk theme ("vista") ignores Treeview/LabelFrame color
+    # overrides outright -- every dark color configured below silently does
+    # nothing under it, which is why the spec/history tables render as
+    # plain white boxes instead of the intended dark theme. "clam" is a
+    # theme that actually honors style.configure colors.
+    try: style.theme_use("clam")
+    except tk.TclError: pass
     style.configure("TC.TLabelframe", background="black", foreground="white", bordercolor="#444")
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
