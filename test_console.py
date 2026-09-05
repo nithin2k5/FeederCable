@@ -733,24 +733,28 @@ def render(parent):
     right_panel.grid(row=0, column=1, sticky="nsew")
     right_panel.grid_propagate(False)
     right_panel.columnconfigure(0, weight=1)
-    for i in range(3): right_panel.rowconfigure(i, weight=0)
-    right_panel.rowconfigure(0, weight=1)
+    for i in range(4): right_panel.rowconfigure(i, weight=0)
+    right_panel.rowconfigure(3, weight=1)   # camera frame absorbs leftover space
 
     result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
-    result_outer.grid(row=0, column=0, sticky="nsew", pady=(0, 3))
+    result_outer.grid(row=0, column=0, sticky="ew", pady=(0, 3))
     result_inner = tk.Frame(result_outer, bg="black")
     result_inner.pack(fill="both", expand=True)
     tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 36, "bold"), anchor="center")
-    result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
-    rework_lbl = tk.Label(result_inner, text="", bg="black", fg="#ff9100", font=("Arial", 11, "bold"), anchor="center")
-    rework_lbl.pack(fill="x", padx=4, pady=(0, 2))
+    result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 26, "bold"), anchor="center")
+    result_lbl.pack(fill="x", padx=4, pady=(2, 4), ipady=20)
     tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
     lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
     lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
     tk.Label(result_inner, text="ELAPSED TIME (s)", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
     elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
     elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
+
+    # Rework indicator lives outside the TEST RESULT box entirely -- it's not
+    # a status field like LOT NO/ELAPSED TIME, it's an attention-grabbing
+    # flag that blinks on/off while X3 (rework select) is high.
+    rework_lbl = tk.Label(right_panel, text="", bg="black", fg="#ff9100", font=("Arial", 12, "bold"), anchor="center")
+    rework_lbl.grid(row=1, column=0, sticky="ew", pady=(0, 3))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
     
@@ -762,9 +766,7 @@ def render(parent):
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
 
-    # Move COM status down to row 2, and Camera down to row 3
-
-    com_lf.grid(row=1, column=0, sticky="ew", pady=(0, 3))
+    com_lf.grid(row=2, column=0, sticky="ew", pady=(0, 3))
     com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
     com_inner.pack(fill="both")
     com_labels = {}
@@ -787,7 +789,7 @@ def render(parent):
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
-    cam_frame.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
+    cam_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
     _cam_feeds = []  # track for cleanup
     cam_labels = {}       # cam_id -> preview Label
     cam_feeds_by_id = {}  # cam_id -> CameraFeed (only when a live feed is running)
@@ -1031,7 +1033,7 @@ def render(parent):
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
     for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
-    test_rows_def = [("IR", "Insulation (IR)", "MÎ©"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
+    test_rows_def = [("IR", "Insulation (IR)", "Ohms"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
         tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
@@ -1567,7 +1569,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
                 for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
-            _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
+            _log(f"IR (Combined): {ir_val:.0f} Ohms — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"IR Test: Testing CH{ch}...")
