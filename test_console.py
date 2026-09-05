@@ -86,22 +86,37 @@ def _play_wav(filename: str):
             pass
 
 def _print_raw(printer_name: str, filename: str):
-    if not _print_ok: return
-    if not os.path.exists(filename): return
+    if not _print_ok:
+        print("[PRINT DEBUG] win32print not available (pywin32 not installed) -- cannot print")
+        return
+    if not os.path.exists(filename):
+        print(f"[PRINT DEBUG] label file not found: {filename}")
+        return
     try:
+        installed = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+        print(f"[PRINT DEBUG] installed printers: {installed}")
+        if printer_name not in installed:
+            print(f"[PRINT DEBUG] '{printer_name}' is NOT in the installed printers list above -- check exact spelling in Windows Settings > Printers & scanners")
+    except Exception as ex:
+        print(f"[PRINT DEBUG] could not enumerate printers: {ex}")
+    try:
+        print(f"[PRINT DEBUG] opening printer '{printer_name}' to send {filename}")
         hPrinter = win32print.OpenPrinter(printer_name)
         try:
             hJob = win32print.StartDocPrinter(hPrinter, 1, ("EOL Label", None, "RAW"))
             try:
                 win32print.StartPagePrinter(hPrinter)
                 with open(filename, "rb") as f:
-                    win32print.WritePrinter(hPrinter, f.read())
+                    data = f.read()
+                    win32print.WritePrinter(hPrinter, data)
                 win32print.EndPagePrinter(hPrinter)
+                print(f"[PRINT DEBUG] sent {len(data)} bytes to '{printer_name}' OK")
             finally:
                 win32print.EndDocPrinter(hPrinter)
         finally:
             win32print.ClosePrinter(hPrinter)
-    except Exception: pass
+    except Exception as ex:
+        print(f"[PRINT DEBUG] print FAILED: {ex}")
 # ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
 # Memory Coils (M):      base 0x0800  (write via FC05/FC15)
 # Discrete Inputs (X):   base 0x0400  (read via FC02, octal numbering)
@@ -487,8 +502,13 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     # nice1.prn = regular-part template, nice1R.prn = rework-part template.
     suffix = "R" if is_rework else ""
     prn_file = os.path.join(base, f"{lbl_sel}{suffix}.prn") if lbl_sel else ""
-    if not prn_file or not os.path.exists(prn_file): prn_file = os.path.join(base, "TEMPPRN.prn")
-    if not os.path.exists(prn_file): return
+    print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
+    if not prn_file or not os.path.exists(prn_file):
+        print(f"[PRINT DEBUG] template not found, falling back to TEMPPRN.prn")
+        prn_file = os.path.join(base, "TEMPPRN.prn")
+    if not os.path.exists(prn_file):
+        print(f"[PRINT DEBUG] no label file at all ({prn_file}) -- aborting print")
+        return
     now = datetime.datetime.now()
     try:
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
@@ -497,7 +517,8 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         tmp = os.path.join(base, "TEMPPRN.prn")
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
-    except Exception: pass
+    except Exception as ex:
+        print(f"[PRINT DEBUG] failed building/sending label: {ex}")
 
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 def _load_cam_cfg() -> dict:
