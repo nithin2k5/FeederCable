@@ -88,6 +88,23 @@ _SCAN_CTRL_NAMES = {
 def _fmt_scan(raw: str) -> str:
     return "".join(_SCAN_CTRL_NAMES.get(ch, ch) for ch in raw)
 
+def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
+    """The lot number is validated against the "T..." field specifically
+    (e.g. T260905I1A2A6 -- date + traceability code), not the whole scanned
+    string, so a lot number that happens to also appear in another field
+    (part number, serial, etc.) can't produce a false OK."""
+    if not labelstr:
+        return False
+    field = ""
+    for ch in scanned:
+        if ch in _SCAN_CTRL_NAMES:
+            if field.startswith("T") and labelstr in field:
+                return True
+            field = ""
+        else:
+            field += ch
+    return field.startswith("T") and labelstr in field
+
 def _play_wav(filename: str):
     base = os.path.dirname(__file__)
     path = os.path.join(base, filename)
@@ -1747,7 +1764,7 @@ def render(parent):
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
         if not scanned: return
-        if labelstr and labelstr in scanned: res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
+        if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
         else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
         _update_scan_result(state["lot_no"], res_str); _after(2000, _lock_scan_entry); _after(2100, _input_poll_start)
