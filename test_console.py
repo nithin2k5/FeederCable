@@ -746,10 +746,10 @@ def render(parent):
     rework_lbl = tk.Label(result_inner, text="", bg="black", fg="#ff9100", font=("Arial", 11, "bold"), anchor="center")
     rework_lbl.pack(fill="x", padx=4, pady=(0, 2))
     tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    lot_lbl = tk.Label(result_inner, text="â€”", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
+    lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
     lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
     tk.Label(result_inner, text="ELAPSED TIME (s)", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    elapsed_lbl = tk.Label(result_inner, text="â€”", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
+    elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
     elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
@@ -1031,26 +1031,26 @@ def render(parent):
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
     for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
-    test_rows_def = [("IR", "Insulation (IR)", "MÎ©"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "â€”")]
+    test_rows_def = [("IR", "Insulation (IR)", "MÎ©"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
         tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
         tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", 8, "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
         row_cells = []
         for ch_i in range(MAX_CH):
-            lbl = tk.Label(test_frame, text="â€”", bg="#0d0d0d", fg="#333", font=("Arial", 8), bd=1, relief="solid", pady=6)
+            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 8), bd=1, relief="solid", pady=6)
             lbl.grid(row=r_idx, column=2 + ch_i, sticky="nsew")
             row_cells.append(lbl)
-        res_lbl = tk.Label(test_frame, text="â€”", bg="#0d0d0d", fg="#333", font=("Arial", 9, "bold"), bd=1, relief="solid")
+        res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 9, "bold"), bd=1, relief="solid")
         res_lbl.grid(row=r_idx, column=2 + MAX_CH, sticky="nsew")
         result_rows[key] = {"cells": row_cells, "result": res_lbl}
 
     def _reset_test_display():
         for key in result_rows:
-            for cell in result_rows[key]["cells"]: cell.config(text="â€”", bg="#0d0d0d", fg="#333")
-            result_rows[key]["result"].config(text="â€”", bg="#0d0d0d", fg="#333")
+            for cell in result_rows[key]["cells"]: cell.config(text="—", bg="#0d0d0d", fg="#333")
+            result_rows[key]["result"].config(text="—", bg="#0d0d0d", fg="#333")
         result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")
-        lot_lbl.config(text="â€”"); elapsed_lbl.config(text="â€”"); blink_start()
+        lot_lbl.config(text="—"); elapsed_lbl.config(text="—"); blink_start()
 
     def _set_cell(test_key, ch_idx, value, passed):
         if ch_idx >= len(result_rows[test_key]["cells"]): return
@@ -1331,8 +1331,8 @@ def render(parent):
             tree_spec.delete(*tree_spec.get_children())
             for ch in range(1, channel + 1):
                 for test_key, tag, sp in [("Insulation Test", "ir", spec_ir.get(ch, {})), ("Withstand Test", "acw", spec_acw.get(ch, {}))]:
-                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), sp.get("appvol", "â€”"), sp.get("testtime", "â€”"), sp.get("min", "â€”"), sp.get("max", "â€”")))
-                tree_spec.insert("", "end", tags=("contact",), values=("Contact Test", str(ch), "â€”", "â€”", "â€”", "â€”"))
+                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), sp.get("appvol", "—"), sp.get("testtime", "—"), sp.get("min", "—"), sp.get("max", "—")))
+                tree_spec.insert("", "end", tags=("contact",), values=("Contact Test", str(ch), "—", "—", "—", "—"))
             spec_status_lbl.config(text=f"[ {channel} channel(s) loaded ]", fg="#4caf50")
             _log(f"Specs loaded for {pno} ({channel} ch)")
             return True
@@ -1366,7 +1366,7 @@ def render(parent):
         except Exception: ng = 0
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
-            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "â€”", row[3] or "â€”", row[4], row[5]))
+            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "—", row[3] or "—", row[4], row[5]))
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
@@ -1776,7 +1776,7 @@ def render(parent):
                 _after(0, lambda: _set_scan_box(""))
                 _after(500, _input_poll_start)
         else:
-            _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL â€” Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+            _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, lambda: _load_today_pass(pno)); _after(0, lambda: _load_history(pno)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
