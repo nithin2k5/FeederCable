@@ -489,7 +489,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         seq = 1
     return f"{prefix}{seq}"
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "TSC TE310"):
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
@@ -499,9 +499,14 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
             if row: lbl_sel = row[0] or ""
     except Exception as ex:
         print(f"DB Error getting label: {ex}")
-    # nice1.prn = regular-part template, nice1R.prn = rework-part template.
+    # lblsel is the full path of the .prn template picked in Model Settings.
+    # nice1.prn = regular-part template, nice1R.prn = rework-part template
+    # (a sibling file with "R" inserted before the extension).
     suffix = "R" if is_rework else ""
-    prn_file = os.path.join(base, f"{lbl_sel}{suffix}.prn") if lbl_sel else ""
+    prn_file = ""
+    if lbl_sel:
+        root, ext = os.path.splitext(lbl_sel)
+        prn_file = f"{root}{suffix}{ext or '.prn'}"
     print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
     if not prn_file or not os.path.exists(prn_file):
         print(f"[PRINT DEBUG] template not found, falling back to TEMPPRN.prn")

@@ -27,6 +27,12 @@ def ensure_column(table: str, column: str, coltype: str):
         if e.errno != 1060:  # 1060 = ER_DUP_FIELDNAME, i.e. already added
             raise
 
+def widen_column(table: str, column: str, coltype: str):
+    """Widen an existing column's type in place. Idempotent -- re-running a
+    MODIFY COLUMN to the same type is a harmless no-op."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(f"ALTER TABLE {table} MODIFY COLUMN {column} {coltype}")
+
 @contextmanager
 def get_cursor(commit=False):
     """

@@ -1,15 +1,17 @@
 import os
-import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import mysql.connector
 
 import db
 
-DEFAULT_LABEL = "HMI DATAMATRIX"
-
 
 def render(parent):
+    try:
+        db.widen_column("settingmaster", "lblsel", "VARCHAR(500)")
+    except Exception:
+        pass  # DB may be unreachable right now -- don't block the page for it
+
     style = ttk.Style()
     style.configure("Treeview.Heading",
                     background="#111", foreground="white",
@@ -130,22 +132,14 @@ def render(parent):
             filetypes=[("PRN Label Files", "*.prn"), ("All Files", "*.*")])
         if not path:
             return
-        name = os.path.splitext(os.path.basename(path))[0]
-        dest = os.path.join(base, os.path.basename(path))
-        try:
-            if os.path.abspath(path) != os.path.abspath(dest):
-                shutil.copyfile(path, dest)
-        except Exception as ex:
-            messagebox.showerror("Error", f"Could not copy label template:\n{ex}")
-            return
-        _set_label_entry(name)
+        _set_label_entry(os.path.abspath(path))
 
     btn_browse_label = tk.Button(lbl_wrap, text="📁", bg="#333", fg="white",
                                   font=('Arial', 9), bd=0, width=3, cursor="hand2",
                                   command=on_browse_label)
     btn_browse_label.grid(row=0, column=1, padx=(4, 0))
 
-    _set_label_entry(DEFAULT_LABEL)
+    _set_label_entry("")
 
     cb_machine = mk_combo(f3, ["PB1", "PB2", "PB3", "PB4"], width=20)
     cb_machine.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
@@ -304,7 +298,7 @@ def render(parent):
             e.config(state="normal")
             e.delete(0, "end")
         cb_channels.current(0)
-        _set_label_entry(DEFAULT_LABEL)
+        _set_label_entry("")
         cb_machine.current(0)
         cb_testmode.current(0)
         selected_pno["value"] = None
@@ -349,7 +343,7 @@ def render(parent):
         cb_channels.config(values=ch_list)
         cb_channels.set(ch_val if ch_val in ch_list else "1")
 
-        _set_label_entry(row_dict.get("lblsel", "") or DEFAULT_LABEL)
+        _set_label_entry(row_dict.get("lblsel", ""))
 
         mach_val = row_dict.get("machine", "PB1")
         if mach_val in list(cb_machine["values"]):
