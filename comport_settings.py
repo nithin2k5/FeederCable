@@ -210,6 +210,17 @@ def render(parent):
         
         combos[dev] = (cb_port, cb_baud, cb_sid)
 
+    # Label scan verification toggle -- when off, Test Console skips the
+    # "scan the printed label" step after a PASS instead of waiting for it.
+    scan_enabled = tk.BooleanVar(value=cfg["COM"].get("scan_enabled", "True").strip().lower()
+                                 in ("1", "true", "yes", "on"))
+    scan_row = tk.Frame(panel, bg="#12151b")
+    scan_row.pack(fill="x", padx=35, pady=(0, 10))
+    tk.Checkbutton(scan_row, text="Verify printed label by scanning it after a PASS",
+                   variable=scan_enabled, bg="#12151b", fg="white", font=('Arial', 11),
+                   selectcolor="#12151b", activebackground="#12151b", activeforeground="white",
+                   highlightthickness=0, bd=0, cursor="hand2").pack(side="left")
+
     def save_settings():
         mapping = {
             "HIPOT": ("hp_port", "hp_baud"),
@@ -224,6 +235,7 @@ def render(parent):
             if dev in mapping:
                 cfg["COM"][mapping[dev][0]] = cb_p.get()
                 cfg["COM"][mapping[dev][1]] = cb_b.get()
+        cfg["COM"]["scan_enabled"] = str(scan_enabled.get())
         with open(_CFG_PATH, "w") as f:
             cfg.write(f)
         log_msg("Settings saved successfully!")

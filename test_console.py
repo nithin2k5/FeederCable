@@ -68,12 +68,25 @@ def _load_cfg() -> dict:
         "hp_port":    cfg.get("COM", "hp_port",    fallback="0"),
         "hp_baud":    cfg.getint("COM", "hp_baud",  fallback=0),
         "machine_id": cfg.get("COM", "machine_id", fallback="PB1"),
+        "scan_enabled": cfg.getboolean("COM", "scan_enabled", fallback=True),
     }
 def _save_cfg(d: dict):
     cfg = configparser.ConfigParser()
     cfg["COM"] = {k: str(v) for k, v in d.items()}
     with open(_CFG_PATH, "w") as f:
         cfg.write(f)
+
+# ISO/IEC 15434 labels carry non-printable separators, which render as nothing
+# (or as boxes) in a Tk label. Show them as mnemonics so the operator sees the
+# structure of what was scanned:
+#   [)>[RS]06[GS]VT007[GS]P123[GS]S123[GS]T260905I1A2A6[GS][RS][EOT]
+_SCAN_CTRL_NAMES = {
+    "\x1e": "[RS]", "\x1d": "[GS]", "\x1f": "[US]",
+    "\x04": "[EOT]", "\x05": "[ENQ]", "\r": "[CR]", "\n": "[LF]",
+}
+
+def _fmt_scan(raw: str) -> str:
+    return "".join(_SCAN_CTRL_NAMES.get(ch, ch) for ch in raw)
 
 def _play_wav(filename: str):
     base = os.path.dirname(__file__)
@@ -1043,68 +1056,77 @@ def render(parent):
 
     bottom = tk.Frame(content, bg="black", height=110)
     bottom.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-    bottom.grid_propagate(False); bottom.columnconfigure(0, weight=4); bottom.columnconfigure(1, weight=3); bottom.rowconfigure(0, weight=1)
+    bottom.grid_propagate(False)
+    bottom.columnconfigure(0, weight=0)   # I/O: only as wide as its indicator grid
+    bottom.columnconfigure(1, weight=3)   # Label Scan Result
+    bottom.columnconfigure(2, weight=2)   # Log
+    bottom.rowconfigure(0, weight=1)
     io_lf = ttk.LabelFrame(bottom, text="PLC I/O Channel Status", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    io_inner = tk.Frame(io_lf, bg="black", padx=5, pady=4); io_inner.pack(fill="both", expand=True)
+    io_inner = tk.Frame(io_lf, bg="black", padx=4, pady=3); io_inner.pack(fill="both", expand=True)
+
+    # Cell and row-label widths are shared by every row so the M coils, the X
+    # inputs and the channel-number header stay in one vertical grid. A cell is
+    # exactly wide enough for its "M29"/"X20" text.
+    _IO_CELL_W, _IO_LBL_W, _IO_GAP = 3, 9, 6
 
     # ── ROW 0: channel-number header, aligned with the M/X columns below ──
     # so a lit cell reads as "channel N", not "go look up what M32 means".
     hdr_row = tk.Frame(io_inner, bg="black"); hdr_row.pack(anchor="w")
-    tk.Label(hdr_row, text="CH #:", bg="black", fg="#555", font=("Arial", 7), width=11, anchor="w").pack(side="left")
-    tk.Label(hdr_row, text="", bg="black", width=4).pack(side="left", padx=(0, 8))  # spacer over Safety/ACK cell
+    tk.Label(hdr_row, text="CH #:", bg="black", fg="#555", font=("Arial", 7), width=_IO_LBL_W, anchor="w").pack(side="left")
+    tk.Label(hdr_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=(0, _IO_GAP))  # spacer over Safety/ACK cell
     for ch in range(1, 9):
-        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=4).pack(side="left", padx=1)
-    tk.Frame(hdr_row, bg="black", width=8).pack(side="left")
+        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=_IO_CELL_W).pack(side="left", padx=1)
+    tk.Frame(hdr_row, bg="black", width=_IO_GAP).pack(side="left")
     for ch in range(1, 9):
-        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=4).pack(side="left", padx=1)
+        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=_IO_CELL_W).pack(side="left", padx=1)
 
     # ── ROW 1: PLC Outputs (M Coils) ──
-    out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 6))
-    tk.Label(out_row, text="OUTPUTS (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
-    
+    out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 5))
+    tk.Label(out_row, text="OUT (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
+
     # Safety Relay
-    safety_lbl = tk.Label(out_row, text="M28", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
-    safety_lbl.pack(side="left", padx=(0, 8))
+    safety_lbl = tk.Label(out_row, text="M28", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    safety_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # Contact Relays
     io_contact_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_contact_labels.append(lbl)
 
-    tk.Frame(out_row, bg="black", width=8).pack(side="left")
+    tk.Frame(out_row, bg="black", width=_IO_GAP).pack(side="left")
 
     # HV Relays
     io_ir_acw_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_ir_acw_labels.append(lbl)
 
     # ── ROW 2: PLC Inputs (X Pins) ──
     in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 2))
-    tk.Label(in_row, text="INPUTS (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=11, anchor="w").pack(side="left")
+    tk.Label(in_row, text="IN (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
 
     # Safety ACK
-    x4_lbl = tk.Label(in_row, text="X4", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
-    x4_lbl.pack(side="left", padx=(0, 8))
+    x4_lbl = tk.Label(in_row, text="X4", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x4_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # Contact OK (aligns under M30)
-    x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=4)
+    x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
 
     # Empty space to pad under M31-M37
     for i in range(2, 9):
-        tk.Label(in_row, text="", bg="black", width=4).pack(side="left", padx=1)
+        tk.Label(in_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=1)
 
-    tk.Frame(in_row, bg="black", width=8).pack(side="left")
+    tk.Frame(in_row, bg="black", width=_IO_GAP).pack(side="left")
 
     # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#141008", fg="#4a3f26", font=("Arial", 7), bd=1, relief="solid", width=4)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#141008", fg="#4a3f26", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
     
@@ -1182,8 +1204,43 @@ def render(parent):
             _after(0, lambda idx=i: (_set_io(io_contact_labels, idx, False),
                                       _set_io(io_ir_acw_labels, idx, False),
                                       _set_io(io_in_labels, idx, False)))
+    scan_lf = ttk.LabelFrame(bottom, text="Label Scan Result", style="TC.TLabelframe")
+    scan_lf.grid(row=0, column=1, sticky="nsew", padx=(0, 4))
+    scan_inner = tk.Frame(scan_lf, bg="black", padx=6, pady=4); scan_inner.pack(fill="both", expand=True)
+
+    scan_verdict_lbl = tk.Label(scan_inner, text="—", bg="black", fg="#555",
+                                font=("Arial", 11, "bold"), anchor="w")
+    scan_verdict_lbl.pack(fill="x")
+    # The scanned code is long and full of separators; wrap it rather than
+    # truncate, so the operator can read the whole thing against the part.
+    scan_data_lbl = tk.Label(scan_inner, text="Waiting for scan…", bg="black", fg="#666",
+                             font=("Consolas", 8), anchor="nw", justify="left", wraplength=300)
+    scan_data_lbl.pack(fill="both", expand=True, pady=(2, 0))
+
+    def _set_scan_box(verdict: str, raw: str = ""):
+        """verdict: "OK" | "NG" | "" (idle)."""
+        colors = {"OK": ("✅  OK", "#76ff03"), "NG": ("❌  NG", "#ff5555")}
+        text, fg = colors.get(verdict, ("—", "#555"))
+        idle = "Waiting for scan…" if cfg.get("scan_enabled", True) else "Scan verification disabled"
+        try:
+            if scan_verdict_lbl.winfo_exists():
+                scan_verdict_lbl.config(text=text, fg=fg)
+            if scan_data_lbl.winfo_exists():
+                scan_data_lbl.config(text=_fmt_scan(raw) if raw else idle,
+                                     fg="#ccc" if raw else "#666")
+        except Exception: pass
+    _set_scan_box("")
+
+    def _fit_scan_wrap(event):
+        # wraplength is in pixels and has to follow the panel, or a long code
+        # spills past the edge instead of wrapping inside it.
+        try:
+            if scan_data_lbl.winfo_exists(): scan_data_lbl.config(wraplength=max(event.width - 16, 80))
+        except Exception: pass
+    scan_inner.bind("<Configure>", _fit_scan_wrap)
+
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
-    log_lf.grid(row=0, column=1, sticky="nsew")
+    log_lf.grid(row=0, column=2, sticky="nsew")
     log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
@@ -1660,19 +1717,24 @@ def render(parent):
         if overall == "PASS":
             _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
-            _after(5000, _show_scan_entry)
+            if cfg.get("scan_enabled", True):
+                _after(5000, _show_scan_entry)
+            else:
+                _after(0, lambda: _set_scan_box(""))
+                _after(500, _input_poll_start)
         else:
             _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL â€” Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, lambda: _load_today_pass(pno)); _after(0, lambda: _load_history(pno)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
-    def _show_scan_entry(): scan_entry_frame.pack(fill="x", pady=(0, 3)); ent_scan.delete(0, "end"); ent_scan.focus_set(); scan_result_lbl.config(text="", fg="white")
+    def _show_scan_entry(): scan_entry_frame.pack(fill="x", pady=(0, 3)); ent_scan.delete(0, "end"); ent_scan.focus_set(); scan_result_lbl.config(text="", fg="white"); _set_scan_box("")
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
         if not scanned: return
-        if labelstr and labelstr in scanned: res_str = "OK"; scan_result_lbl.config(text="âœ…  OK", fg="#76ff03"); _log(f"Scan verify: OK ({scanned})")
-        else: res_str = "NG"; scan_result_lbl.config(text="âŒ  NG", fg="#ff5555"); _log(f"Scan verify: NG (expected '{labelstr}', got '{scanned}')")
+        if labelstr and labelstr in scanned: res_str = "OK"; scan_result_lbl.config(text="âœ…  OK", fg="#76ff03"); _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
+        else: res_str = "NG"; scan_result_lbl.config(text="âŒ  NG", fg="#ff5555"); _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
+        _set_scan_box(res_str, scanned)
         _update_scan_result(state["lot_no"], res_str); _after(2000, scan_entry_frame.pack_forget); _after(2100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
@@ -1744,7 +1806,7 @@ def render(parent):
         ent_jig.config(state="normal"); ent_jig.delete(0, "end"); ent_jig.config(state="readonly", bg="#0d0d0d")
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); tree_lot.delete(*tree_lot.get_children()); _reset_test_display()
-        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); scan_entry_frame.pack_forget()
+        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); scan_entry_frame.pack_forget(); _set_scan_box("")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None})
         btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_emp.focus_set()
     tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
