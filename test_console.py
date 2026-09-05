@@ -733,10 +733,33 @@ def render(parent):
     right_panel.grid(row=0, column=1, sticky="nsew")
     right_panel.grid_propagate(False)
     right_panel.columnconfigure(0, weight=1)
-    for i in range(5): right_panel.rowconfigure(i, weight=0)
-    right_panel.rowconfigure(1, weight=1)   # spacer above TEST RESULT
-    right_panel.rowconfigure(4, weight=1)   # spacer below -- together these center it
+    for i in range(4): right_panel.rowconfigure(i, weight=0)
+    right_panel.rowconfigure(0, weight=1)   # TEST RESULT frame absorbs leftover space
 
+    result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
+    result_outer.grid(row=0, column=0, sticky="nsew", pady=(0, 3))
+    result_inner = tk.Frame(result_outer, bg="black")
+    result_inner.pack(fill="both", expand=True)
+    tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
+    result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 26, "bold"), anchor="center")
+    result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
+    tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
+    lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
+    lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
+    tk.Label(result_inner, text="ELAPSED TIME (s)", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
+    elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
+    elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
+
+    # Rework indicator lives outside the TEST RESULT box entirely, styled like
+    # a COM Status pill (bordered box, always showing its name) -- blinking
+    # is done by swapping its color, not its text, while X3 (rework select)
+    # is high.
+    rework_lbl = tk.Label(right_panel, text="REWORK", bg="#2a2a2a", fg="#555",
+                          font=("Arial", 8), pady=3, bd=1, relief="solid")
+    rework_lbl.grid(row=1, column=0, sticky="ew", pady=(0, 3))
+
+    com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
+    
     # Initialize local vision controller (headless, no UI panel)
     try:
         from vision_engine.vision_controller import get_vision_controller
@@ -745,10 +768,30 @@ def render(parent):
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
 
-    # Camera frames — live feed from OpenCV. Pushed to the top of the sidebar.
+    com_lf.grid(row=2, column=0, sticky="ew", pady=(0, 3))
+    com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
+    com_inner.pack(fill="both")
+    com_labels = {}
+    for i, dev in enumerate(["HiPot", "IO Ctrl", "Scanner", "Printer"]):
+        r, c = divmod(i, 2)
+        lbl = tk.Label(com_inner, text=dev, bg="#2a2a2a", fg="#555", font=("Arial", 8), width=9, pady=3, bd=1, relief="solid")
+        lbl.grid(row=r, column=c, padx=2, pady=2, sticky="ew")
+        com_labels[dev] = lbl
+        com_inner.columnconfigure(c, weight=1)
+    def set_com_status(dev, connected):
+        lbl = com_labels.get(dev)
+        def _update():
+            try:
+                if lbl.winfo_exists(): lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
+            except Exception: pass
+        if lbl:
+            try: _after(0, _update)
+            except Exception: pass
+
+    # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
-    cam_frame.grid(row=0, column=0, sticky="new")
+    cam_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
     _cam_feeds = []  # track for cleanup
     cam_labels = {}       # cam_id -> preview Label
     cam_feeds_by_id = {}  # cam_id -> CameraFeed (only when a live feed is running)
@@ -905,32 +948,6 @@ def render(parent):
     _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"], 1, cam_cfg["cam1_width"], cam_cfg["cam1_height"])
     _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"], 2, cam_cfg["cam2_width"], cam_cfg["cam2_height"])
 
-    # TEST RESULT sits centered in the space left below the cameras -- the
-    # weight=1 spacer rows above (1) and below (4) share the leftover space
-    # equally, so this box and the rework flag under it land in the middle
-    # rather than pinned to the top or bottom of the sidebar.
-    result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
-    result_outer.grid(row=2, column=0, sticky="ew", pady=(3, 3))
-    result_inner = tk.Frame(result_outer, bg="black")
-    result_inner.pack(fill="both", expand=True)
-    tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 26, "bold"), anchor="center")
-    result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
-    tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
-    lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
-    tk.Label(result_inner, text="ELAPSED TIME (s)", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
-    elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
-
-    # Rework indicator lives outside the TEST RESULT box entirely, styled like
-    # a COM Status pill (bordered box, always showing its name) -- blinking
-    # is done by swapping its color, not its text, while X3 (rework select)
-    # is high.
-    rework_lbl = tk.Label(right_panel, text="REWORK", bg="#2a2a2a", fg="#555",
-                          font=("Arial", 8), pady=3, bd=1, relief="solid")
-    rework_lbl.grid(row=3, column=0, sticky="ew", pady=(0, 3))
-
     # Cleanup camera feeds and the PLC input-polling loop when the page is destroyed.
     # Without this, navigating away (e.g. to COM Port Settings) left the X0
     # "waiting for physical START" poll looping forever in the background,
@@ -1080,8 +1097,7 @@ def render(parent):
     bottom.grid_propagate(False)
     bottom.columnconfigure(0, weight=0)   # I/O: only as wide as its indicator grid
     bottom.columnconfigure(1, weight=3)   # Label Scan Result
-    bottom.columnconfigure(2, weight=0)   # COM Status: only as wide as its pill grid
-    bottom.columnconfigure(3, weight=1)   # Log
+    bottom.columnconfigure(2, weight=2)   # Log
     bottom.rowconfigure(0, weight=1)
     io_lf = ttk.LabelFrame(bottom, text="PLC I/O Channel Status", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
@@ -1278,29 +1294,8 @@ def render(parent):
         except Exception: pass
     scan_inner.bind("<Configure>", _fit_scan_wrap)
 
-    com_lf = ttk.LabelFrame(bottom, text="COM Status", style="TC.TLabelframe")
-    com_lf.grid(row=0, column=2, sticky="ns", padx=(0, 4))
-    com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
-    com_inner.pack(fill="both")
-    com_labels = {}
-    for i, dev in enumerate(["HiPot", "IO Ctrl", "Scanner", "Printer"]):
-        r, c = divmod(i, 2)
-        lbl = tk.Label(com_inner, text=dev, bg="#2a2a2a", fg="#555", font=("Arial", 8), width=9, pady=3, bd=1, relief="solid")
-        lbl.grid(row=r, column=c, padx=2, pady=2, sticky="ew")
-        com_labels[dev] = lbl
-        com_inner.columnconfigure(c, weight=1)
-    def set_com_status(dev, connected):
-        lbl = com_labels.get(dev)
-        def _update():
-            try:
-                if lbl.winfo_exists(): lbl.config(bg="#1b5e20" if connected else "#3a3a3a", fg="white" if connected else "#555")
-            except Exception: pass
-        if lbl:
-            try: _after(0, _update)
-            except Exception: pass
-
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
-    log_lf.grid(row=0, column=3, sticky="nsew")
+    log_lf.grid(row=0, column=2, sticky="nsew")
     log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
