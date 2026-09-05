@@ -1028,13 +1028,6 @@ def render(parent):
     scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", 11, "bold"), pady=8)
     scan_lbl.pack(fill="both", expand=True)
 
-    scan_entry_frame = tk.Frame(left_area, bg="black")
-    scan_entry_frame.pack(fill="x", pady=(0, 3)); scan_entry_frame.pack_forget()
-    tk.Label(scan_entry_frame, text="Scan Label:", bg="black", fg="#aaa", font=("Arial", 9)).pack(side="left", padx=5)
-    ent_scan = _ent(scan_entry_frame, w=36, editable=True); ent_scan.pack(side="left", padx=5, pady=5)
-    scan_result_lbl = tk.Label(scan_entry_frame, text="", bg="black", fg="white", font=("Arial", 12, "bold"))
-    scan_result_lbl.pack(side="left", padx=8)
-
     tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
     lot_cols = ("#", "LOT NO", "ALC", "RESULT", "SCAN", "EMP", "TIME")
     tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
@@ -1211,6 +1204,20 @@ def render(parent):
     scan_verdict_lbl = tk.Label(scan_inner, text="—", bg="black", fg="#555",
                                 font=("Arial", 11, "bold"), anchor="w")
     scan_verdict_lbl.pack(fill="x")
+
+    # The operator never has to click anywhere -- after a PASS this entry
+    # gets keyboard focus directly, so a keyboard-wedge scanner's trigger
+    # pull types the code straight in here and its own Enter submits it.
+    ent_scan = _ent(scan_inner, editable=False)
+    ent_scan.pack(fill="x", pady=(3, 3))
+
+    def _lock_scan_entry():
+        try:
+            if ent_scan.winfo_exists():
+                ent_scan.delete(0, "end")
+                ent_scan.config(state="readonly")
+        except Exception: pass
+
     # The scanned code is long and full of separators; wrap it rather than
     # truncate, so the operator can read the whole thing against the part.
     scan_data_lbl = tk.Label(scan_inner, text="Waiting for scan…", bg="black", fg="#666",
@@ -1648,7 +1655,7 @@ def render(parent):
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
-        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, scan_entry_frame.pack_forget)
+        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
         # Re-check X3 (rework select) fresh for this cycle -- the background
@@ -1728,14 +1735,22 @@ def render(parent):
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
-    def _show_scan_entry(): scan_entry_frame.pack(fill="x", pady=(0, 3)); ent_scan.delete(0, "end"); ent_scan.focus_set(); scan_result_lbl.config(text="", fg="white"); _set_scan_box("")
+    def _show_scan_entry():
+        """Called once a PASS has had time to print. Puts keyboard focus on
+        the entry inside the Label Scan Result box, so a keyboard-wedge
+        scanner's trigger pull -- which just "types" the code followed by
+        its own Enter -- lands there directly with no click needed."""
+        try:
+            ent_scan.config(state="normal"); ent_scan.delete(0, "end"); ent_scan.focus_set()
+        except Exception: pass
+        _set_scan_box("")
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
         if not scanned: return
-        if labelstr and labelstr in scanned: res_str = "OK"; scan_result_lbl.config(text="âœ…  OK", fg="#76ff03"); _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
-        else: res_str = "NG"; scan_result_lbl.config(text="âŒ  NG", fg="#ff5555"); _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
+        if labelstr and labelstr in scanned: res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
+        else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
-        _update_scan_result(state["lot_no"], res_str); _after(2000, scan_entry_frame.pack_forget); _after(2100, _input_poll_start)
+        _update_scan_result(state["lot_no"], res_str); _after(2000, _lock_scan_entry); _after(2100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     def _input_poll_once():
@@ -1806,7 +1821,7 @@ def render(parent):
         ent_jig.config(state="normal"); ent_jig.delete(0, "end"); ent_jig.config(state="readonly", bg="#0d0d0d")
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); tree_lot.delete(*tree_lot.get_children()); _reset_test_display()
-        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); scan_entry_frame.pack_forget(); _set_scan_box("")
+        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_scan_box("")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None})
         btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_emp.focus_set()
     tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
