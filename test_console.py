@@ -42,6 +42,7 @@ except ImportError:
 
 try:
     import cv2
+    from vision_engine import camera
     _cv2_ok = True
 except ImportError:
     _cv2_ok = False
@@ -541,13 +542,23 @@ def _load_cam_cfg() -> dict:
     }
 
 class CameraFeed:
-    """Streams a live camera feed into a tkinter Label widget."""
-    def __init__(self, label, cam_index, display_w=200, display_h=110):
+    """Streams a live camera feed into a tkinter Label widget.
+
+    Reads through vision_engine.camera's reference-counted registry instead
+    of opening its own cv2.VideoCapture. A DirectShow device only tolerates
+    one open capture at a time -- a second independent VideoCapture on the
+    same index (e.g. this live preview racing the vision inspection that
+    runs mid-test on the same camera) raises an unrecoverable C++ exception
+    inside OpenCV's DSHOW backend and takes the whole process down with it.
+    """
+    def __init__(self, label, cam_index, display_w=200, display_h=110, width=640, height=480):
         self._label = label
         self._cam_index = cam_index
         self._display_w = display_w
         self._display_h = display_h
-        self._cap = None
+        self._width = width
+        self._height = height
+        self._cam_stream = None
         self._running = False
         self._photo = None
         self._paused = False
@@ -566,9 +577,12 @@ class CameraFeed:
         self._paused = False
 
     def _open_camera(self):
-        self._cap = cv2.VideoCapture(self._cam_index, cv2.CAP_DSHOW)
-        if not self._cap.isOpened():
+        self._cam_stream = camera.acquire(self._cam_index, self._width, self._height)
+        if self._cam_stream is None or not self._cam_stream.wait_until_open(timeout=5.0):
             self._running = False
+            if self._cam_stream is not None:
+                self._cam_stream.release()
+                self._cam_stream = None
             try:
                 self._label.after(0, lambda: self._label.config(
                     text="Camera\nunavailable", fg="#ff5555"))
@@ -578,7 +592,7 @@ class CameraFeed:
         self._stream()
 
     def _stream(self):
-        if not self._running or self._cap is None or not self._cap.isOpened():
+        if not self._running or self._cam_stream is None or not self._cam_stream.is_alive():
             return
         if self._paused:
             try:
@@ -586,8 +600,8 @@ class CameraFeed:
             except Exception:
                 self.stop()
             return
-        ret, frame = self._cap.read()
-        if ret:
+        frame = self._cam_stream.latest()
+        if frame is not None:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame = cv2.resize(frame, (self._display_w, self._display_h))
             img = Image.fromarray(frame)
@@ -606,9 +620,9 @@ class CameraFeed:
 
     def stop(self):
         self._running = False
-        if self._cap and self._cap.isOpened():
-            self._cap.release()
-        self._cap = None
+        if self._cam_stream is not None:
+            self._cam_stream.release()
+        self._cam_stream = None
 
 def render(parent):
     cfg = _load_cfg()
@@ -850,7 +864,7 @@ def render(parent):
         _open_camera_popup(e, cam_id)
 
 
-    def _make_cam_widget(container_parent, cam_label, cam_index, enabled, cam_id):
+    def _make_cam_widget(container_parent, cam_label, cam_index, enabled, cam_id, cam_w=640, cam_h=480):
         """Create a camera frame — live feed if configured, placeholder otherwise."""
         container = tk.Frame(container_parent, bg="#1a1a1a", bd=1, relief="solid",
                              width=210, height=115)
@@ -866,15 +880,15 @@ def render(parent):
         cam_default_text[cam_id] = lbl.cget("text")
 
         if enabled and cam_index >= 0 and _cv2_ok and _pil_ok:
-            feed = CameraFeed(lbl, cam_index, display_w=208, display_h=113)
+            feed = CameraFeed(lbl, cam_index, display_w=208, display_h=113, width=cam_w, height=cam_h)
             feed.start()
             _cam_feeds.append(feed)
             cam_feeds_by_id[cam_id] = feed
 
         return container, lbl
 
-    _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"], 1)
-    _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"], 2)
+    _make_cam_widget(cam_frame, "CAMERA 1", cam_cfg["cam1_index"], cam_cfg["cam1_enabled"], 1, cam_cfg["cam1_width"], cam_cfg["cam1_height"])
+    _make_cam_widget(cam_frame, "CAMERA 2", cam_cfg["cam2_index"], cam_cfg["cam2_enabled"], 2, cam_cfg["cam2_width"], cam_cfg["cam2_height"])
 
     # Cleanup camera feeds and the PLC input-polling loop when the page is destroyed.
     # Without this, navigating away (e.g. to COM Port Settings) left the X0
