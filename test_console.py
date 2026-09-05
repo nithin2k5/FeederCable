@@ -1742,7 +1742,12 @@ def render(parent):
             _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
             if cfg.get("scan_enabled", True):
-                _after(5000, _show_scan_entry)
+                # Focus immediately, not after a delay: printers eject a label
+                # fast enough that a delay left the entry still readonly when
+                # the operator's actual scan arrived, dropping it silently and
+                # leaving the box showing the previous part's result -- which
+                # reads exactly like results lagging one part behind.
+                _after(0, _show_scan_entry)
             else:
                 _after(0, lambda: _set_scan_box(""))
                 _after(500, _input_poll_start)
