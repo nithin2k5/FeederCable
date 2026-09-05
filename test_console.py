@@ -89,21 +89,29 @@ def _fmt_scan(raw: str) -> str:
     return "".join(_SCAN_CTRL_NAMES.get(ch, ch) for ch in raw)
 
 def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
-    """The lot number is validated against the "T..." field specifically
-    (e.g. T260905I1A2A6 -- date + traceability code), not the whole scanned
-    string, so a lot number that happens to also appear in another field
-    (part number, serial, etc.) can't produce a false OK."""
+    """PASS only if the lot number is a substring of the field that starts
+    with "T" (e.g. T260905I1A2A6 -- date + traceability code), never the
+    whole scanned string -- so a lot number that happens to also appear in
+    another field (part number, serial, etc.) can't produce a false OK.
+
+    Fields are split on any non-alphanumeric character rather than on the
+    specific ISO 15434 control bytes, since a keyboard-wedge scanner does
+    not reliably deliver GS/RS/EOT as literal insertable characters -- but
+    the envelope punctuation and separators are non-alphanumeric either way,
+    so splitting on "not alnum" isolates the same fields regardless of
+    exactly which bytes the scanner actually sends.
+    """
     if not labelstr:
         return False
-    field = ""
-    for ch in scanned:
-        if ch in _SCAN_CTRL_NAMES:
-            if field.startswith("T") and labelstr in field:
-                return True
-            field = ""
+    word = ""
+    for ch in scanned + "\x00":
+        if ch.isalnum():
+            word += ch
         else:
-            field += ch
-    return field.startswith("T") and labelstr in field
+            if word.startswith("T") and labelstr in word:
+                return True
+            word = ""
+    return False
 
 def _play_wav(filename: str):
     base = os.path.dirname(__file__)
