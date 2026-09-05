@@ -1,17 +1,12 @@
+import os
+import shutil
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import mysql.connector
 
 import db
 
-# ─── Load available PRN label templates (mirrors Settings.cs display()) ───────
-def load_prn_templates():
-    try:
-        with open("listofprnfile.txt", "r") as f:
-            lines = [l.strip() for l in f.readlines() if l.strip()]
-        return lines if lines else ["HMI DATAMATRIX.prn"]
-    except FileNotFoundError:
-        return ["HMI DATAMATRIX.prn"]
+DEFAULT_LABEL = "HMI DATAMATRIX"
 
 
 def render(parent):
@@ -108,8 +103,49 @@ def render(parent):
     cb_channels = mk_combo(f3, [str(i) for i in range(1, 9)], width=20)
     cb_channels.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
 
-    cb_label = mk_combo(f3, load_prn_templates(), width=20)
-    cb_label.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+    # Label template: picked via a file-explorer dialog instead of a fixed list
+    lbl_wrap = tk.Frame(f3, bg="black")
+    lbl_wrap.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+    lbl_wrap.columnconfigure(0, weight=1)
+
+    cb_label = tk.Entry(lbl_wrap, bg="#111", fg="white", font=('Arial', 10),
+                         bd=1, relief="solid", highlightbackground="#444",
+                         highlightthickness=1, insertbackground="white",
+                         disabledbackground="#1a1a1a", disabledforeground="#555",
+                         readonlybackground="#111", state="readonly")
+    cb_label.grid(row=0, column=0, sticky="ew")
+
+    def _set_label_entry(val):
+        prev_state = cb_label.cget("state")
+        cb_label.config(state="normal")
+        cb_label.delete(0, "end")
+        cb_label.insert(0, val or "")
+        cb_label.config(state=prev_state)
+
+    def on_browse_label():
+        base = os.path.dirname(os.path.abspath(__file__))
+        path = filedialog.askopenfilename(
+            title="Select Label Template",
+            initialdir=base,
+            filetypes=[("PRN Label Files", "*.prn"), ("All Files", "*.*")])
+        if not path:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        dest = os.path.join(base, os.path.basename(path))
+        try:
+            if os.path.abspath(path) != os.path.abspath(dest):
+                shutil.copyfile(path, dest)
+        except Exception as ex:
+            messagebox.showerror("Error", f"Could not copy label template:\n{ex}")
+            return
+        _set_label_entry(name)
+
+    btn_browse_label = tk.Button(lbl_wrap, text="📁", bg="#333", fg="white",
+                                  font=('Arial', 9), bd=0, width=3, cursor="hand2",
+                                  command=on_browse_label)
+    btn_browse_label.grid(row=0, column=1, padx=(4, 0))
+
+    _set_label_entry(DEFAULT_LABEL)
 
     cb_machine = mk_combo(f3, ["PB1", "PB2", "PB3", "PB4"], width=20)
     cb_machine.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
@@ -268,7 +304,7 @@ def render(parent):
             e.config(state="normal")
             e.delete(0, "end")
         cb_channels.current(0)
-        cb_label.current(0)
+        _set_label_entry(DEFAULT_LABEL)
         cb_machine.current(0)
         cb_testmode.current(0)
         selected_pno["value"] = None
@@ -290,6 +326,7 @@ def render(parent):
         cb_state = "disabled" if locked else "readonly"
         for cb in (cb_channels, cb_label, cb_machine, cb_testmode):
             cb.config(state=cb_state)
+        btn_browse_label.config(state=st)
 
     def set_form(row_dict):
         """Populate form fields from a dict."""
@@ -312,9 +349,7 @@ def render(parent):
         cb_channels.config(values=ch_list)
         cb_channels.set(ch_val if ch_val in ch_list else "1")
 
-        lbl_val = row_dict.get("lblsel", "")
-        if lbl_val and lbl_val in cb_label["values"]:
-            cb_label.set(lbl_val)
+        _set_label_entry(row_dict.get("lblsel", "") or DEFAULT_LABEL)
 
         mach_val = row_dict.get("machine", "PB1")
         if mach_val in list(cb_machine["values"]):
