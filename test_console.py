@@ -474,7 +474,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         seq = 1
     return f"{prefix}{seq}"
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "TSC TE310"):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
