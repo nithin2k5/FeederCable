@@ -734,10 +734,10 @@ def render(parent):
     right_panel.grid_propagate(False)
     right_panel.columnconfigure(0, weight=1)
     for i in range(4): right_panel.rowconfigure(i, weight=0)
-    right_panel.rowconfigure(3, weight=1)   # camera frame absorbs leftover space
+    right_panel.rowconfigure(0, weight=1)   # TEST RESULT frame absorbs leftover space
 
     result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
-    result_outer.grid(row=0, column=0, sticky="ew", pady=(0, 3))
+    result_outer.grid(row=0, column=0, sticky="nsew", pady=(0, 3))
     result_inner = tk.Frame(result_outer, bg="black")
     result_inner.pack(fill="both", expand=True)
     tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
@@ -750,10 +750,12 @@ def render(parent):
     elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
     elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
 
-    # Rework indicator lives outside the TEST RESULT box entirely -- it's not
-    # a status field like LOT NO/ELAPSED TIME, it's an attention-grabbing
-    # flag that blinks on/off while X3 (rework select) is high.
-    rework_lbl = tk.Label(right_panel, text="", bg="black", fg="#ff9100", font=("Arial", 12, "bold"), anchor="center")
+    # Rework indicator lives outside the TEST RESULT box entirely, styled like
+    # a COM Status pill (bordered box, always showing its name) -- blinking
+    # is done by swapping its color, not its text, while X3 (rework select)
+    # is high.
+    rework_lbl = tk.Label(right_panel, text="REWORK", bg="#2a2a2a", fg="#555",
+                          font=("Arial", 8), pady=3, bd=1, relief="solid")
     rework_lbl.grid(row=1, column=0, sticky="ew", pady=(0, 3))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
@@ -1033,7 +1035,7 @@ def render(parent):
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
     for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
-    test_rows_def = [("IR", "Insulation (IR)", "Ohms"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
+    test_rows_def = [("IR", "Insulation (IR)", "MΩ"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
         tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
@@ -1202,15 +1204,18 @@ def render(parent):
         except Exception: pass
 
     _rework_blink = {"active": False, "on": False}
+    _REWORK_IDLE_BG, _REWORK_IDLE_FG = "#2a2a2a", "#555"
+    _REWORK_ON_BG,   _REWORK_ON_FG   = "#ff9100", "black"
 
     def _rework_blink_tick():
         if not _rework_blink["active"]:
-            try: rework_lbl.config(text="")
+            try: rework_lbl.config(bg=_REWORK_IDLE_BG, fg=_REWORK_IDLE_FG)
             except Exception: pass
             return
         _rework_blink["on"] = not _rework_blink["on"]
         try:
-            rework_lbl.config(text="⚠  REWORK PART  ⚠" if _rework_blink["on"] else "")
+            if _rework_blink["on"]: rework_lbl.config(bg=_REWORK_ON_BG, fg=_REWORK_ON_FG)
+            else: rework_lbl.config(bg=_REWORK_IDLE_BG, fg=_REWORK_IDLE_FG)
         except Exception: pass
         _after(500, _rework_blink_tick)
 
@@ -1226,7 +1231,7 @@ def render(parent):
             _rework_blink["on"] = False
             _after(0, _rework_blink_tick)
         elif not active:
-            _after(0, lambda: rework_lbl.config(text=""))
+            _after(0, lambda: rework_lbl.config(bg=_REWORK_IDLE_BG, fg=_REWORK_IDLE_FG))
 
     def _clear_all_io_indicators():
         """Force every per-channel output/ack indicator back to its resting
@@ -1569,7 +1574,7 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
                 for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
-            _log(f"IR (Combined): {ir_val:.0f} Ohms — {'PASS' if all_pass else 'FAIL'}")
+            _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"IR Test: Testing CH{ch}...")
