@@ -1777,6 +1777,7 @@ def render(parent):
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
         if not scanned: return
+        print(f"[SCAN DEBUG] labelstr={labelstr!r} scanned={scanned!r} result={_scan_lot_ok(scanned, labelstr)}")
         if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
         else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
