@@ -24,6 +24,10 @@ def render(parent):
     
     style = ttk.Style()
     style.configure("Treeview.Heading", background="#0a1920", foreground=text_color, font=('Arial', 9, 'bold'), bordercolor=border_color, lightcolor=border_color, darkcolor=border_color)
+    # Column headers otherwise brighten on mouse-over / press (the theme's
+    # built-in hover state) -- pin the color so it stays flat in every state.
+    style.map("Treeview.Heading", background=[("active", "#0a1920"), ("pressed", "#0a1920")],
+              foreground=[("active", text_color), ("pressed", text_color)])
     style.configure("Treeview", background="#0c131a", foreground=text_color, fieldbackground="#0c131a", font=('Arial', 9), rowheight=28, bordercolor=border_color)
     style.map("Treeview", background=[('selected', '#1a3340')])
     style.configure("TCombobox", fieldbackground="#111", background="#111", foreground="white", bordercolor=border_color)

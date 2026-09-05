@@ -11,6 +11,10 @@ def render(parent):
     
     style = ttk.Style()
     style.configure("Admin.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
+    # Column headers otherwise brighten on mouse-over / press -- pin the
+    # color so it stays flat in every state.
+    style.map("Admin.Treeview.Heading", background=[("active", "#1a1a1a"), ("pressed", "#1a1a1a")],
+              foreground=[("active", "white"), ("pressed", "white")])
     style.configure("Admin.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
     style.map("Admin.Treeview", background=[("selected", "#1c3a5e")])
 

@@ -16,6 +16,10 @@ def render(parent):
     style.configure("Treeview.Heading",
                     background="#111", foreground="white",
                     font=('Arial', 9, 'bold'), bordercolor="#444")
+    # Column headers otherwise brighten on mouse-over / press -- pin the
+    # color so it stays flat in every state.
+    style.map("Treeview.Heading", background=[("active", "#111"), ("pressed", "#111")],
+              foreground=[("active", "white"), ("pressed", "white")])
     style.configure("Treeview",
                     background="#0a0a0a", foreground="white",
                     fieldbackground="#0a0a0a", font=('Arial', 9), rowheight=25)

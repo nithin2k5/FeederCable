@@ -680,6 +680,15 @@ def render(parent):
     style.configure("Hist.Treeview", background="#080808", foreground="#ccc", fieldbackground="#080808", font=("Arial", 8), rowheight=22)
     style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="#76ff03", font=("Arial", 8, "bold"))
     style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 8), rowheight=22)
+    # Column headers otherwise brighten on mouse-over / press -- pin each
+    # heading style's color so it stays flat in every state.
+    for heading_style, bg, fg in (
+        ("Spec.Treeview.Heading", "#1a1a1a", "white"),
+        ("Hist.Treeview.Heading", "#111", "white"),
+        ("Lot.Treeview.Heading", "#0a1a00", "#76ff03"),
+    ):
+        style.map(heading_style, background=[("active", bg), ("pressed", bg)],
+                  foreground=[("active", fg), ("pressed", fg)])
     style.map("Spec.Treeview", background=[("selected", "#1c3a5e")])
     style.map("Hist.Treeview", background=[("selected", "#1c3a5e")])
     style.map("Lot.Treeview",  background=[("selected", "#1c3a5e")])
