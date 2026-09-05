@@ -742,7 +742,7 @@ def render(parent):
     result_inner.pack(fill="both", expand=True)
     tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
     result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 26, "bold"), anchor="center")
-    result_lbl.pack(fill="x", padx=4, pady=(2, 4), ipady=20)
+    result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
     tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
     lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
     lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
