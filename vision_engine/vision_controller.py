@@ -206,6 +206,10 @@ class VisionController:
                 best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
             compared += 1
 
+        print(f"[VISION DEBUG] pno={part_number} frame={gray_frame.shape[1]}x{gray_frame.shape[0]} "
+              f"brightness={gray_frame.mean():.1f} templates={[(t.shape[1], t.shape[0]) for t in templates]} "
+              f"compared={compared} best_score={best_score:.3f}")
+
         if compared == 0:
             return _error(
                 f"Every template is larger than this frame "

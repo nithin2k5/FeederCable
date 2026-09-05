@@ -113,11 +113,15 @@ class CameraStream:
         with self._frame_lock:
             return self._frame.copy() if self._frame is not None else None
 
-    def read(self, timeout: float = 5.0, settle_frames: int = 5) -> Optional[np.ndarray]:
+    def read(self, timeout: float = 5.0, settle_frames: int = 30) -> Optional[np.ndarray]:
         """Newest frame, once the device has produced at least `settle_frames`.
 
         The settle count lets auto-exposure stabilise on a stream that has just
-        been opened; an already-running preview satisfies it immediately.
+        been opened; an already-running preview satisfies it immediately because
+        the counter is cumulative over the stream's life. 30 frames is ~1s at
+        30fps -- judging a cold device sooner than that matches a template
+        against a still-darkening frame and scores it far below what the same
+        part scores once exposure settles.
         """
         if not self.wait_until_open(timeout):
             return None
