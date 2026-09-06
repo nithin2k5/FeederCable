@@ -389,10 +389,22 @@ def render(parent):
                     testname, ch_str, appvol, testtime, vmin, vmax = row
                     try:
                         ch = int(ch_str)
-                    except ValueError:
+                    except (TypeError, ValueError):
                         continue
-                    if ch in spec_data and testname in spec_data[ch]:
-                        spec_data[ch][testname] = [appvol, testtime, vmin, vmax]
+                    if ch not in spec_data:
+                        continue
+                    # Rows written by the legacy Settings form store testname
+                    # as "Insulation Test(MΩ)" / "Withstand Test(mA)" instead
+                    # of "IR"/"ACW" -- normalize both spellings so specs saved
+                    # by either tool load correctly.
+                    tn = str(testname or "").strip().lower()
+                    if tn == "ir" or "insulation" in tn:
+                        key = "IR"
+                    elif tn == "acw" or "withstand" in tn:
+                        key = "ACW"
+                    else:
+                        continue
+                    spec_data[ch][key] = [appvol, testtime, vmin, vmax]
         except Exception:
             pass
         switch_channel(active_ch["value"])
