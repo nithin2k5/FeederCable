@@ -89,17 +89,21 @@ def _fmt_scan(raw: str) -> str:
     return "".join(_SCAN_CTRL_NAMES.get(ch, ch) for ch in raw)
 
 def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
-    """PASS only if the lot number is a substring of the field that starts
-    with "T" (e.g. T260905I1A2A6 -- date + traceability code), never the
-    whole scanned string -- so a lot number that happens to also appear in
-    another field (part number, serial, etc.) can't produce a false OK.
+    """PASS only if the lot number is a substring of one whole field of the
+    scanned data, never spanning across a field boundary -- so a lot number
+    that happens to only partially overlap two adjacent fields (part number,
+    serial, etc.) can't produce a false OK.
 
     Fields are split on any non-alphanumeric character rather than on the
     specific ISO 15434 control bytes, since a keyboard-wedge scanner does
     not reliably deliver GS/RS/EOT as literal insertable characters -- but
     the envelope punctuation and separators are non-alphanumeric either way,
     so splitting on "not alnum" isolates the same fields regardless of
-    exactly which bytes the scanner actually sends.
+    exactly which bytes the scanner actually sends. Some label formats wrap
+    the lot number in an ISO 15434 field starting with "T" (e.g.
+    T260905I1A2A6); others (most current templates) print the bare lot
+    number with no prefix at all -- either way the lot number is a substring
+    of that one field, so checking membership in the field is enough.
     """
     if not labelstr:
         return False
@@ -108,7 +112,7 @@ def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
         if ch.isalnum():
             word += ch
         else:
-            if word.startswith("T") and labelstr in word:
+            if labelstr in word:
                 return True
             word = ""
     return False
