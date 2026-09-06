@@ -407,7 +407,11 @@ def render(parent):
                     spec_data[ch][key] = [appvol, testtime, vmin, vmax]
         except Exception:
             pass
-        switch_channel(active_ch["value"])
+        # Redraw directly -- switch_channel() would call save_spec_ui() first,
+        # which copies whatever is still showing in the (stale/blank) entry
+        # widgets back into spec_data for the active channel, clobbering the
+        # values just loaded from the DB before they ever get displayed.
+        render_spec_table(active_ch["value"])
 
     # ─────────────────────────────────────────────────────────────────────────
     # CRUD FUNCTIONS
