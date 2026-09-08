@@ -178,7 +178,7 @@ def render(parent):
                            m.model, m.pno, m.pname, m.lotno, m.alc, m.result,
                            r.channel, r.ir_resistance, r.acw_current, r.contact_result, m.visionimg
                     FROM testmaster m
-                    LEFT JOIN testresult r ON m.lotno = r.lotno
+                    LEFT JOIN testresult r ON m.lotno = r.lotno AND m.pno = r.pno
                     WHERE m.date >= %s AND m.date <= %s
                 """
                 params = [start, end]

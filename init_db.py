@@ -56,20 +56,25 @@ def init_db():
             model VARCHAR(100),
             alc VARCHAR(50),
             channel VARCHAR(10),
-            lotno VARCHAR(100) UNIQUE,
+            lotno VARCHAR(100),
             date VARCHAR(20),
             time VARCHAR(20),
             empcode VARCHAR(50),
             result VARCHAR(20),
             scanresult VARCHAR(20),
             machine VARCHAR(50),
-            visionimg VARCHAR(255)
+            visionimg VARCHAR(255),
+            -- Part + lot, not lot alone: the lot sequence restarts at 1 for
+            -- each part number every day, so two parts legitimately share a
+            -- lot string. It is the pair that identifies a test run.
+            CONSTRAINT uq_pno_lotno UNIQUE (pno, lotno)
         )''')
 
         print("Creating testresult table...")
         cur.execute('''
         CREATE TABLE IF NOT EXISTS testresult (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            pno VARCHAR(50),
             lotno VARCHAR(100),
             channel VARCHAR(10),
             ir_volts VARCHAR(50),

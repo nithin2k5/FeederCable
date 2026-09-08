@@ -517,18 +517,20 @@ class HiPotSerial:
         print(f"[HIPOT DEBUG] ACW: commanded {acw_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={acw_val}")
         return acw_min <= acw_val <= acw_max, acw_val
 
-def _generate_lot_number(machine_id: str) -> str:
-    """Next lot number for this machine-day: <yymmdd>I<machine>A2A<seq>.
+def _generate_lot_number(pno: str, machine_id: str) -> str:
+    """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<seq>.
 
-    The sequence belongs to the machine and the day, not to one part number.
-    Counting per part restarted it at 1 every time the operator switched
-    parts, so the second part of a shift re-issued lot numbers the first part
-    already owned -- and since testmaster.lotno is UNIQUE, that INSERT was
-    rejected and the finished test was lost with nothing but a line in the
-    log. Continuing from the highest sequence already issued today (rather
-    than from a row count) also keeps the run unbroken when an old record is
-    deleted, which would otherwise re-issue a number that is already on a
-    printed label.
+    The sequence belongs to the part number, so every part starts its own run
+    at 1 each day rather than continuing the previous part's numbering. Two
+    parts therefore share a lot string on the same day, which is why a test
+    run is identified by the (pno, lotno) pair everywhere it is stored or
+    looked up -- testmaster is keyed UNIQUE (pno, lotno), and testresult
+    carries the part number alongside the lot so its per-channel rows cannot
+    be confused with another part's run of the same number.
+
+    Continuing from the highest number this part has already been issued today
+    (rather than from a row count) stops a deleted record from re-issuing a
+    number that is already on a printed label.
     """
     now = datetime.datetime.now()
     date_str = now.strftime("%y%m%d")
@@ -537,7 +539,8 @@ def _generate_lot_number(machine_id: str) -> str:
     highest = 0
     try:
         with db.get_cursor() as cur:
-            cur.execute("SELECT lotno FROM testmaster WHERE lotno LIKE %s", (f"{prefix}%",))
+            cur.execute("SELECT lotno FROM testmaster WHERE pno=%s AND lotno LIKE %s",
+                        (pno, f"{prefix}%"))
             for (lot,) in cur.fetchall():
                 tail = str(lot)[len(prefix):]
                 if tail.isdigit():
@@ -713,8 +716,21 @@ def render(parent):
 
     try:
         db.ensure_column("testmaster", "visionimg", "VARCHAR(255)")
-    except Exception:
-        pass  # DB may be unreachable right now -- don't block the page for it
+        # A test run is identified by (part number, lot number), because the lot
+        # sequence restarts at 1 for each part every day. A live DB created
+        # before that carries a UNIQUE index on lotno alone, which rejects the
+        # second part's first lot of the day outright, and a testresult table
+        # with no part number, whose per-channel rows would then be ambiguous
+        # between two parts sharing a lot string.
+        db.ensure_column("testresult", "pno", "VARCHAR(50)")
+        with db.get_cursor(commit=True) as _cur:
+            _cur.execute("UPDATE testresult r JOIN testmaster m ON r.lotno = m.lotno "
+                         "SET r.pno = m.pno WHERE r.pno IS NULL")
+        db.drop_index("testmaster", "lotno")
+        db.ensure_unique_index("testmaster", "uq_pno_lotno", "pno, lotno")
+    except Exception as ex:
+        # DB may be unreachable right now -- don't block the page for it
+        print(f"[DB MIGRATION] skipped: {ex}")
 
     state = {
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
@@ -1441,14 +1457,18 @@ def render(parent):
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
                 cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img))
                 for ch in range(1, state["num_channels"] + 1):
-                    cur.execute("INSERT INTO testresult (lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
+                    cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} â†’ {lot_no}")
         except Exception as ex: _log(f"Save error: {ex}")
 
     def _update_scan_result(lot_no: str, scan_res: str):
         try:
             with db.get_cursor(commit=True) as cur:
-                cur.execute("UPDATE testmaster SET scanresult=%s WHERE lotno=%s", (scan_res, lot_no))
+                # Scoped by part too: another part can hold the same lot string
+                # today, and stamping its row with this scan's verdict would
+                # quietly corrupt that part's record.
+                cur.execute("UPDATE testmaster SET scanresult=%s WHERE pno=%s AND lotno=%s",
+                            (scan_res, state["pno"], lot_no))
         except Exception as ex: _log(f"Scan update error: {ex}")
 
     def _validate_employee(empno: str) -> bool:
@@ -1801,7 +1821,7 @@ def render(parent):
             plc.close()
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
-        pno = state["pno"]; lot_no = _generate_lot_number(cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
+        pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
         elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
