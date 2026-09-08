@@ -518,7 +518,10 @@ class HiPotSerial:
         return acw_min <= acw_val <= acw_max, acw_val
 
 def _generate_lot_number(pno: str, machine_id: str) -> str:
-    """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<seq>.
+    """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<nnnn>.
+
+    The serial is zero-padded to four digits (0001, 0002, ... ) so every label
+    carries a fixed-width code, the way the original C# console padded its own.
 
     The sequence belongs to the part number, so every part starts its own run
     at 1 each day rather than continuing the previous part's numbering. Two
@@ -530,7 +533,8 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
 
     Continuing from the highest number this part has already been issued today
     (rather than from a row count) stops a deleted record from re-issuing a
-    number that is already on a printed label.
+    number that is already on a printed label. Unpadded lots issued before the
+    padding went in still read back correctly, since int() ignores the width.
     """
     now = datetime.datetime.now()
     date_str = now.strftime("%y%m%d")
@@ -547,7 +551,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
                     highest = max(highest, int(tail))
     except Exception as ex:
         print(f"DB Error generating lot: {ex}")
-    return f"{prefix}{highest + 1}"
+    return f"{prefix}{highest + 1:04d}"
 
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
     base = os.path.dirname(__file__)
