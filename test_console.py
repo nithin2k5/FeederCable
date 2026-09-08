@@ -701,21 +701,17 @@ def render(parent):
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
     style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
-    style.configure("Hist.Treeview.Heading", background="#111", foreground="white", font=("Arial", 8, "bold"))
-    style.configure("Hist.Treeview", background="#080808", foreground="#ccc", fieldbackground="#080808", font=("Arial", 8), rowheight=22)
     style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="#76ff03", font=("Arial", 8, "bold"))
     style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 8), rowheight=22)
     # Column headers otherwise brighten on mouse-over / press -- pin each
     # heading style's color so it stays flat in every state.
     for heading_style, bg, fg in (
         ("Spec.Treeview.Heading", "#1a1a1a", "white"),
-        ("Hist.Treeview.Heading", "#111", "white"),
         ("Lot.Treeview.Heading", "#0a1a00", "#76ff03"),
     ):
         style.map(heading_style, background=[("active", bg), ("pressed", bg)],
                   foreground=[("active", fg), ("pressed", fg)])
     style.map("Spec.Treeview", background=[("selected", "#1c3a5e")])
-    style.map("Hist.Treeview", background=[("selected", "#1c3a5e")])
     style.map("Lot.Treeview",  background=[("selected", "#1c3a5e")])
 
     try:
@@ -1123,15 +1119,6 @@ def render(parent):
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
     tree_lot.pack(fill="x")
 
-    tk.Label(left_area, text="Recent Test History", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    hist_cols = ("DATE", "TIME", "PART NO", "LOT NO", "EMP", "RESULT")
-    tree_hist = ttk.Treeview(left_area, columns=hist_cols, show="headings", height=3, style="Hist.Treeview")
-    hist_widths = {"DATE": 80, "TIME": 70, "PART NO": 120, "LOT NO": 140, "EMP": 70, "RESULT": 60}
-    for col in hist_cols: tree_hist.heading(col, text=col); tree_hist.column(col, anchor="center", width=hist_widths.get(col, 80))
-    tree_hist.tag_configure("pass", foreground="#76ff03")
-    tree_hist.tag_configure("fail", foreground="#ff5555")
-    tree_hist.pack(fill="x")
-
     btn_start = tk.Button(left_area, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
     btn_start.pack(fill="x", pady=(6, 0))
 
@@ -1389,17 +1376,6 @@ def render(parent):
         except Exception as ex:
             messagebox.showerror("DB Error", str(ex))
             _log(f"DB Error: {ex}"); return False
-
-    def _load_history(pno=None):
-        tree_hist.delete(*tree_hist.get_children())
-        try:
-            with db.get_cursor() as cur:
-                if pno: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster WHERE pno=%s ORDER BY id DESC LIMIT 15", (pno,))
-                else: cur.execute("SELECT date, time, pno, lotno, empcode, result FROM testmaster ORDER BY id DESC LIMIT 15")
-                for row in cur.fetchall():
-                    tag = "pass" if row[5] == "PASS" else "fail"
-                    tree_hist.insert("", "end", tags=(tag,), values=row)
-        except Exception: pass
 
     def _load_today_pass():
         """Every PASS recorded today, across all the parts run today.
@@ -1846,7 +1822,7 @@ def render(parent):
                 _after(500, _input_poll_start)
         else:
             _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
-        _after(0, _load_today_pass); _after(0, _load_history); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
+        _after(0, _load_today_pass); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
@@ -1965,7 +1941,7 @@ def render(parent):
             ent_emp.config(state="normal", bg="black"); ent_emp.focus_set()
             _log("Enter Employee ID first."); return
         ent_pno.config(state="normal", bg="black"); ent_pno.focus_set()
-        _load_history(); _load_today_pass()
+        _load_today_pass()
         _log("Ready for the next part — enter the new Part Number.")
 
     btn_next_part.config(command=_next_part)
@@ -2128,7 +2104,7 @@ def render(parent):
         
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
-            _load_history(); _load_today_pass(); btn_start.config(bg="#1b5e20", fg="white")
+            _load_today_pass(); btn_start.config(bg="#1b5e20", fg="white")
             _vision_check_loaded_part(pno)
             btn_start.focus_set(); _after(500, _input_poll_start)
         else:
@@ -2138,6 +2114,6 @@ def render(parent):
             btn_start.config(bg="#1a1a1a", fg="#444"); _next_part()
     ent_jig.bind("<Return>", _on_jig_enter)
 
-    _load_history(); _log("System ready. Enter Employee ID and press ENTER.")
+    _load_today_pass(); _log("System ready. Enter Employee ID and press ENTER.")
     set_com_status("HiPot", False); set_com_status("IO Ctrl", False); set_com_status("Scanner", False); set_com_status("Printer", False)
     ent_emp.focus_set()
