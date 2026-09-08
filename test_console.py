@@ -747,6 +747,15 @@ def render(parent):
     upper = tk.Frame(content, bg="black"); upper.grid(row=0, column=0, sticky="nsew")
     upper.columnconfigure(0, weight=1); upper.columnconfigure(1, weight=0); upper.rowconfigure(0, weight=1)
     left_area = tk.Frame(upper, bg="black"); left_area.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+    # The operator controls (START TEST, NEXT PART, CLEAR) live in their own
+    # container packed against the bottom *first*, so the packer hands them
+    # their height before anything else claims it. The left column asks for
+    # more room than the window has, and pack gives nothing at all to whatever
+    # is packed last -- which silently clipped the START button off the bottom
+    # of the screen. Reserving the space up front means the panels above are
+    # what shrink, never the buttons.
+    left_bottom = tk.Frame(left_area, bg="black")
+    left_bottom.pack(side="bottom", fill="x")
     right_panel = tk.Frame(upper, bg="black", width=220)
     right_panel.grid(row=0, column=1, sticky="nsew")
     right_panel.grid_propagate(False)
@@ -1009,6 +1018,11 @@ def render(parent):
     _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=8, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
     _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=4); ent_jig = _ent(pi, w=18, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Test Type").grid(row=4, column=4, sticky="w", padx=(8, 4)); ent_testtype = _ent(pi, w=8, editable=False); ent_testtype.grid(row=4, column=5, sticky="ew", padx=5)
+
+    # Sits with the Part No / JIG fields it acts on. Its command is wired
+    # further down, once _next_part() exists -- same pattern as btn_start.
+    btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
+    btn_next_part.grid(row=4, column=6, columnspan=2, sticky="ew", padx=(10, 0))
     
     def _fill_ro(entry, val):
         entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, str(val) if val else ""); entry.config(state="readonly")
@@ -1107,7 +1121,7 @@ def render(parent):
     tree_hist.tag_configure("fail", foreground="#ff5555")
     tree_hist.pack(fill="x")
 
-    btn_start = tk.Button(left_area, text="â–¶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
+    btn_start = tk.Button(left_bottom, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
     btn_start.pack(fill="x", pady=(6, 0))
 
     bottom = tk.Frame(content, bg="black", height=110)
@@ -1818,7 +1832,7 @@ def render(parent):
         else:
             _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, _load_today_pass); _after(0, _load_history); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
-        state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
+        state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
     def _show_scan_entry():
@@ -1939,11 +1953,8 @@ def render(parent):
         _load_history(); _load_today_pass()
         _log("Ready for the next part — enter the new Part Number.")
 
-    action_row = tk.Frame(left_area, bg="black")
-    action_row.pack(fill="x", pady=(3, 0))
-    action_row.columnconfigure(0, weight=1); action_row.columnconfigure(1, weight=1)
-    tk.Button(action_row, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#1565c0", activeforeground="white", command=_next_part).grid(row=0, column=0, sticky="ew", padx=(0, 3))
-    tk.Button(action_row, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).grid(row=0, column=1, sticky="ew")
+    btn_next_part.config(command=_next_part)
+    tk.Button(left_bottom, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
 
     def _on_emp_enter(event=None):
         emp = ent_emp.get().strip()
