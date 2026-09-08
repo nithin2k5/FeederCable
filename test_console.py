@@ -747,15 +747,6 @@ def render(parent):
     upper = tk.Frame(content, bg="black"); upper.grid(row=0, column=0, sticky="nsew")
     upper.columnconfigure(0, weight=1); upper.columnconfigure(1, weight=0); upper.rowconfigure(0, weight=1)
     left_area = tk.Frame(upper, bg="black"); left_area.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    # The operator controls (START TEST, NEXT PART, CLEAR) live in their own
-    # container packed against the bottom *first*, so the packer hands them
-    # their height before anything else claims it. The left column asks for
-    # more room than the window has, and pack gives nothing at all to whatever
-    # is packed last -- which silently clipped the START button off the bottom
-    # of the screen. Reserving the space up front means the panels above are
-    # what shrink, never the buttons.
-    left_bottom = tk.Frame(left_area, bg="black")
-    left_bottom.pack(side="bottom", fill="x")
     right_panel = tk.Frame(upper, bg="black", width=220)
     right_panel.grid(row=0, column=1, sticky="nsew")
     right_panel.grid_propagate(False)
@@ -1121,7 +1112,7 @@ def render(parent):
     tree_hist.tag_configure("fail", foreground="#ff5555")
     tree_hist.pack(fill="x")
 
-    btn_start = tk.Button(left_bottom, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
+    btn_start = tk.Button(left_area, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
     btn_start.pack(fill="x", pady=(6, 0))
 
     bottom = tk.Frame(content, bg="black", height=110)
@@ -1954,7 +1945,7 @@ def render(parent):
         _log("Ready for the next part — enter the new Part Number.")
 
     btn_next_part.config(command=_next_part)
-    tk.Button(left_bottom, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
+    tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
 
     def _on_emp_enter(event=None):
         emp = ent_emp.get().strip()
