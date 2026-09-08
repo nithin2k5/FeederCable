@@ -700,7 +700,7 @@ def render(parent):
     style.configure("TC.TLabelframe", background="black", foreground="white", bordercolor="#444")
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
-    style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=22)
+    style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
     style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="#76ff03", font=("Arial", 8, "bold"))
     style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 8), rowheight=22)
     # Column headers otherwise brighten on mouse-over / press -- pin each
@@ -1054,7 +1054,7 @@ def render(parent):
             entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, val); entry.config(state="readonly")
 
     shf = tk.Frame(left_area, bg="black")
-    shf.pack(fill="x", pady=(3, 1))
+    shf.pack(fill="x", pady=(6, 2))
     tk.Label(shf, text="Inspection Specification", bg="black", fg="white", font=("Arial", 10, "bold")).pack(side="left")
     spec_status_lbl = tk.Label(shf, text="[ No part loaded ]", bg="black", fg="#444", font=("Arial", 9))
     spec_status_lbl.pack(side="left", padx=10)
@@ -1067,21 +1067,21 @@ def render(parent):
     tree_spec.tag_configure("contact", background="#1a1a0d", foreground="#ffd54f")
     tree_spec.pack(fill="x")
 
-    tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(4, 1))
+    tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(8, 2))
     test_frame = tk.Frame(left_area, bg="black")
     test_frame.pack(fill="x")
     MAX_CH = 8
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
-    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=3).grid(row=0, column=i, sticky="nsew")
+    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
     test_rows_def = [("IR", "Insulation (IR)", "MΩ"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
-        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=3).grid(row=r_idx, column=0, sticky="nsew")
+        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
         tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", 8, "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
         row_cells = []
         for ch_i in range(MAX_CH):
-            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 8), bd=1, relief="solid", pady=3)
+            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 8), bd=1, relief="solid", pady=6)
             lbl.grid(row=r_idx, column=2 + ch_i, sticky="nsew")
             row_cells.append(lbl)
         res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 9, "bold"), bd=1, relief="solid")
@@ -1108,13 +1108,13 @@ def render(parent):
         result_rows[test_key]["result"].config(text=text, bg=bg, fg=fg)
 
     scan_outer = tk.Frame(left_area, bg="#222", padx=2, pady=2)
-    scan_outer.pack(fill="x", pady=(4, 2))
-    scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", 11, "bold"), pady=5)
+    scan_outer.pack(fill="x", pady=(8, 3))
+    scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", 11, "bold"), pady=8)
     scan_lbl.pack(fill="both", expand=True)
 
-    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(3, 1))
+    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
     lot_cols = ("#", "LOT NO", "ALC", "RESULT", "SCAN", "EMP", "TIME")
-    tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=6, style="Lot.Treeview")
+    tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
     lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60, "EMP": 70, "TIME": 70}
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
     tree_lot.pack(fill="x")
