@@ -517,20 +517,34 @@ class HiPotSerial:
         print(f"[HIPOT DEBUG] ACW: commanded {acw_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={acw_val}")
         return acw_min <= acw_val <= acw_max, acw_val
 
-def _generate_lot_number(pno: str, machine_id: str) -> str:
+def _generate_lot_number(machine_id: str) -> str:
+    """Next lot number for this machine-day: <yymmdd>I<machine>A2A<seq>.
+
+    The sequence belongs to the machine and the day, not to one part number.
+    Counting per part restarted it at 1 every time the operator switched
+    parts, so the second part of a shift re-issued lot numbers the first part
+    already owned -- and since testmaster.lotno is UNIQUE, that INSERT was
+    rejected and the finished test was lost with nothing but a line in the
+    log. Continuing from the highest sequence already issued today (rather
+    than from a row count) also keeps the run unbroken when an old record is
+    deleted, which would otherwise re-issue a number that is already on a
+    printed label.
+    """
     now = datetime.datetime.now()
     date_str = now.strftime("%y%m%d")
     mid_char = machine_id[-1] if machine_id else "1"
     prefix = f"{date_str}I{mid_char}A2A"
+    highest = 0
     try:
         with db.get_cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM testmaster WHERE pno=%s AND lotno LIKE %s", (pno, f"{date_str}%"))
-            row = cur.fetchone()
-            seq = (row[0] if row else 0) + 1
-    except Exception as ex: 
+            cur.execute("SELECT lotno FROM testmaster WHERE lotno LIKE %s", (f"{prefix}%",))
+            for (lot,) in cur.fetchall():
+                tail = str(lot)[len(prefix):]
+                if tail.isdigit():
+                    highest = max(highest, int(tail))
+    except Exception as ex:
         print(f"DB Error generating lot: {ex}")
-        seq = 1
-    return f"{prefix}{seq}"
+    return f"{prefix}{highest + 1}"
 
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
     base = os.path.dirname(__file__)
@@ -1362,19 +1376,34 @@ def render(parent):
                     tree_hist.insert("", "end", tags=(tag,), values=row)
         except Exception: pass
 
-    def _load_today_pass(pno=None):
+    def _load_today_pass():
+        """Every PASS recorded today, across all the parts run today.
+
+        Deliberately not filtered by the loaded part: this panel and the Count
+        box track the shift, so switching to the next part no longer blanks the
+        records the operator has already built up. The verdict is read from
+        testmaster.result -- testresult only carries the per-channel
+        measurements (ir_result / acw_result / contact_result) and has no
+        'result' column at all, so the old join both failed outright and, had
+        the column existed, would have listed every lot once per channel.
+        """
         tree_lot.delete(*tree_lot.get_children())
+        rows = []
         try:
             with db.get_cursor() as cur:
-                query = "SELECT testmaster.lotno, testmaster.alc, testresult.result, testmaster.scanresult, testmaster.empcode, testmaster.time FROM testmaster JOIN testresult ON testmaster.lotno = testresult.lotno WHERE testresult.result = 'PASS' AND DATE(testmaster.date) = CURDATE() " + (f"AND testmaster.pno='{pno}' " if pno else "") + "ORDER BY testmaster.time DESC"
-                cur.execute(query); rows = cur.fetchall()
-        except Exception: rows = []
+                cur.execute("SELECT lotno, alc, result, scanresult, empcode, time FROM testmaster "
+                            "WHERE result='PASS' AND DATE(date)=CURDATE() ORDER BY time DESC")
+                rows = cur.fetchall()
+        except Exception as ex:
+            _log(f"Today's PASS records: load failed ({ex})")
         ok = len(rows)
+        ng = 0
         try:
             with db.get_cursor() as cur2:
-                q2 = "SELECT COUNT(*) FROM testmaster WHERE result='FAIL' AND DATE(date)=CURDATE()" + (f" AND pno='{pno}'" if pno else "")
-                cur2.execute(q2); ng = cur2.fetchone()[0] or 0
-        except Exception: ng = 0
+                cur2.execute("SELECT COUNT(*) FROM testmaster WHERE result='FAIL' AND DATE(date)=CURDATE()")
+                ng = cur2.fetchone()[0] or 0
+        except Exception as ex:
+            _log(f"Today's NG count: load failed ({ex})")
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
             tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "—", row[3] or "—", row[4], row[5]))
@@ -1767,7 +1796,7 @@ def render(parent):
             plc.close()
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
-        pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
+        pno = state["pno"]; lot_no = _generate_lot_number(cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
         elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
@@ -1788,7 +1817,7 @@ def render(parent):
                 _after(500, _input_poll_start)
         else:
             _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
-        _after(0, lambda: _load_today_pass(pno)); _after(0, lambda: _load_history(pno)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
+        _after(0, _load_today_pass); _after(0, _load_history); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="â–¶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
@@ -1872,17 +1901,49 @@ def render(parent):
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
 
-    def _clear_all():
-        _input_poll_stop()
-        ent_emp.config(state="normal"); ent_emp.delete(0, "end"); ent_emp.config(bg="black")
+    def _clear_part_fields():
+        """Reset everything that belongs to one part -- the part/JIG entries,
+        the master data loaded from them, the specs and the per-cycle test
+        display -- leaving the employee login and the day's records alone."""
         ent_pno.config(state="normal"); ent_pno.delete(0, "end"); ent_pno.config(state="readonly", bg="#0d0d0d")
         ent_jig.config(state="normal"); ent_jig.delete(0, "end"); ent_jig.config(state="readonly", bg="#0d0d0d")
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
-        tree_spec.delete(*tree_spec.get_children()); tree_lot.delete(*tree_lot.get_children()); _reset_test_display()
+        tree_spec.delete(*tree_spec.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_scan_box("")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None})
-        btn_start.config(bg="#1a1a1a", fg="#444"); _log("Cleared."); ent_emp.focus_set()
-    tk.Button(left_area, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).pack(fill="x", pady=(3, 0))
+        btn_start.config(bg="#1a1a1a", fg="#444")
+
+    def _clear_all():
+        _input_poll_stop()
+        ent_emp.config(state="normal"); ent_emp.delete(0, "end"); ent_emp.config(bg="black")
+        _clear_part_fields()
+        tree_lot.delete(*tree_lot.get_children())
+        _log("Cleared."); ent_emp.focus_set()
+
+    def _next_part():
+        """Switch to a different part without ending the operator's session.
+
+        Only the part is released: the employee stays validated and the day's
+        PASS records and counts stay on screen, so the operator just types the
+        new part number and rescans its JIG.
+        """
+        if state["test_running"]:
+            _log("Test in progress — finish it before changing part."); return
+        _input_poll_stop()
+        _clear_part_fields()
+        emp = ent_emp.get().strip()
+        if not emp:
+            ent_emp.config(state="normal", bg="black"); ent_emp.focus_set()
+            _log("Enter Employee ID first."); return
+        ent_pno.config(state="normal", bg="black"); ent_pno.focus_set()
+        _load_history(); _load_today_pass()
+        _log("Ready for the next part — enter the new Part Number.")
+
+    action_row = tk.Frame(left_area, bg="black")
+    action_row.pack(fill="x", pady=(3, 0))
+    action_row.columnconfigure(0, weight=1); action_row.columnconfigure(1, weight=1)
+    tk.Button(action_row, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#1565c0", activeforeground="white", command=_next_part).grid(row=0, column=0, sticky="ew", padx=(0, 3))
+    tk.Button(action_row, text="⟳  CLEAR / RESET", bg="#2a2a2a", fg="#aaa", font=("Arial", 10, "bold"), pady=5, bd=0, cursor="hand2", activebackground="#444", activeforeground="white", command=_clear_all).grid(row=0, column=1, sticky="ew")
 
     def _on_emp_enter(event=None):
         emp = ent_emp.get().strip()
@@ -2041,11 +2102,14 @@ def render(parent):
         
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
-            _load_history(pno); _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
+            _load_history(); _load_today_pass(); btn_start.config(bg="#1b5e20", fg="white")
             _vision_check_loaded_part(pno)
             btn_start.focus_set(); _after(500, _input_poll_start)
         else:
-            btn_start.config(bg="#1a1a1a", fg="#444"); _clear_all()
+            # An unknown part number is a typo, not the end of the shift --
+            # release just the part and ask for it again, rather than logging
+            # the operator out and wiping the day's records off the panel.
+            btn_start.config(bg="#1a1a1a", fg="#444"); _next_part()
     ent_jig.bind("<Return>", _on_jig_enter)
 
     _load_history(); _log("System ready. Enter Employee ID and press ENTER.")
