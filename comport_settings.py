@@ -210,6 +210,17 @@ def render(parent):
         
         combos[dev] = (cb_port, cb_baud, cb_sid)
 
+    # Machine ID -- stamped onto lot numbers and printed labels by Test Console.
+    mid_row = tk.Frame(panel, bg="#12151b")
+    mid_row.pack(fill="x", padx=35, pady=(0, 10))
+    tk.Label(mid_row, text="Machine ID", bg="#12151b", fg="white",
+             font=('Arial', 11)).pack(side="left")
+    ent_machine_id = tk.Entry(mid_row, bg="#1c2029", fg="white", insertbackground="white",
+                              font=('Arial', 11), width=14, bd=1, relief="solid",
+                              highlightbackground="#333", highlightthickness=1)
+    ent_machine_id.insert(0, cfg["COM"].get("machine_id", "PB1"))
+    ent_machine_id.pack(side="left", padx=(15, 0))
+
     # Label scan verification toggle -- when off, Test Console skips the
     # "scan the printed label" step after a PASS instead of waiting for it.
     scan_enabled = tk.BooleanVar(value=cfg["COM"].get("scan_enabled", "True").strip().lower()
@@ -235,6 +246,11 @@ def render(parent):
             if dev in mapping:
                 cfg["COM"][mapping[dev][0]] = cb_p.get()
                 cfg["COM"][mapping[dev][1]] = cb_b.get()
+        machine_id = ent_machine_id.get().strip()
+        if not machine_id:
+            log_msg("Machine ID cannot be empty -- settings not saved.")
+            return
+        cfg["COM"]["machine_id"] = machine_id
         cfg["COM"]["scan_enabled"] = str(scan_enabled.get())
         with open(_CFG_PATH, "w") as f:
             cfg.write(f)
