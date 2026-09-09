@@ -1363,8 +1363,9 @@ def render(parent):
     scan_data_lbl.pack(fill="both", expand=True, pady=(2, 0))
 
     def _set_scan_box(verdict: str, raw: str = ""):
-        """verdict: "OK" | "NG" | "" (idle)."""
-        colors = {"OK": ("✅  OK", "#76ff03"), "NG": ("❌  NG", "#ff5555")}
+        """verdict: "OK" | "NG" | "DUP" | "" (idle)."""
+        colors = {"OK": ("✅  OK", "#76ff03"), "NG": ("❌  NG", "#ff5555"),
+                  "DUP": ("⚠  Duplicate label", "#ff9800")}
         text, fg = colors.get(verdict, ("—", "#555"))
         idle = "Waiting for scan…" if cfg.get("scan_enabled", True) else "Scan verification disabled"
         try:
@@ -1375,6 +1376,13 @@ def render(parent):
                                      fg="#ccc" if raw else "#666")
         except Exception: pass
     _set_scan_box("")
+
+    def _reset_scan_box():
+        """Put the box back to idle once the operator has had a moment to read
+        the verdict. The verdict is not lost by clearing it -- by this point it
+        is stamped on the record and shown in the SCAN column -- so the next
+        part starts from a clean box instead of the previous part's result."""
+        _lock_scan_entry(); _set_scan_box("")
 
     def _fit_scan_wrap(event):
         # wraplength is in pixels and has to follow the panel, or a long code
@@ -1515,6 +1523,36 @@ def render(parent):
                 cur.execute("UPDATE testmaster SET scanresult=%s WHERE pno=%s AND lotno=%s",
                             (scan_res, state["pno"], lot_no))
         except Exception as ex: _log(f"Scan update error: {ex}")
+
+    def _duplicate_check(scanned: str):
+        """(lot this label belongs to if already scanned, is this lot scanned).
+
+        The second flag decides whether a duplicate can be recorded: it says
+        whether the row for the lot on the bench right now already holds a
+        verdict of its own.
+
+        Covers both ways an operator can present a used label: triggering the
+        scanner twice on the current one, and picking an earlier part's label
+        up off the bench. Matching reuses _scan_lot_ok against each candidate,
+        so it reads a label exactly the way verification does.
+
+        Scoped to this part, and it has to be: the lot sequence restarts at 1
+        per part, so another part's run today can hold the very same lot string
+        and would otherwise read as a duplicate of this one.
+        """
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT lotno FROM testmaster WHERE pno=%s AND DATE(date)=CURDATE() "
+                            "AND scanresult IS NOT NULL AND scanresult<>'' ORDER BY time DESC",
+                            (state["pno"],))
+                rows = cur.fetchall()
+        except Exception as ex:
+            # Can't prove it's a duplicate, so don't claim it is -- fall through
+            # to the normal OK/NG comparison rather than blocking a good part.
+            _log(f"Duplicate check failed: {ex}"); return "", False
+        done = {row[0] for row in rows if row[0]}
+        dup = next((lot for lot in done if _scan_lot_ok(scanned, lot)), "")
+        return dup, state["lot_no"] in done
 
     def _validate_employee(empno: str) -> bool:
         emp_file = os.path.join(os.path.dirname(__file__), "emp.txt")
@@ -1806,7 +1844,7 @@ def render(parent):
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
-        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#e65100", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
+        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
         # Re-check X3 (rework select) fresh for this cycle -- the background
@@ -1878,7 +1916,7 @@ def render(parent):
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
-            _after(0, lambda: _set_verdict("PASS", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
+            _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
             if cfg.get("scan_enabled", True):
                 # Focus immediately, not after a delay: printers eject a label
@@ -1909,10 +1947,31 @@ def render(parent):
         scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
         if not scanned: return
         print(f"[SCAN DEBUG] labelstr={labelstr!r} scanned={scanned!r} result={_scan_lot_ok(scanned, labelstr)}")
+        dup_lot, cur_done = _duplicate_check(scanned)
+        if dup_lot:
+            _log(f"Scan verify: duplicate label — lot {dup_lot} was already scanned")
+            _set_scan_box("DUP", scanned)
+            if not cur_done:
+                # An older label was presented for a lot that has no verdict
+                # yet, so record what happened. Skipped when this lot has
+                # already been scanned -- there the row holds a real verdict
+                # and a duplicate must not overwrite it.
+                _update_scan_result(state["lot_no"], "DUP")
+                _after(0, lambda p=state["pno"]: _load_today_pass(p))
+            _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
+            return
         if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
         else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
-        _update_scan_result(state["lot_no"], res_str); _after(2000, _lock_scan_entry); _after(2100, _input_poll_start)
+        _update_scan_result(state["lot_no"], res_str)
+        # Today's PASS Records was drawn when the test finished, before this
+        # scan existed, so its SCAN column still reads "—" for this lot.
+        # Refresh it now the row is stamped rather than leaving it stale until
+        # the next test completes. _update_scan_result has already committed --
+        # _after(0, ...) runs after this callback returns -- so the reload sees
+        # the new verdict.
+        _after(0, lambda p=state["pno"]: _load_today_pass(p))
+        _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     def _input_poll_once():
