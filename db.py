@@ -27,6 +27,16 @@ def ensure_column(table: str, column: str, coltype: str):
         if e.errno != 1060:  # 1060 = ER_DUP_FIELDNAME, i.e. already added
             raise
 
+def ensure_table(table: str, columns: str):
+    """Create a table if it isn't there yet. Idempotent.
+
+    init_db.py's CREATE TABLE IF NOT EXISTS only runs on a fresh install, so
+    a live DB that predates a table never gets it. This is the table-level
+    counterpart to ensure_column, safe to call on every use.
+    """
+    with get_cursor(commit=True) as cur:
+        cur.execute(f"CREATE TABLE IF NOT EXISTS {table} ({columns})")
+
 def widen_column(table: str, column: str, coltype: str):
     """Widen an existing column's type in place. Idempotent -- re-running a
     MODIFY COLUMN to the same type is a harmless no-op."""

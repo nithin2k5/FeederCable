@@ -1,3 +1,4 @@
+import datetime
 import tkinter as tk
 import mysql.connector
 
@@ -5,6 +6,42 @@ import db
 
 def _get_conn():
     return db.get_connection()
+
+# Audit trail for the pages behind a login (Admin, Model Settings). Kept as
+# separate date/time strings to match testmaster, so the two read the same way.
+LOGIN_HISTORY_COLUMNS = """
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    page VARCHAR(50),
+    eno VARCHAR(50),
+    ename VARCHAR(100),
+    result VARCHAR(20),
+    reason VARCHAR(100),
+    date VARCHAR(20),
+    time VARCHAR(20)
+"""
+
+def _record_login(page: str, eno: str, ok: bool, reason: str = ""):
+    """Append one login attempt to the audit trail.
+
+    Both outcomes are recorded -- a run of failures against an admin page is
+    exactly what this table exists to show. The password is never stored, on
+    success or failure.
+
+    Never raises: a failed audit write must not stop someone logging in.
+    """
+    now = datetime.datetime.now()
+    try:
+        db.ensure_table("loginhistory", LOGIN_HISTORY_COLUMNS)
+        with db.get_cursor(commit=True) as cur:
+            cur.execute("SELECT ename FROM admin WHERE eno=%s", (eno,))
+            row = cur.fetchone()
+            cur.execute(
+                "INSERT INTO loginhistory (page, eno, ename, result, reason, date, time) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (page, eno, (row[0] if row else "") or "", "SUCCESS" if ok else "FAILED",
+                 reason, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")))
+    except Exception as ex:
+        print(f"[AUTH] login history write failed: {ex}")
 
 def show_disclaimer(parent_root):
     # Modal dialog that blocks the main window
@@ -62,11 +99,15 @@ def show_disclaimer(parent_root):
     parent_root.wait_window(dialog)
 
 
-def show_login(parent_root, title="Login"):
+def show_login(parent_root, title="Login", page=None):
     """
     Shows a login modal.
     Returns True if login successful, False otherwise.
+
+    Every attempt, successful or not, is written to the loginhistory table
+    against `page` (defaults to the dialog title).
     """
+    page = page or title
     dialog = tk.Toplevel(parent_root)
     dialog.title(title)
 
@@ -127,6 +168,7 @@ def show_login(parent_root, title="Login"):
 
         if (eno == "nice" and pwd == "nice1234") or (eno == "123" and pwd == "123"):
             result["success"] = True
+            _record_login(page, eno, True)
             dialog.destroy()
             return
 
@@ -137,8 +179,13 @@ def show_login(parent_root, title="Login"):
 
             if row and row[0] == pwd:
                 result["success"] = True
+                _record_login(page, eno, True)
                 dialog.destroy()
             else:
+                # Separated so the trail distinguishes someone mistyping their
+                # own password from an ID that does not exist at all.
+                _record_login(page, eno, False,
+                              "wrong password" if row else "unknown employee ID")
                 err_lbl.config(text="Invalid Employee ID or Password.")
                 ent_pwd.delete(0, "end")
                 ent_pwd.focus_set()

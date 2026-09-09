@@ -151,7 +151,7 @@ class App:
         # Authentication check
         if page_name in ["admin", "model_settings"]:
             title_str = "Admin Login" if page_name == "admin" else "Settings Login"
-            if not auth.show_login(self.root, title=title_str):
+            if not auth.show_login(self.root, title=title_str, page=page_name):
                 return
                 
         # 1. Clear the current content area

@@ -1,6 +1,11 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import auth
 import db
+
+# Enough to cover a long shift without turning the panel into a data dump --
+# Test Data is the place to go digging further back.
+_HISTORY_LIMIT = 200
 
 def _get_conn():
     return db.get_connection()
@@ -134,5 +139,56 @@ def render(parent):
     for col in cols: tree.heading(col, text=col); tree.column(col, anchor="center")
     tree.pack(fill="both", expand=True, padx=2, pady=2)
     tree.bind("<<TreeviewSelect>>", on_tree_select)
-    
+
+    # ── Login history for the pages behind a login (Admin, Model Settings) ──
+    hist_head = tk.Frame(content, bg=bg_color)
+    hist_head.pack(fill="x", pady=(20, 8))
+    tk.Label(hist_head, text="LOGIN HISTORY", fg="#e8a000", bg=bg_color,
+             font=("Arial", 13, "bold")).pack(side="left")
+    hist_status = tk.Label(hist_head, text="", fg="#666", bg=bg_color, font=("Arial", 9))
+    hist_status.pack(side="left", padx=12)
+
+    hist_frame = tk.Frame(content, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1)
+    hist_frame.pack(fill="both", expand=True)
+
+    hist_cols = ("Date", "Time", "Page", "Employee ID", "Name", "Result", "Reason")
+    hist_widths = {"Date": 90, "Time": 80, "Page": 120, "Employee ID": 100,
+                   "Name": 150, "Result": 90, "Reason": 160}
+    tree_hist = ttk.Treeview(hist_frame, columns=hist_cols, show="headings", style="Admin.Treeview")
+    for col in hist_cols:
+        tree_hist.heading(col, text=col)
+        tree_hist.column(col, anchor="center", width=hist_widths.get(col, 100))
+    tree_hist.tag_configure("ok", foreground="#76ff03")
+    tree_hist.tag_configure("bad", foreground="#ff5555")
+    tree_hist.pack(side="left", fill="both", expand=True, padx=2, pady=2)
+    hist_scroll = ttk.Scrollbar(hist_frame, orient="vertical", command=tree_hist.yview)
+    hist_scroll.pack(side="right", fill="y")
+    tree_hist.configure(yscrollcommand=hist_scroll.set)
+
+    def load_history():
+        tree_hist.delete(*tree_hist.get_children())
+        try:
+            # The table is created on first login attempt, so a DB that has
+            # never seen one has no table yet -- make it rather than error.
+            db.ensure_table("loginhistory", auth.LOGIN_HISTORY_COLUMNS)
+            with db.get_cursor() as cur:
+                cur.execute("SELECT date, time, page, eno, ename, result, reason "
+                            "FROM loginhistory ORDER BY date DESC, time DESC, id DESC "
+                            "LIMIT %s", (_HISTORY_LIMIT,))
+                rows = cur.fetchall()
+        except Exception as ex:
+            hist_status.config(text=f"load failed: {ex}", fg="#ff5555")
+            return
+        for row in rows:
+            tag = "ok" if row[5] == "SUCCESS" else "bad"
+            tree_hist.insert("", "end", values=[c if c else "—" for c in row], tags=(tag,))
+        if rows:
+            hist_status.config(text=f"[ {len(rows)} most recent ]", fg="#666")
+        else:
+            hist_status.config(text="[ no logins recorded yet ]", fg="#666")
+
+    tk.Button(hist_head, text="Refresh", bg="#333", fg="white", font=("Arial", 9, "bold"),
+              bd=0, padx=14, pady=4, cursor="hand2", command=load_history).pack(side="right")
+
     load_users()
+    load_history()

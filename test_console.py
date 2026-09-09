@@ -53,6 +53,7 @@ try:
 except ImportError:
     _pil_ok = False
 
+import auth
 import db
 
 def _get_conn():
@@ -73,6 +74,21 @@ def _load_cfg() -> dict:
 def _save_cfg(d: dict):
     cfg = configparser.ConfigParser()
     cfg["COM"] = {k: str(v) for k, v in d.items()}
+    with open(_CFG_PATH, "w") as f:
+        cfg.write(f)
+
+def _save_cfg_key(key: str, value):
+    """Write one [COM] key, leaving everything else in the file alone.
+
+    Deliberately not _save_cfg(): that rebuilds the whole [COM] section out of
+    the six keys this page happens to load, which would drop every other
+    device's port and baud that COM Settings keeps in the same file.
+    """
+    cfg = configparser.ConfigParser()
+    cfg.read(_CFG_PATH)
+    if not cfg.has_section("COM"):
+        cfg.add_section("COM")
+    cfg.set("COM", key, str(value))
     with open(_CFG_PATH, "w") as f:
         cfg.write(f)
 
@@ -802,6 +818,11 @@ def render(parent):
 
     try:
         db.ensure_column("testmaster", "visionimg", "VARCHAR(255)")
+        # Per-camera vision verdicts. One taught model per part is run against
+        # each enabled camera, so the record shows which camera saw the part
+        # rather than a single verdict for the whole station.
+        db.ensure_column("testmaster", "cam1result", "VARCHAR(10)")
+        db.ensure_column("testmaster", "cam2result", "VARCHAR(10)")
         # A test run is identified by (part number, lot number), because the lot
         # sequence restarts at 1 for each part every day. A live DB created
         # before that carries a UNIQUE index on lotno alone, which rejects the
@@ -824,6 +845,7 @@ def render(parent):
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
         "ct_last": None, "ct_sum": 0.0, "ct_count": 0,
+        "cam_results": {1: None, 2: None},
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
@@ -1238,9 +1260,10 @@ def render(parent):
     scan_lbl.pack(fill="both", expand=True)
 
     tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    lot_cols = ("#", "LOT NO", "ALC", "RESULT", "SCAN", "EMP", "TIME")
+    lot_cols = ("#", "LOT NO", "ALC", "RESULT", "SCAN", "CAM1", "CAM2", "EMP", "TIME")
     tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
-    lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60, "EMP": 70, "TIME": 70}
+    lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60,
+                  "CAM1": 55, "CAM2": 55, "EMP": 70, "TIME": 70}
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
     tree_lot.pack(fill="x")
 
@@ -1404,9 +1427,21 @@ def render(parent):
     scan_lf.grid(row=0, column=1, sticky="nsew", padx=(0, 4))
     scan_inner = tk.Frame(scan_lf, bg="black", padx=6, pady=4); scan_inner.pack(fill="both", expand=True)
 
-    scan_verdict_lbl = tk.Label(scan_inner, text="—", bg="black", fg="#555",
+    scan_head = tk.Frame(scan_inner, bg="black")
+    scan_head.pack(fill="x")
+    scan_verdict_lbl = tk.Label(scan_head, text="—", bg="black", fg="#555",
                                 font=("Arial", 11, "bold"), anchor="w")
-    scan_verdict_lbl.pack(fill="x")
+    scan_verdict_lbl.pack(side="left")
+
+    # Turning verification off lets parts ship without their printed label
+    # ever being checked, so it is a supervisor decision, not an operator one:
+    # the toggle asks for a login and puts itself back if that is refused.
+    scan_req_var = tk.BooleanVar(value=cfg.get("scan_enabled", True))
+    tk.Checkbutton(scan_head, text="Scan required", variable=scan_req_var,
+                   bg="black", fg="#888", font=("Arial", 8), selectcolor="#1a1a1a",
+                   activebackground="black", activeforeground="white",
+                   highlightthickness=0, bd=0, cursor="hand2",
+                   command=lambda: _toggle_scan_required()).pack(side="right")
 
     # The operator never has to click anywhere -- after a PASS this entry
     # gets keyboard focus directly, so a keyboard-wedge scanner's trigger
@@ -1470,6 +1505,35 @@ def render(parent):
             except Exception: pass
         try: _after(0, _do_log)
         except Exception: pass
+
+    def _toggle_scan_required():
+        """Enable/disable label scan verification, behind a login.
+
+        Reverting the variable on refusal matters: Checkbutton has already
+        flipped it by the time this runs, so without that the box would show a
+        setting that was never applied.
+        """
+        want = scan_req_var.get()
+        if state["test_running"]:
+            scan_req_var.set(not want)
+            _log("Test in progress — finish it before changing the scan setting.")
+            return
+        if not auth.show_login(parent.winfo_toplevel(),
+                               title="Label Scan Setting", page="label_scan_toggle"):
+            scan_req_var.set(not want)
+            _log("Label scan setting unchanged (login cancelled or failed).")
+            return
+        cfg["scan_enabled"] = want
+        try:
+            _save_cfg_key("scan_enabled", want)
+        except Exception as ex:
+            _log(f"Could not save the label scan setting: {ex}")
+        # The idle text of the box spells out which mode it is in.
+        if not want: _lock_scan_entry()
+        _set_scan_box("")
+        _log(f"Label scan {'ENABLED' if want else 'DISABLED'} — "
+             f"{'required' if want else 'not required'} after a PASS.")
+
     def _load_specs(pno: str) -> bool:
         try:
             with db.get_dict_cursor() as cur:
@@ -1528,7 +1592,7 @@ def render(parent):
         rows = []
         try:
             with db.get_cursor() as cur:
-                cur.execute("SELECT lotno, alc, result, scanresult, empcode, time FROM testmaster "
+                cur.execute("SELECT lotno, alc, result, scanresult, cam1result, cam2result, empcode, time FROM testmaster "
                             "WHERE result='PASS' AND DATE(date)=CURDATE()" + where_pno +
                             " ORDER BY time DESC", args)
                 rows = cur.fetchall()
@@ -1545,7 +1609,8 @@ def render(parent):
             _log(f"Today's NG count: load failed ({ex})")
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
-            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "—", row[3] or "—", row[4], row[5]))
+            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "—",
+                                              row[3] or "—", row[4] or "—", row[5] or "—", row[6], row[7]))
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
@@ -1573,7 +1638,7 @@ def render(parent):
         try:
             with db.get_cursor(commit=True) as cur:
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
-                cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img))
+                cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg, cam1result, cam2result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img, state["cam_results"].get(1), state["cam_results"].get(2)))
                 for ch in range(1, state["num_channels"] + 1):
                     cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} → {lot_no}")
@@ -1908,7 +1973,7 @@ def render(parent):
         if not emp: _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID.")); return
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
-        state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
+        state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None; state["cam_results"] = {1: None, 2: None}
         _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
@@ -1930,18 +1995,35 @@ def render(parent):
             if not vision_ctrl.has_model(state["pno"]):
                 _log(f"Vision WARNING: No vision model configured for part '{state['pno']}'. Skipping vision.")
             else:
-                # Run inspection (capture frame + contour match)
-                vision_result = vision_ctrl.inspect(state["pno"])
-                state["vision_result"] = vision_result.judgement
-                state["last_vision_result"] = vision_result
-                _after(0, lambda r=vision_result: _show_vision_frame(r))
-
-                if vision_result.judgement == "ERROR":
-                    _log(f"Vision ERROR: {vision_result.error}. Skipping vision.")
-                elif not vision_result.ok:
-                    _log(f"Vision NG: {vision_result.error} (score={vision_result.match_score:.4f}). Skipping vision.")
-                else:
-                    _log(f"Vision OK: score={vision_result.match_score:.4f} in {vision_result.processing_time_ms}ms")
+                # Each enabled camera is inspected in turn against the part's
+                # one taught model, so the record can say which camera saw the
+                # part. The configured camera_source stays the "primary": it
+                # is the result that drives the saved pass image, exactly as
+                # before, so nothing downstream changes shape.
+                primary = 2 if vision_ctrl.config.get("camera_source", "cam1") == "cam2" else 1
+                cams = _load_cam_cfg()
+                for cid in (1, 2):
+                    if not cams.get(f"cam{cid}_enabled"):
+                        state["cam_results"][cid] = None
+                        continue
+                    frame = camera.grab(cams[f"cam{cid}_index"],
+                                        cams[f"cam{cid}_width"], cams[f"cam{cid}_height"])
+                    if frame is None:
+                        state["cam_results"][cid] = "ERROR"
+                        _log(f"Vision CAM{cid} ERROR: no frame from the camera")
+                        continue
+                    r = vision_ctrl.inspect(state["pno"], frame=frame)
+                    state["cam_results"][cid] = r.judgement
+                    _after(0, lambda res=r, c=cid: _show_vision_frame(res, c))
+                    if cid == primary:
+                        state["vision_result"] = r.judgement
+                        state["last_vision_result"] = r
+                    if r.judgement == "ERROR":
+                        _log(f"Vision CAM{cid} ERROR: {r.error}")
+                    elif not r.ok:
+                        _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}")
+                    else:
+                        _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms")
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -2212,7 +2294,7 @@ def render(parent):
                         (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
         return frame
 
-    def _show_vision_frame(result):
+    def _show_vision_frame(result, cam_id=None):
         """Paint the frame vision judged, with the detected match boxed on it,
         into that camera's preview panel — so the operator sees *what* the
         matcher found, not just a score. Reverts to the live feed a few
@@ -2220,7 +2302,8 @@ def render(parent):
         """
         if not (_cv2_ok and _pil_ok) or result.frame is None or not vision_ctrl:
             return
-        cam_id = 2 if vision_ctrl.config.get("camera_source", "cam1") == "cam2" else 1
+        if cam_id is None:
+            cam_id = 2 if vision_ctrl.config.get("camera_source", "cam1") == "cam2" else 1
         lbl = cam_labels.get(cam_id)
         if lbl is None:
             return

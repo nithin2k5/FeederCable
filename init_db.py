@@ -64,6 +64,8 @@ def init_db():
             scanresult VARCHAR(20),
             machine VARCHAR(50),
             visionimg VARCHAR(255),
+            cam1result VARCHAR(10),
+            cam2result VARCHAR(10),
             -- Part + lot, not lot alone: the lot sequence restarts at 1 for
             -- each part number every day, so two parts legitimately share a
             -- lot string. It is the pair that identifies a test run.
@@ -97,6 +99,19 @@ def init_db():
             dept VARCHAR(100)
         )''')
         
+        print("Creating loginhistory table...")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS loginhistory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            page VARCHAR(50),
+            eno VARCHAR(50),
+            ename VARCHAR(100),
+            result VARCHAR(20),
+            reason VARCHAR(100),
+            date VARCHAR(20),
+            time VARCHAR(20)
+        )""")
+
         print("Inserting default admin users...")
         cur.execute('''
         INSERT IGNORE INTO admin (eno, ename, pwd, desig, dept) 
