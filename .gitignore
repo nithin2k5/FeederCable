@@ -7,3 +7,6 @@ __pycache__/
 
 # Per-lot vision pass images -- operational data, one file per test run
 vision_captures/
+
+# Runtime scratch for the START/END marker labels (rendered from MARKER.prn)
+TEMPMARKER_*.prn

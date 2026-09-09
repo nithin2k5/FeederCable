@@ -589,6 +589,36 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     except Exception as ex:
         print(f"[PRINT DEBUG] failed building/sending label: {ex}")
 
+def _print_marker_label(pno: str, marker: str, printer_name: str = "EOLPRINTER"):
+    """Print the text-only label that brackets a part's run on the roll.
+
+    START goes out when a part finishes loading, END when it is released, so
+    the roll shows where one part's output stops and the next begins. There is
+    no barcode or data matrix on it -- nothing scans this label, it is read by
+    eye. Layout lives in MARKER.prn so the plant can nudge it without a code
+    change; the placeholders match _print_barcode_label's.
+    """
+    base = os.path.dirname(__file__)
+    prn_file = os.path.join(base, "MARKER.prn")
+    if not os.path.exists(prn_file):
+        print(f"[PRINT DEBUG] marker template not found ({prn_file}) -- aborting print")
+        return
+    now = datetime.datetime.now()
+    try:
+        with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
+        text = (text.replace("@marker@", marker)
+                    .replace("@partNumber@", pno)
+                    .replace("@ddMMyy@", now.strftime("%d%m%y"))
+                    .replace("@HH:mm:ss@", now.strftime("%H:%M:%S")))
+        # A scratch file per marker: _print_barcode_label owns TEMPPRN.prn and
+        # both printers run on background threads, so any shared scratch file
+        # could be overwritten between write and send.
+        tmp = os.path.join(base, f"TEMPMARKER_{marker}.prn")
+        with open(tmp, "w", encoding="latin-1") as f: f.write(text)
+        _print_raw(printer_name, tmp)
+    except Exception as ex:
+        print(f"[PRINT DEBUG] failed building/sending marker label: {ex}")
+
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 def _load_cam_cfg() -> dict:
     cfg = configparser.ConfigParser()
@@ -1946,6 +1976,13 @@ def render(parent):
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
 
+    def _print_marker(marker: str, pno: str):
+        """Send a START/END marker label off the UI thread -- printing blocks
+        for as long as the spooler takes, and this runs while the operator is
+        mid-flow loading or releasing a part."""
+        _log(f"{marker} label -> {pno}")
+        threading.Thread(target=_print_marker_label, args=(pno, marker), daemon=True).start()
+
     def _clear_part_fields():
         """Reset everything that belongs to one part -- the part/JIG entries,
         the master data loaded from them, the specs and the per-cycle test
@@ -1969,6 +2006,10 @@ def render(parent):
         """
         if state["test_running"]:
             _log("Test in progress — finish it before changing part."); return
+        # Has to happen before _clear_part_fields() wipes state["pno"]. The
+        # guard also covers _on_jig_enter's failure path, which calls this with
+        # no part ever loaded -- there is nothing to close out there.
+        if state["pno"]: _print_marker("END", state["pno"])
         _input_poll_stop()
         _clear_part_fields()
         emp = ent_emp.get().strip()
@@ -2139,6 +2180,7 @@ def render(parent):
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
             _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
+            _print_marker("START", pno)
             _vision_check_loaded_part(pno)
             btn_start.focus_set(); _after(500, _input_poll_start)
         else:
