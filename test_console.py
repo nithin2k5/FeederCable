@@ -595,19 +595,23 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
 _MARKER_LABEL_W = 280
 _MARKER_FONT_W = {"2": 12, "3": 16}
 
-def _marker_line(y: int, font: str, mul: int, content: str) -> str:
-    """One horizontally centred TSPL TEXT line, rotation 180.
+def _marker_line(y: int, font: str, mul: int, content: str, align_w: int = 0) -> str:
+    """One TSPL TEXT line, rotation 180, positioned without the printer's help.
 
-    Centring is computed rather than handed to the printer: TSPL's own
-    alignment argument is not supported across all TSC firmware, but these
-    internal fonts are fixed width, so the rendered width is exact. Rotation
-    180 matches every other template in this project, and with it the anchor
-    is the text's far edge -- hence centre plus half the width. A line too
-    long for the label falls back to starting at its own width, so it runs off
-    one side instead of being mispositioned on both.
+    TSPL's own alignment argument is not supported across all TSC firmware,
+    but these internal fonts are fixed width, so a line's rendered width is
+    exact and the position can just be computed.
+
+    align_w is the width the line is placed *as if* it had. Left at 0 the line
+    centres on itself; pass a block's widest line and every line of that block
+    shares one edge instead of floating independently. That works because
+    under rotation 180 the anchor is the reading-left edge, so a shared anchor
+    is a shared left margin whatever each line's own length -- and for the
+    centred case the arithmetic comes out the same either way.
     """
     width = len(content) * _MARKER_FONT_W[font] * mul
-    x = max(width, (_MARKER_LABEL_W + width) // 2)
+    box = max(width, align_w)
+    x = max(width, min(_MARKER_LABEL_W, (_MARKER_LABEL_W + box) // 2))
     return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
 
 def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = "EOLPRINTER"):
@@ -627,14 +631,21 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         print(f"[PRINT DEBUG] marker template not found ({prn_file}) -- aborting print")
         return
     now = datetime.datetime.now()
+    # Captions padded to the longest one so the colons line up down the block.
+    fields = [f"{cap:<5} : {val}" for cap, val in (
+        ("P/NO",  pno),
+        ("DATE",  now.strftime("%d/%m/%y")),
+        ("TIME",  now.strftime("%H:%M:%S")),
+        ("MC ID", machine_id),
+    )]
+    # The title centres on itself; the fields share one left edge, with the
+    # block as a whole centred via its widest line.
+    block_w = max(len(f) for f in fields) * _MARKER_FONT_W["2"]
     # Read top to bottom on the label; with rotation 180 that is y descending.
-    body = "\r\n".join([
-        _marker_line(170, "3", 1, f"{marker} LABEL"),
-        _marker_line(132, "2", 1, f"P/NO : {pno}"),
-        _marker_line(104, "2", 1, f"DATE : {now.strftime('%d/%m/%y')}"),
-        _marker_line(76,  "2", 1, f"TIME : {now.strftime('%H:%M:%S')}"),
-        _marker_line(48,  "2", 1, f"MC ID : {machine_id}"),
-    ])
+    body = "\r\n".join(
+        [_marker_line(170, "3", 1, f"{marker} LABEL")]
+        + [_marker_line(y, "2", 1, f, block_w) for y, f in zip((132, 104, 76, 48), fields)]
+    )
     try:
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
         text = text.replace("@body@", body)
