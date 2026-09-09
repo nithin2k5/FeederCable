@@ -14,7 +14,7 @@ import time
 import os
 import configparser
 
-# â”€â”€ Optional hardware libraries (graceful degradation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Optional hardware libraries (graceful degradation) ─────────────────────────
 try:
     import serial
     import serial.tools.list_ports
@@ -737,6 +737,7 @@ def render(parent):
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
+        "ct_last": None, "ct_sum": 0.0, "ct_count": 0,
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
@@ -759,38 +760,59 @@ def render(parent):
             if content.winfo_exists():
                 fn(*a)
         return _real_after(delay, _guarded, *args)
-    content.rowconfigure(0, weight=1); content.rowconfigure(1, weight=0); content.columnconfigure(0, weight=1)
-    upper = tk.Frame(content, bg="black"); upper.grid(row=0, column=0, sticky="nsew")
-    upper.columnconfigure(0, weight=1); upper.columnconfigure(1, weight=0); upper.rowconfigure(0, weight=1)
-    left_area = tk.Frame(upper, bg="black"); left_area.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    right_panel = tk.Frame(upper, bg="black", width=220)
-    right_panel.grid(row=0, column=1, sticky="nsew")
+    # The sidebar runs the full height of the page (rowspan 2), so the bottom
+    # row -- PLC I/O / Label Scan Result / Log -- ends where the left column
+    # ends instead of running underneath the sidebar. That leaves COM Status a
+    # home at the very bottom of the sidebar, level with the bottom row.
+    content.rowconfigure(0, weight=1); content.rowconfigure(1, weight=0)
+    content.columnconfigure(0, weight=1); content.columnconfigure(1, weight=0)
+    left_area = tk.Frame(content, bg="black"); left_area.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+    right_panel = tk.Frame(content, bg="black", width=220)
+    right_panel.grid(row=0, column=1, rowspan=2, sticky="nsew")
     right_panel.grid_propagate(False)
     right_panel.columnconfigure(0, weight=1)
-    for i in range(4): right_panel.rowconfigure(i, weight=0)
-    right_panel.rowconfigure(0, weight=1)   # TEST RESULT frame absorbs leftover space
+    # Sidebar order, top to bottom: cameras, verdict block, lot/time strip,
+    # REWORK, COM Status.
+    for i in range(5): right_panel.rowconfigure(i, weight=0)
+    right_panel.rowconfigure(1, weight=1)   # result block absorbs leftover space
 
+    # The verdict is the only thing in this block, filling it edge to edge so
+    # it reads from across the line; the lot number and elapsed time sit in a
+    # slim strip underneath rather than inside it.
     result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
-    result_outer.grid(row=0, column=0, sticky="nsew", pady=(0, 3))
-    result_inner = tk.Frame(result_outer, bg="black")
-    result_inner.pack(fill="both", expand=True)
-    tk.Label(result_inner, text="TEST RESULT", bg="black", fg="#666", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    result_lbl = tk.Label(result_inner, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 26, "bold"), anchor="center")
-    result_lbl.pack(fill="both", expand=True, padx=4, pady=(2, 4))
-    tk.Label(result_inner, text="LOT NO", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    lot_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 8), anchor="center")
-    lot_lbl.pack(fill="x", padx=4, pady=(0, 4))
-    tk.Label(result_inner, text="ELAPSED TIME (s)", bg="black", fg="#444", font=("Arial", 8)).pack(fill="x")
-    elapsed_lbl = tk.Label(result_inner, text="—", bg="black", fg="#888", font=("Consolas", 9), anchor="center")
-    elapsed_lbl.pack(fill="x", padx=4, pady=(0, 6))
+    result_outer.grid(row=1, column=0, sticky="nsew", pady=(0, 3))
+    result_lbl = tk.Label(result_outer, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 30, "bold"), anchor="center")
+    result_lbl.pack(fill="both", expand=True)
 
-    # Rework indicator lives outside the TEST RESULT box entirely, styled like
-    # a COM Status pill (bordered box, always showing its name) -- blinking
-    # is done by swapping its color, not its text, while X3 (rework select)
-    # is high.
+    def _set_verdict(text, bg, fg):
+        """Set the verdict, sized to the sidebar. "TESTING" is half again as
+        wide as "PASS", so one fixed size either clips it or wastes the block
+        on the short words -- pick the size from the word instead."""
+        result_lbl.config(text=text, bg=bg, fg=fg,
+                          font=("Arial", 30 if len(text) <= 5 else 22, "bold"))
+
+    # Lot number and elapsed time tuck under the verdict as a two-line strip:
+    # caption left, value right, small enough that the verdict block keeps
+    # essentially all of the sidebar's spare height.
+    meta = tk.Frame(right_panel, bg="black")
+    meta.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 3))
+    meta.columnconfigure(1, weight=1)
+    _META_CAP = {"bg": "black", "fg": "#444", "font": ("Arial", 7), "anchor": "w"}
+    _META_VAL = {"bg": "black", "fg": "#888", "font": ("Consolas", 8), "anchor": "e"}
+    tk.Label(meta, text="LOT NO", **_META_CAP).grid(row=0, column=0, sticky="w")
+    lot_lbl = tk.Label(meta, text="—", **_META_VAL)
+    lot_lbl.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+    tk.Label(meta, text="TIME (s)", **_META_CAP).grid(row=1, column=0, sticky="w")
+    elapsed_lbl = tk.Label(meta, text="—", **_META_VAL)
+    elapsed_lbl.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+
+    # Rework indicator sits between the verdict block and COM Status, styled
+    # like a COM Status pill (bordered box, always showing its name) -- so it
+    # stays readable without stealing room from the verdict. Blinking is done
+    # by swapping its color, not its text, while X3 (rework select) is high.
     rework_lbl = tk.Label(right_panel, text="REWORK", bg="#2a2a2a", fg="#555",
                           font=("Arial", 8), pady=3, bd=1, relief="solid")
-    rework_lbl.grid(row=1, column=0, sticky="ew", pady=(0, 3))
+    rework_lbl.grid(row=3, column=0, sticky="ew", pady=(0, 3))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
     
@@ -802,7 +824,7 @@ def render(parent):
         vision_ctrl = None
         print(f"Vision controller init error: {e}")
 
-    com_lf.grid(row=2, column=0, sticky="ew", pady=(0, 3))
+    com_lf.grid(row=4, column=0, sticky="ew")
     com_inner = tk.Frame(com_lf, bg="black", padx=4, pady=4)
     com_inner.pack(fill="both")
     com_labels = {}
@@ -825,7 +847,7 @@ def render(parent):
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
     cam_frame = tk.Frame(right_panel, bg="black")
-    cam_frame.grid(row=3, column=0, sticky="nsew", pady=(5, 0))
+    cam_frame.grid(row=0, column=0, sticky="new", pady=(0, 3))
     _cam_feeds = []  # track for cleanup
     cam_labels = {}       # cam_id -> preview Label
     cam_feeds_by_id = {}  # cam_id -> CameraFeed (only when a live feed is running)
@@ -1045,12 +1067,20 @@ def render(parent):
     _lbl(ci, "OK").grid(row=1, column=0, sticky="w", pady=3); cnt_ok = _ent(ci, w=6, editable=False, fg="#76ff03"); cnt_ok.grid(row=1, column=1, sticky="ew", padx=5)
     _lbl(ci, "NG%").grid(row=1, column=2, sticky="w", padx=5); cnt_ng_pct = _ent(ci, w=6, editable=False, fg="#ff5555"); cnt_ng_pct.grid(row=1, column=3, sticky="ew", padx=5)
     _lbl(ci, "PPM").grid(row=2, column=0, sticky="w", pady=3); cnt_ppm = _ent(ci, w=6, editable=False, fg="#ff9800"); cnt_ppm.grid(row=2, column=1, sticky="ew", padx=5)
+    _lbl(ci, "CT (s)").grid(row=2, column=2, sticky="w", padx=5); cnt_ct = _ent(ci, w=6, editable=False, fg="#4fc3f7"); cnt_ct.grid(row=2, column=3, sticky="ew", padx=5)
+    _lbl(ci, "Avg CT (s)").grid(row=3, column=2, sticky="w", padx=5, pady=3); cnt_ct_avg = _ent(ci, w=6, editable=False, fg="#4fc3f7"); cnt_ct_avg.grid(row=3, column=3, sticky="ew", padx=5)
     
     def _update_counts():
         t = state["total"]; o = state["ok"]; n = state["ng"]
         pct = f"{(n/t*100):.1f}%" if t > 0 else "0.0%"
         ppm = f"{int(n/t*1000000)}" if t > 0 else "0"
-        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm)]:
+        # Cycle time is measured live, not stored -- testmaster keeps no
+        # duration column, so unlike the counts above (which are read back
+        # from today's rows) these only cover the tests run since the current
+        # part was loaded. "—" until the first one finishes.
+        ct = f"{state['ct_last']:.1f}" if state["ct_last"] is not None else "—"
+        avg = f"{(state['ct_sum'] / state['ct_count']):.1f}" if state["ct_count"] else "—"
+        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm), (cnt_ct, ct), (cnt_ct_avg, avg)]:
             entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, val); entry.config(state="readonly")
 
     shf = tk.Frame(left_area, bg="black")
@@ -1092,7 +1122,7 @@ def render(parent):
         for key in result_rows:
             for cell in result_rows[key]["cells"]: cell.config(text="—", bg="#0d0d0d", fg="#333")
             result_rows[key]["result"].config(text="—", bg="#0d0d0d", fg="#333")
-        result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")
+        _set_verdict("READY", "#1a1a1a", "#555")
         lot_lbl.config(text="—"); elapsed_lbl.config(text="—"); blink_start()
 
     def _set_cell(test_key, ch_idx, value, passed):
@@ -1123,11 +1153,11 @@ def render(parent):
     btn_start.pack(fill="x", pady=(6, 0))
 
     bottom = tk.Frame(content, bg="black", height=110)
-    bottom.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+    bottom.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(4, 0))
     bottom.grid_propagate(False)
-    bottom.columnconfigure(0, weight=0)   # I/O: only as wide as its indicator grid
-    bottom.columnconfigure(1, weight=3)   # Label Scan Result
-    bottom.columnconfigure(2, weight=2)   # Log
+    bottom.columnconfigure(0, weight=0)                # I/O: only as wide as its indicator grid
+    bottom.columnconfigure(1, weight=3, minsize=200)   # Label Scan Result
+    bottom.columnconfigure(2, weight=2, minsize=260)   # Log
     bottom.rowconfigure(0, weight=1)
     io_lf = ttk.LabelFrame(bottom, text="PLC I/O Channel Status", style="TC.TLabelframe")
     io_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
@@ -1326,7 +1356,7 @@ def render(parent):
 
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=2, sticky="nsew")
-    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5)
+    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5, width=1)
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -1443,7 +1473,7 @@ def render(parent):
                 cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img))
                 for ch in range(1, state["num_channels"] + 1):
                     cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
-            _log(f"Saved {overall} â†’ {lot_no}")
+            _log(f"Saved {overall} → {lot_no}")
         except Exception as ex: _log(f"Save error: {ex}")
 
     def _update_scan_result(lot_no: str, scan_res: str):
@@ -1746,7 +1776,7 @@ def render(parent):
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None
-        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: result_lbl.config(text="TESTING...", bg="#e65100", fg="white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
+        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#e65100", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
         # Re-check X3 (rework select) fresh for this cycle -- the background
@@ -1786,12 +1816,12 @@ def render(parent):
         _after(0, lambda: scan_lbl.config(text="Checking contact (CH1)...", bg="#001830", fg="#e8a000"))
         if _modbus_ok:
             if not _run_contact_ch1_check():
-                _log("Contact NOT OK (X2) — aborting"); _after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); _after(0, lambda: result_lbl.config(text="READY", bg="#1a1a1a", fg="#555")); _after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
+                _log("Contact NOT OK (X2) — aborting"); _after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
                 state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
-        _after(0, lambda: scan_lbl.config(text="âš¡  ACW Testing (Withstand Voltage)â€¦", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
+        _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return
         _after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
@@ -1807,13 +1837,18 @@ def render(parent):
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
-        elapsed_str = f"{(datetime.datetime.now() - state['start_time']).total_seconds():.1f}" if state["start_time"] else "—"
+        elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
+        elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
+        # Cycle time == this test's duration (START to verdict), which is what
+        # the sidebar strip shows too; the Count box adds the running mean.
+        if elapsed is not None:
+            state["ct_last"] = elapsed; state["ct_sum"] += elapsed; state["ct_count"] += 1
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
-            _after(0, lambda: result_lbl.config(text="PASS", bg="#0033aa", fg="white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
+            _after(0, lambda: _set_verdict("PASS", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
             if cfg.get("scan_enabled", True):
                 # Focus immediately, not after a delay: printers eject a label
@@ -1826,8 +1861,8 @@ def render(parent):
                 _after(0, lambda: _set_scan_box(""))
                 _after(500, _input_poll_start)
         else:
-            _after(0, lambda: result_lbl.config(text="FAIL", bg="#b71c1c", fg="white")); _after(0, lambda: scan_lbl.config(text="âŒ  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
-        _after(0, lambda p=pno: _load_today_pass(p)); _log(f"â”€â”€ Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s â”€â”€")
+            _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda: scan_lbl.config(text="❌  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+        _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         if overall == "FAIL": _after(200, _input_poll_start)
 
@@ -1920,7 +1955,8 @@ def render(parent):
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_scan_box("")
-        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None})
+        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None,
+                      "ct_last": None, "ct_sum": 0.0, "ct_count": 0})
         btn_start.config(bg="#1a1a1a", fg="#444")
 
     def _next_part():
