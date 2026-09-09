@@ -1128,8 +1128,14 @@ def render(parent):
     tree_spec.pack(fill="x")
 
     tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(8, 2))
-    test_frame = tk.Frame(left_area, bg="black")
-    test_frame.pack(fill="x")
+    # Outer white border, the same 1px padded-wrapper trick the verdict and
+    # scan boxes use -- without it this table has no outline of its own and
+    # runs straight into the black background, unlike the treeviews above and
+    # below it.
+    test_outer = tk.Frame(left_area, bg="white", padx=1, pady=1)
+    test_outer.pack(fill="x")
+    test_frame = tk.Frame(test_outer, bg="black")
+    test_frame.pack(fill="both", expand=True)
     MAX_CH = 8
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
