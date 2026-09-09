@@ -589,14 +589,37 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     except Exception as ex:
         print(f"[PRINT DEBUG] failed building/sending label: {ex}")
 
-def _print_marker_label(pno: str, marker: str, printer_name: str = "EOLPRINTER"):
+# 35 mm at 203 dpi (8 dots/mm), and the TSPL internal fonts that are fixed
+# width -- cell width in dots, so a rendered line's width is exactly
+# len(text) * cell * multiplier.
+_MARKER_LABEL_W = 280
+_MARKER_FONT_W = {"2": 12, "3": 16}
+
+def _marker_line(y: int, font: str, mul: int, content: str) -> str:
+    """One horizontally centred TSPL TEXT line, rotation 180.
+
+    Centring is computed rather than handed to the printer: TSPL's own
+    alignment argument is not supported across all TSC firmware, but these
+    internal fonts are fixed width, so the rendered width is exact. Rotation
+    180 matches every other template in this project, and with it the anchor
+    is the text's far edge -- hence centre plus half the width. A line too
+    long for the label falls back to starting at its own width, so it runs off
+    one side instead of being mispositioned on both.
+    """
+    width = len(content) * _MARKER_FONT_W[font] * mul
+    x = max(width, (_MARKER_LABEL_W + width) // 2)
+    return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
+
+def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = "EOLPRINTER"):
     """Print the text-only label that brackets a part's run on the roll.
 
-    START goes out when a part finishes loading, END when it is released, so
-    the roll shows where one part's output stops and the next begins. There is
-    no barcode or data matrix on it -- nothing scans this label, it is read by
-    eye. Layout lives in MARKER.prn so the plant can nudge it without a code
-    change; the placeholders match _print_barcode_label's.
+    START goes out when a part finishes loading, END when it is released or
+    the program closes, so the roll shows where one part's output stops and
+    the next begins. There is no barcode or data matrix on it -- nothing scans
+    this label, it is read by eye.
+
+    MARKER.prn holds the stock setup (size, gap, tear) and the body is
+    generated here, because centring each line needs the rendered text.
     """
     base = os.path.dirname(__file__)
     prn_file = os.path.join(base, "MARKER.prn")
@@ -604,12 +627,17 @@ def _print_marker_label(pno: str, marker: str, printer_name: str = "EOLPRINTER")
         print(f"[PRINT DEBUG] marker template not found ({prn_file}) -- aborting print")
         return
     now = datetime.datetime.now()
+    # Read top to bottom on the label; with rotation 180 that is y descending.
+    body = "\r\n".join([
+        _marker_line(170, "3", 1, f"{marker} LABEL"),
+        _marker_line(132, "2", 1, f"P/NO : {pno}"),
+        _marker_line(104, "2", 1, f"DATE : {now.strftime('%d/%m/%y')}"),
+        _marker_line(76,  "2", 1, f"TIME : {now.strftime('%H:%M:%S')}"),
+        _marker_line(48,  "2", 1, f"MC ID : {machine_id}"),
+    ])
     try:
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
-        text = (text.replace("@marker@", marker)
-                    .replace("@partNumber@", pno)
-                    .replace("@ddMMyy@", now.strftime("%d%m%y"))
-                    .replace("@HH:mm:ss@", now.strftime("%H:%M:%S")))
+        text = text.replace("@body@", body)
         # A scratch file per marker: _print_barcode_label owns TEMPPRN.prn and
         # both printers run on background threads, so any shared scratch file
         # could be overwritten between write and send.
@@ -618,6 +646,23 @@ def _print_marker_label(pno: str, marker: str, printer_name: str = "EOLPRINTER")
         _print_raw(printer_name, tmp)
     except Exception as ex:
         print(f"[PRINT DEBUG] failed building/sending marker label: {ex}")
+
+# render() publishes a callback here so main.py can close out the loaded
+# part's run when the program exits; None when no Test Console page is live.
+_ACTIVE = {"close_out": None}
+
+def close_out_run():
+    """Print the END label for whatever part is still loaded, if any.
+
+    Called by main.py on window close. Deliberately synchronous: the marker
+    printers otherwise use daemon threads, which die the moment the
+    interpreter exits, so a threaded print here would usually never reach the
+    spooler.
+    """
+    fn = _ACTIVE.get("close_out")
+    if fn is None: return
+    try: fn()
+    except Exception as ex: print(f"[PRINT DEBUG] close-out failed: {ex}")
 
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 def _load_cam_cfg() -> dict:
@@ -1041,6 +1086,9 @@ def render(parent):
     # page's own attempt to open it.
     def _on_page_destroy(e):
         if e.widget == content:
+            # Navigating away is not "closing the program", so this only drops
+            # the hook -- it does not print an END.
+            _ACTIVE["close_out"] = None
             for feed in _cam_feeds:
                 feed.stop()
             state["input_polling"] = False
@@ -2046,7 +2094,18 @@ def render(parent):
         for as long as the spooler takes, and this runs while the operator is
         mid-flow loading or releasing a part."""
         _log(f"{marker} label -> {pno}")
-        threading.Thread(target=_print_marker_label, args=(pno, marker), daemon=True).start()
+        threading.Thread(target=_print_marker_label,
+                         args=(pno, marker, cfg["machine_id"]), daemon=True).start()
+
+    def _close_out_run():
+        """END for the part still loaded when the program closes. Prints on
+        this thread -- see close_out_run() -- and clears the part so a second
+        call can't put a duplicate END on the roll."""
+        if state["pno"]:
+            _log(f"END label -> {state['pno']} (program closing)")
+            _print_marker_label(state["pno"], "END", cfg["machine_id"])
+            state["pno"] = None
+    _ACTIVE["close_out"] = _close_out_run
 
     def _clear_part_fields():
         """Reset everything that belongs to one part -- the part/JIG entries,

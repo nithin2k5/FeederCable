@@ -49,6 +49,13 @@ class App:
         self.load_page('test_console')
 
     def on_closing(self):
+        # Close out the loaded part's run first: printing has to reach the
+        # spooler while the interpreter is still alive. No-op unless a Test
+        # Console page is live with a part loaded.
+        try:
+            test_console.close_out_run()
+        except Exception as e:
+            print(f"Error printing END label on exit: {e}")
         try:
             import configparser
             import os
