@@ -4,6 +4,7 @@ import threading
 from pymodbus.client import ModbusSerialClient
 import os
 import configparser
+import auth
 
 def render(parent):
     style = ttk.Style()
@@ -211,15 +212,61 @@ def render(parent):
         combos[dev] = (cb_port, cb_baud, cb_sid)
 
     # Machine ID -- stamped onto lot numbers and printed labels by Test Console.
+    # It identifies the station itself, so changing it re-labels everything the
+    # machine produces from then on: the field stays read-only until someone
+    # signs in for it, the way the label-scan setting is gated.
     mid_row = tk.Frame(panel, bg="#12151b")
     mid_row.pack(fill="x", padx=35, pady=(0, 10))
     tk.Label(mid_row, text="Machine ID", bg="#12151b", fg="white",
              font=('Arial', 11)).pack(side="left")
     ent_machine_id = tk.Entry(mid_row, bg="#1c2029", fg="white", insertbackground="white",
                               font=('Arial', 11), width=14, bd=1, relief="solid",
-                              highlightbackground="#333", highlightthickness=1)
+                              highlightbackground="#333", highlightthickness=1,
+                              readonlybackground="#16191f", disabledforeground="#666")
     ent_machine_id.insert(0, cfg["COM"].get("machine_id", "PB1"))
+    ent_machine_id.config(state="readonly")
     ent_machine_id.pack(side="left", padx=(15, 0))
+
+    machine_unlocked = {"value": False}
+
+    def unlock_machine_id():
+        """Ask for a login before the Machine ID can be typed into.
+
+        Every attempt is recorded against "machine_id_change" in the login
+        history, so a re-labelled station can be traced to whoever did it.
+        """
+        if machine_unlocked["value"]:
+            return
+        if not auth.show_login(parent.winfo_toplevel(),
+                               title="Machine ID", page="machine_id_change"):
+            log_msg("Machine ID unchanged (login cancelled or failed).")
+            return
+        machine_unlocked["value"] = True
+        ent_machine_id.config(state="normal")
+        ent_machine_id.focus_set()
+        ent_machine_id.selection_range(0, "end")
+        btn_unlock.config(text="Unlocked", bg="#2e7d32", state="disabled",
+                          disabledforeground="white", cursor="arrow")
+        mid_hint.config(text="Machine ID unlocked — Save to apply", fg="#76ff03")
+        log_msg("Machine ID unlocked for editing.")
+
+    def relock_machine_id():
+        """Back to read-only, so the next change needs its own login."""
+        machine_unlocked["value"] = False
+        ent_machine_id.config(state="readonly")
+        btn_unlock.config(text="Change…", bg="#333", state="normal",
+                          cursor="hand2")
+        mid_hint.config(text="Signed-in change only", fg="#666")
+
+    btn_unlock = tk.Button(mid_row, text="Change…", bg="#333", fg="white",
+                           font=('Arial', 10, 'bold'), bd=0, padx=14, pady=3,
+                           activebackground="#444", activeforeground="white",
+                           cursor="hand2", command=unlock_machine_id)
+    btn_unlock.pack(side="left", padx=(10, 0))
+
+    mid_hint = tk.Label(mid_row, text="Signed-in change only", bg="#12151b",
+                        fg="#666", font=('Arial', 10))
+    mid_hint.pack(side="left", padx=(12, 0))
 
     # Label scan verification toggle -- when off, Test Console skips the
     # "scan the printed label" step after a PASS instead of waiting for it.
@@ -250,11 +297,18 @@ def render(parent):
         if not machine_id:
             log_msg("Machine ID cannot be empty -- settings not saved.")
             return
-        cfg["COM"]["machine_id"] = machine_id
+        # Only a session that unlocked the field can change what is stored;
+        # otherwise the value written back is the one already on disk.
+        if machine_unlocked["value"]:
+            previous = cfg["COM"].get("machine_id", "")
+            cfg["COM"]["machine_id"] = machine_id
+            if machine_id != previous:
+                log_msg(f"Machine ID changed: {previous or '(unset)'} -> {machine_id}")
         cfg["COM"]["scan_enabled"] = str(scan_enabled.get())
         with open(_CFG_PATH, "w") as f:
             cfg.write(f)
         log_msg("Settings saved successfully!")
+        relock_machine_id()
 
     # Bottom buttons
     bottom_bar = tk.Frame(panel, bg="#12151b")
