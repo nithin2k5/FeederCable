@@ -1140,28 +1140,28 @@ def render(parent):
     pi = tk.Frame(pf, bg="black", padx=8, pady=5)
     pi.pack(fill="both", expand=True)
     for col in range(8): pi.columnconfigure(col, weight=1 if col % 2 != 0 else 0)
-    def _lbl(parent, text): return tk.Label(parent, text=text, bg="black", fg="#999", font=("Arial", 9))
-    def _ent(parent, w=16, editable=True, fg="white"):
+    def _lbl(parent, text): return tk.Label(parent, text=text, bg="black", fg="#999", font=("Arial", 11))
+    def _ent(parent, w=13, editable=True, fg="white", size=12):
         st = "normal" if editable else "readonly"
-        e = tk.Entry(parent, bg="black" if editable else "#0d0d0d", fg=fg, font=("Arial", 10), insertbackground="white", bd=1, relief="solid", width=w, highlightbackground="#444", highlightcolor="#888", highlightthickness=1, readonlybackground="#0d0d0d", state=st)
+        e = tk.Entry(parent, bg="black" if editable else "#0d0d0d", fg=fg, font=("Arial", size), insertbackground="white", bd=1, relief="solid", width=w, highlightbackground="#444", highlightcolor="#888", highlightthickness=1, readonlybackground="#0d0d0d", state=st)
         return e
 
-    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=4); ent_pno = _ent(pi, w=18, editable=False); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "EMP ID").grid(row=0, column=4, sticky="w", padx=(10, 4)); ent_emp = _ent(pi, w=12, editable=True); ent_emp.grid(row=0, column=5, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Part Name").grid(row=1, column=0, sticky="w", pady=4); ent_pname = _ent(pi, w=14, editable=False); ent_pname.grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Customer").grid(row=1, column=4, sticky="w", padx=(10, 4)); ent_cust = _ent(pi, w=12, editable=False); ent_cust.grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Model").grid(row=2, column=0, sticky="w", pady=4); ent_model = _ent(pi, w=10, editable=False); ent_model.grid(row=2, column=1, sticky="ew", padx=5)
-    _lbl(pi, "ALC").grid(row=2, column=2, sticky="w", padx=(8, 4)); ent_alc = _ent(pi, w=6, editable=False); ent_alc.grid(row=2, column=3, sticky="ew", padx=5)
-    _lbl(pi, "LOT No").grid(row=2, column=4, sticky="w", padx=(8, 4)); ent_lot = _ent(pi, w=14, editable=False); ent_lot.grid(row=2, column=5, columnspan=2, sticky="ew", padx=5)
-    _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=4); ent_vendor = _ent(pi, w=10, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
-    _lbl(pi, "EO No").grid(row=3, column=2, sticky="w", padx=(8, 4)); ent_eo = _ent(pi, w=8, editable=False); ent_eo.grid(row=3, column=3, sticky="ew", padx=5)
-    _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=8, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
-    _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=4); ent_jig = _ent(pi, w=18, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Test Type").grid(row=4, column=4, sticky="w", padx=(8, 4)); ent_testtype = _ent(pi, w=8, editable=False); ent_testtype.grid(row=4, column=5, sticky="ew", padx=5)
+    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=7); ent_pno = _ent(pi, w=15, editable=False); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "EMP ID").grid(row=0, column=4, sticky="w", padx=(10, 4)); ent_emp = _ent(pi, w=7, editable=True); ent_emp.grid(row=0, column=5, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Part Name").grid(row=1, column=0, sticky="w", pady=7); ent_pname = _ent(pi, w=7, editable=False); ent_pname.grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Customer").grid(row=1, column=4, sticky="w", padx=(10, 4)); ent_cust = _ent(pi, w=7, editable=False); ent_cust.grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Model").grid(row=2, column=0, sticky="w", pady=7); ent_model = _ent(pi, w=7, editable=False); ent_model.grid(row=2, column=1, sticky="ew", padx=5)
+    _lbl(pi, "ALC").grid(row=2, column=2, sticky="w", padx=(8, 4)); ent_alc = _ent(pi, w=5, editable=False); ent_alc.grid(row=2, column=3, sticky="ew", padx=5)
+    _lbl(pi, "LOT No").grid(row=2, column=4, sticky="w", padx=(8, 4)); ent_lot = _ent(pi, w=7, editable=False); ent_lot.grid(row=2, column=5, columnspan=2, sticky="ew", padx=5)
+    _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=7); ent_vendor = _ent(pi, w=7, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
+    _lbl(pi, "EO No").grid(row=3, column=2, sticky="w", padx=(8, 4)); ent_eo = _ent(pi, w=7, editable=False); ent_eo.grid(row=3, column=3, sticky="ew", padx=5)
+    _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=7, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
+    _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=7); ent_jig = _ent(pi, w=15, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Test Type").grid(row=4, column=4, sticky="w", padx=(8, 4)); ent_testtype = _ent(pi, w=7, editable=False); ent_testtype.grid(row=4, column=5, sticky="ew", padx=5)
 
     # Sits with the Part No / JIG fields it acts on. Its command is wired
     # further down, once _next_part() exists -- same pattern as btn_start.
-    btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 9, "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
+    btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
     btn_next_part.grid(row=4, column=6, columnspan=2, sticky="ew", padx=(10, 0))
     
     def _fill_ro(entry, val):
@@ -1173,13 +1173,13 @@ def render(parent):
     ci = tk.Frame(cf, bg="black", padx=8, pady=5)
     ci.pack(fill="both", expand=True)
     ci.columnconfigure(1, weight=1); ci.columnconfigure(3, weight=1)
-    _lbl(ci, "Total").grid(row=0, column=0, sticky="w", pady=3); cnt_total = _ent(ci, w=6, editable=False); cnt_total.grid(row=0, column=1, sticky="ew", padx=5)
-    _lbl(ci, "NG").grid(row=0, column=2, sticky="w", padx=5); cnt_ng = _ent(ci, w=6, editable=False, fg="#ff5555"); cnt_ng.grid(row=0, column=3, sticky="ew", padx=5)
-    _lbl(ci, "OK").grid(row=1, column=0, sticky="w", pady=3); cnt_ok = _ent(ci, w=6, editable=False, fg="#76ff03"); cnt_ok.grid(row=1, column=1, sticky="ew", padx=5)
-    _lbl(ci, "NG%").grid(row=1, column=2, sticky="w", padx=5); cnt_ng_pct = _ent(ci, w=6, editable=False, fg="#ff5555"); cnt_ng_pct.grid(row=1, column=3, sticky="ew", padx=5)
-    _lbl(ci, "PPM").grid(row=2, column=0, sticky="w", pady=3); cnt_ppm = _ent(ci, w=6, editable=False, fg="#ff9800"); cnt_ppm.grid(row=2, column=1, sticky="ew", padx=5)
-    _lbl(ci, "CT (s)").grid(row=2, column=2, sticky="w", padx=5); cnt_ct = _ent(ci, w=6, editable=False, fg="#4fc3f7"); cnt_ct.grid(row=2, column=3, sticky="ew", padx=5)
-    _lbl(ci, "Avg CT (s)").grid(row=3, column=2, sticky="w", padx=5, pady=3); cnt_ct_avg = _ent(ci, w=6, editable=False, fg="#4fc3f7"); cnt_ct_avg.grid(row=3, column=3, sticky="ew", padx=5)
+    _lbl(ci, "Total").grid(row=0, column=0, sticky="w", pady=5); cnt_total = _ent(ci, w=5, editable=False); cnt_total.grid(row=0, column=1, sticky="ew", padx=5)
+    _lbl(ci, "NG").grid(row=0, column=2, sticky="w", padx=5); cnt_ng = _ent(ci, w=5, editable=False, fg="#ff5555"); cnt_ng.grid(row=0, column=3, sticky="ew", padx=5)
+    _lbl(ci, "OK").grid(row=1, column=0, sticky="w", pady=5); cnt_ok = _ent(ci, w=5, editable=False, fg="#76ff03"); cnt_ok.grid(row=1, column=1, sticky="ew", padx=5)
+    _lbl(ci, "NG%").grid(row=1, column=2, sticky="w", padx=5); cnt_ng_pct = _ent(ci, w=5, editable=False, fg="#ff5555"); cnt_ng_pct.grid(row=1, column=3, sticky="ew", padx=5)
+    _lbl(ci, "PPM").grid(row=2, column=0, sticky="w", pady=5); cnt_ppm = _ent(ci, w=5, editable=False, fg="#ff9800"); cnt_ppm.grid(row=2, column=1, sticky="ew", padx=5)
+    _lbl(ci, "CT (s)").grid(row=2, column=2, sticky="w", padx=5); cnt_ct = _ent(ci, w=5, editable=False, fg="#4fc3f7"); cnt_ct.grid(row=2, column=3, sticky="ew", padx=5)
+    _lbl(ci, "Avg CT (s)").grid(row=3, column=2, sticky="w", padx=5, pady=5); cnt_ct_avg = _ent(ci, w=5, editable=False, fg="#4fc3f7"); cnt_ct_avg.grid(row=3, column=3, sticky="ew", padx=5)
     
     def _update_counts():
         t = state["total"]; o = state["ok"]; n = state["ng"]
@@ -1470,7 +1470,7 @@ def render(parent):
     # The operator never has to click anywhere -- after a PASS this entry
     # gets keyboard focus directly, so a keyboard-wedge scanner's trigger
     # pull types the code straight in here and its own Enter submits it.
-    ent_scan = _ent(scan_inner, editable=False)
+    ent_scan = _ent(scan_inner, w=16, editable=False, size=10)
     ent_scan.pack(fill="x", pady=(3, 3))
 
     def _lock_scan_entry():
