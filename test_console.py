@@ -917,8 +917,11 @@ def render(parent):
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
     style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
-    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", 8, "bold"))
-    style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 8), rowheight=22)
+    # Read standing up, a metre or so back, so the day's lots are sized to be
+    # legible from there. rowheight follows the type, or the taller glyphs
+    # clip against the row above.
+    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", 10, "bold"))
+    style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 11), rowheight=28)
     # Column headers otherwise brighten on mouse-over / press -- pin each
     # heading style's color so it stays flat in every state.
     for heading_style, bg, fg in (
@@ -1451,12 +1454,78 @@ def render(parent):
         if qty <= 0 or ok <= 0 or ok % qty: return
         if state.get("lot_alert_at") == ok: return
         state["lot_alert_at"] = ok
-        lots = ok // qty
-        _log(f"Lot quantity reached: {ok} OK = {lots} × {qty}.")
-        messagebox.showinfo("Lot Complete",
-                            f"Lot quantity reached.\n\n"
-                            f"{ok} OK parts — lot {lots} of {qty} is complete.",
-                            parent=parent.winfo_toplevel())
+        _log(f"Lot quantity reached ({ok} OK).")
+        _show_lot_dialog()
+
+    def _show_lot_dialog():
+        """The lot announcement, as a dialog that matches the console rather
+        than a stock grey messagebox -- it lands on a dark screen the operator
+        is watching from a step back, so it is built the size and contrast of
+        the page's own verdict panel.
+
+        Modal on purpose: the next test cannot start until it is acknowledged,
+        which is the whole point of stopping to close off a lot.
+        """
+        top = parent.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.withdraw()
+        dlg.title("Lot Complete")
+        dlg.configure(bg="#111")
+        dlg.resizable(False, False)
+        dlg.transient(top)
+
+        # A green cap, the same green a PASS verdict uses, so the dialog reads
+        # as good news before a word of it is read.
+        tk.Frame(dlg, bg="#1b5e20", height=6).pack(fill="x")
+        body = tk.Frame(dlg, bg="#111", padx=44, pady=26)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="\u2714", bg="#111", fg="#76ff03",
+                 font=("Arial", 40)).pack()
+        tk.Label(body, text="Lot quantity reached!", bg="#111", fg="white",
+                 font=("Arial", 20, "bold")).pack(pady=(8, 0))
+
+        def _close(_e=None):
+            try: dlg.grab_release()
+            except Exception: pass
+            dlg.destroy()
+            # The grab took the keyboard off the scan entry that the PASS had
+            # just focused, and a wedge scanner types wherever the focus is --
+            # so hand it back, or the scan after a lot would land nowhere.
+            if state.get("awaiting_scan"): _show_scan_entry()
+
+        btn = tk.Button(body, text="OK", bg="#1b5e20", fg="white",
+                        font=("Arial", 13, "bold"), bd=0, padx=48, pady=9,
+                        cursor="hand2", activebackground="#2e7d32",
+                        activeforeground="white", command=_close)
+        btn.pack(pady=(22, 0))
+        dlg.protocol("WM_DELETE_WINDOW", _close)
+        for key in ("<Return>", "<KP_Enter>", "<space>", "<Escape>"):
+            dlg.bind(key, _close)
+
+        # Centred on the app window, not the screen -- the same thing on one
+        # maximised monitor and very much not on two. Measured twice because
+        # Windows places the window frame at the requested point while every
+        # size here is of the client area inside it, so the title bar would
+        # otherwise push the dialog down and right of centre.
+        dlg.update_idletasks()
+        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        def _place(fw, fh):
+            x = top.winfo_rootx() + (top.winfo_width() - fw) // 2
+            y = top.winfo_rooty() + (top.winfo_height() - fh) // 3
+            x = max(0, min(x, dlg.winfo_screenwidth() - fw))
+            y = max(0, min(y, dlg.winfo_screenheight() - fh))
+            dlg.geometry(f"{w}x{h}+{x}+{y}")
+            return x, y
+        x, y = _place(w, h)
+        dlg.deiconify()
+        dlg.update_idletasks()
+        bx = max(0, dlg.winfo_rootx() - x)
+        by = max(0, dlg.winfo_rooty() - y)
+        _place(w + 2 * bx, h + by + bx)
+
+        btn.focus_set()
+        try: dlg.grab_set()
+        except Exception: pass
 
     shf = tk.Frame(left_area, bg="black")
     shf.pack(fill="x", pady=(6, 2))
@@ -1541,14 +1610,14 @@ def render(parent):
     scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", 11, "bold"), pady=8)
     scan_lbl.pack(fill="both", expand=True)
 
-    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
+    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 12, "bold")).pack(fill="x", pady=(6, 2))
     # Identity first (lot, part, who, when), verdicts last -- the four result
     # columns are what the operator reads across to, so they sit together at
     # the right-hand end rather than split by EMP/TIME.
     lot_cols = ("#", "LOT NO", "ALC", "EMP", "TIME", "CAM1", "CAM2", "RESULT", "SCAN")
     tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
-    lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60,
-                  "CAM1": 55, "CAM2": 55, "EMP": 70, "TIME": 70}
+    lot_widths = {"#": 40, "LOT NO": 200, "ALC": 80, "RESULT": 80, "SCAN": 70,
+                  "CAM1": 70, "CAM2": 70, "EMP": 85, "TIME": 85}
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
 
     # START now lives in Product Info above NEXT PART, so the whole leftover
