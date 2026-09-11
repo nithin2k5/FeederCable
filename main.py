@@ -111,6 +111,13 @@ class App:
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
+        # Every widget that makes up a tile, kept per page so the active one
+        # can be repainted when the page changes. Nothing on screen said which
+        # page you were on except the title in the header.
+        self.nav_tiles = {}
+        self._NAV_IDLE = ("#111", "white", "#444")        # bg, fg, border
+        self._NAV_ACTIVE = ("#e8a000", "black", "#ffc947")
+
         sidebar_buttons = [
             ("🏠", "Home", "test_console"),
             ("👤", "Admin", "admin"),
@@ -127,32 +134,61 @@ class App:
             has_page = bool(page)
             cursor_type = "hand2" if has_page else "arrow"
             
+            # The buttons share the sidebar's full height between them rather
+            # than sitting at their natural size with a band of dead black
+            # underneath -- and a taller target is easier to hit on a machine
+            # operated standing up.
             f = tk.Frame(sidebar, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1, cursor=cursor_type)
-            f.pack(fill="x", padx=4, pady=3)
-            
-            lbl_icon = tk.Label(f, text=icon, bg="#111", fg="white", font=('Arial', 18), cursor=cursor_type)
-            lbl_icon.pack(pady=(6, 0))
-            
-            lbl_text = tk.Label(f, text=text, bg="#111", fg="white", font=('Arial', 8), cursor=cursor_type)
-            lbl_text.pack(pady=(0, 6))
+            f.pack(fill="both", expand=True, padx=4, pady=3)
+
+            # The icon and caption are centred in whatever height the frame
+            # ends up with, instead of being pinned to its top edge.
+            inner = tk.Frame(f, bg="#111", cursor=cursor_type)
+            inner.place(relx=0.5, rely=0.5, anchor="center")
+
+            lbl_icon = tk.Label(inner, text=icon, bg="#111", fg="white", font=('Arial', 18), cursor=cursor_type)
+            lbl_icon.pack()
+
+            lbl_text = tk.Label(inner, text=text, bg="#111", fg="white", font=('Arial', 8), cursor=cursor_type)
+            lbl_text.pack()
             
             # Bind click event
             if has_page:
-                f.bind("<Button-1>", lambda e, p=page: self.load_page(p))
-                lbl_icon.bind("<Button-1>", lambda e, p=page: self.load_page(p))
-                lbl_text.bind("<Button-1>", lambda e, p=page: self.load_page(p))
+                for w in (f, inner, lbl_icon, lbl_text):
+                    w.bind("<Button-1>", lambda e, p=page: self.load_page(p))
+                self.nav_tiles[page] = (f, inner, lbl_icon, lbl_text)
 
         # --- Content Container ---
         # This empty frame will hold our different pages.
         self.content_area = tk.Frame(self.body, bg="black")
         self.content_area.pack(side="left", fill="both", expand=True)
         
+    def _set_active_nav(self, page_name):
+        """Paint the sidebar tile for the page now showing.
+
+        Called only once a page is actually being rendered, so a login that
+        is cancelled leaves the highlight where it was rather than moving it
+        to a page the operator never reached.
+        """
+        for page, widgets in getattr(self, "nav_tiles", {}).items():
+            bg, fg, border = self._NAV_ACTIVE if page == page_name else self._NAV_IDLE
+            frame, inner, icon, text = widgets
+            try:
+                frame.config(bg=bg, highlightbackground=border)
+                inner.config(bg=bg)
+                icon.config(bg=bg, fg=fg)
+                text.config(bg=bg, fg=fg)
+            except Exception:
+                pass
+
     def load_page(self, page_name):
         # Authentication check
         if page_name in ["admin", "model_settings"]:
             title_str = "Admin Login" if page_name == "admin" else "Settings Login"
             if not auth.show_login(self.root, title=title_str, page=page_name):
                 return
+
+        self._set_active_nav(page_name)
                 
         # 1. Clear the current content area
         for widget in self.content_area.winfo_children():
