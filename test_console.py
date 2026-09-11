@@ -1388,8 +1388,12 @@ def render(parent):
     _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=7); ent_jig = _ent(pi, w=15, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Test Type").grid(row=4, column=4, sticky="w", padx=(8, 4)); ent_testtype = _ent(pi, w=7, editable=False); ent_testtype.grid(row=4, column=5, sticky="ew", padx=5)
 
-    # Sits with the Part No / JIG fields it acts on. Its command is wired
-    # further down, once _next_part() exists -- same pattern as btn_start.
+    # Both buttons sit with the Part No / JIG fields they act on, START
+    # stacked directly above NEXT PART so the two actions of a cycle read
+    # top to bottom in one place. Their commands are wired further down,
+    # once _trigger_test() and _next_part() exist.
+    btn_start = tk.Button(pi, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 11, "bold"), bd=0, padx=10, pady=5, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
+    btn_start.grid(row=3, column=6, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 4))
     btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
     btn_next_part.grid(row=4, column=6, columnspan=2, sticky="ew", padx=(10, 0))
     
@@ -1507,20 +1511,17 @@ def render(parent):
     scan_lbl.pack(fill="both", expand=True)
 
     tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(6, 2))
-    lot_cols = ("#", "LOT NO", "ALC", "RESULT", "SCAN", "CAM1", "CAM2", "EMP", "TIME")
+    # Identity first (lot, part, who, when), verdicts last -- the four result
+    # columns are what the operator reads across to, so they sit together at
+    # the right-hand end rather than split by EMP/TIME.
+    lot_cols = ("#", "LOT NO", "ALC", "EMP", "TIME", "CAM1", "CAM2", "RESULT", "SCAN")
     tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
     lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60,
                   "CAM1": 55, "CAM2": 55, "EMP": 70, "TIME": 70}
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
 
-    btn_start = tk.Button(left_area, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
-    # Anchored to the bottom and packed before the records table, so the
-    # button keeps its full height no matter how tight the column gets --
-    # a squeezed START button is far worse than one record row fewer.
-    btn_start.pack(side="bottom", fill="x", pady=(6, 0))
-
-    # The only stretchy widget in the column: the leftover height that used to
-    # sit as dead black space under START TEST becomes extra record rows.
+    # START now lives in Product Info above NEXT PART, so the whole leftover
+    # height of this column goes to the records table.
     tree_lot.pack(fill="both", expand=True)
 
     bottom = tk.Frame(content, bg="black", height=110)
@@ -1913,8 +1914,10 @@ def render(parent):
             _log(f"Today's NG count: load failed ({ex})")
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
         for idx, row in enumerate(rows, start=1):
-            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[2] or "—",
-                                              row[3] or "—", row[4] or "—", row[5] or "—", row[6], row[7]))
+            # row order is lotno, alc, result, scanresult, cam1, cam2, emp, time
+            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[6], row[7],
+                                              row[4] or "—", row[5] or "—",
+                                              row[2] or "—", row[3] or "—"))
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
