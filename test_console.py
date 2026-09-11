@@ -958,7 +958,7 @@ def render(parent):
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "dev_polling": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
-        "ct_last": None, "ct_sum": 0.0, "ct_count": 0,
+        "ct_last": None, "lot_alert_at": None,
         "cam_results": {1: None, 2: None},
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
@@ -1412,7 +1412,11 @@ def render(parent):
     _lbl(ci, "NG%").grid(row=1, column=2, sticky="w", padx=5); cnt_ng_pct = _ent(ci, w=5, editable=False, fg="#ff5555"); cnt_ng_pct.grid(row=1, column=3, sticky="ew", padx=5)
     _lbl(ci, "PPM").grid(row=2, column=0, sticky="w", pady=5); cnt_ppm = _ent(ci, w=5, editable=False, fg="#ff9800"); cnt_ppm.grid(row=2, column=1, sticky="ew", padx=5)
     _lbl(ci, "CT (s)").grid(row=2, column=2, sticky="w", padx=5); cnt_ct = _ent(ci, w=5, editable=False, fg="#4fc3f7"); cnt_ct.grid(row=2, column=3, sticky="ew", padx=5)
-    _lbl(ci, "Avg CT (s)").grid(row=3, column=2, sticky="w", padx=5, pady=5); cnt_ct_avg = _ent(ci, w=5, editable=False, fg="#4fc3f7"); cnt_ct_avg.grid(row=3, column=3, sticky="ew", padx=5)
+    # Typed by the operator, not measured: how many good parts make one lot.
+    # Every time the OK count reaches a multiple of it the page says so, which
+    # is what the running mean cycle time used to occupy this row doing --
+    # a number nobody acted on, next to the live CT that they do.
+    _lbl(ci, "Lot Qty").grid(row=3, column=0, sticky="w", pady=5); ent_lot_qty = _ent(ci, w=5, editable=True); ent_lot_qty.grid(row=3, column=1, columnspan=3, sticky="ew", padx=5)
     
     def _update_counts():
         t = state["total"]; o = state["ok"]; n = state["ng"]
@@ -1420,12 +1424,39 @@ def render(parent):
         ppm = f"{int(n/t*1000000)}" if t > 0 else "0"
         # Cycle time is measured live, not stored -- testmaster keeps no
         # duration column, so unlike the counts above (which are read back
-        # from today's rows) these only cover the tests run since the current
+        # from today's rows) it only covers the tests run since the current
         # part was loaded. "—" until the first one finishes.
         ct = f"{state['ct_last']:.1f}" if state["ct_last"] is not None else "—"
-        avg = f"{(state['ct_sum'] / state['ct_count']):.1f}" if state["ct_count"] else "—"
-        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm), (cnt_ct, ct), (cnt_ct_avg, avg)]:
+        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm), (cnt_ct, ct)]:
             entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, val); entry.config(state="readonly")
+
+    def _lot_qty() -> int:
+        """The typed lot quantity, or 0 when the box is empty or not a
+        number -- which is the off switch for the announcement below."""
+        try: return int(ent_lot_qty.get().strip())
+        except (AttributeError, TypeError, ValueError): return 0
+
+    def _check_lot_target():
+        """Announce each time the day's OK count reaches a multiple of the
+        lot quantity, so the operator packs a full box instead of counting
+        rows by eye.
+
+        Keyed on the count that triggered it rather than a flag: the counts
+        are reloaded from today's rows on every part load, so a plain "already
+        warned" flag would either fire again on the same lot or go quiet for
+        the rest of the shift.
+        """
+        qty = _lot_qty()
+        ok = state["ok"]
+        if qty <= 0 or ok <= 0 or ok % qty: return
+        if state.get("lot_alert_at") == ok: return
+        state["lot_alert_at"] = ok
+        lots = ok // qty
+        _log(f"Lot quantity reached: {ok} OK = {lots} × {qty}.")
+        messagebox.showinfo("Lot Complete",
+                            f"Lot quantity reached.\n\n"
+                            f"{ok} OK parts — lot {lots} of {qty} is complete.",
+                            parent=parent.winfo_toplevel())
 
     shf = tk.Frame(left_area, bg="black")
     shf.pack(fill="x", pady=(6, 2))
@@ -2413,11 +2444,15 @@ def render(parent):
         elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
         elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
         # Cycle time == this test's duration (START to verdict), which is what
-        # the sidebar strip shows too; the Count box adds the running mean.
+        # the sidebar strip and the Count box's CT both show.
         if elapsed is not None:
-            state["ct_last"] = elapsed; state["ct_sum"] += elapsed; state["ct_count"] += 1
+            state["ct_last"] = elapsed
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
-        _after(0, _update_counts); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
+        _after(0, _update_counts)
+        # Queued, not called here: this runs on the test thread and the
+        # announcement is a modal dialog.
+        if overall == "PASS": _after(0, _check_lot_target)
+        _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
@@ -2579,7 +2614,7 @@ def render(parent):
         tree_spec.delete(*tree_spec.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_awaiting_scan(False); _set_scan_box("")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None,
-                      "ct_last": None, "ct_sum": 0.0, "ct_count": 0})
+                      "ct_last": None, "lot_alert_at": None})
         btn_start.config(bg="#1a1a1a", fg="#444")
 
     def _next_part():
