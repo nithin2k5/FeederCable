@@ -15,27 +15,27 @@ def render(parent):
     text_color = "white"
     
     style = ttk.Style()
-    style.configure("Admin.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
+    style.configure("Admin.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 11, "bold"))
     # Column headers otherwise brighten on mouse-over / press -- pin the
     # color so it stays flat in every state.
     style.map("Admin.Treeview.Heading", background=[("active", "#1a1a1a"), ("pressed", "#1a1a1a")],
               foreground=[("active", "white"), ("pressed", "white")])
-    style.configure("Admin.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
+    style.configure("Admin.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 11), rowheight=30)
     style.map("Admin.Treeview", background=[("selected", "#1c3a5e")])
 
     content = tk.Frame(parent, bg=bg_color)
     content.pack(fill="both", expand=True, padx=20, pady=20)
     
-    tk.Label(content, text="ADMIN USER MANAGEMENT", fg="#e8a000", bg=bg_color, font=("Arial", 16, "bold")).pack(anchor="w", pady=(0, 20))
+    tk.Label(content, text="ADMIN USER MANAGEMENT", fg="#e8a000", bg=bg_color, font=("Arial", 18, "bold")).pack(anchor="w", pady=(0, 14))
     
     # Form Frame
     form_frame = tk.Frame(content, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1, padx=20, pady=20)
     form_frame.pack(fill="x", pady=(0, 20))
     
     def _lbl(parent_frame, txt):
-        return tk.Label(parent_frame, text=txt, bg="#111", fg="#aaa", font=("Arial", 10))
+        return tk.Label(parent_frame, text=txt, bg="#111", fg="#aaa", font=("Arial", 12))
     def _ent(parent_frame, is_password=False):
-        return tk.Entry(parent_frame, font=("Arial", 11), bg="#222", fg="white", insertbackground="white", bd=1, relief="solid", show="*" if is_password else "")
+        return tk.Entry(parent_frame, font=("Arial", 13), bg="#222", fg="white", insertbackground="white", bd=1, relief="solid", show="*" if is_password else "")
 
     _lbl(form_frame, "Employee ID (ENO)").grid(row=0, column=0, sticky="w", pady=10, padx=(0,10))
     ent_eno = _ent(form_frame)
@@ -126,35 +126,35 @@ def render(parent):
         for e in [ent_eno, ent_ename, ent_pwd, ent_desig, ent_dept]: e.delete(0, "end")
         ent_eno.focus_set()
 
-    tk.Button(btn_frame, text="Save / Update", bg="#1b5e20", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, cursor="hand2", command=on_save).pack(side="left", padx=(0, 10))
-    tk.Button(btn_frame, text="Delete", bg="#b71c1c", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, cursor="hand2", command=on_delete).pack(side="left", padx=(0, 10))
-    tk.Button(btn_frame, text="Clear", bg="#333", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, cursor="hand2", command=on_clear).pack(side="left")
+    tk.Button(btn_frame, text="Save / Update", bg="#1b5e20", fg="white", font=("Arial", 12, "bold"), bd=0, padx=20, pady=9, cursor="hand2", command=on_save).pack(side="left", padx=(0, 10))
+    tk.Button(btn_frame, text="Delete", bg="#b71c1c", fg="white", font=("Arial", 12, "bold"), bd=0, padx=20, pady=9, cursor="hand2", command=on_delete).pack(side="left", padx=(0, 10))
+    tk.Button(btn_frame, text="Clear", bg="#333", fg="white", font=("Arial", 12, "bold"), bd=0, padx=20, pady=9, cursor="hand2", command=on_clear).pack(side="left")
 
     # Treeview
     tree_frame = tk.Frame(content, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1)
     tree_frame.pack(fill="both", expand=True)
     
     cols = ("Employee ID", "Name", "Designation", "Department")
-    tree = ttk.Treeview(tree_frame, columns=cols, show="headings", style="Admin.Treeview")
+    tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=5, style="Admin.Treeview")
     for col in cols: tree.heading(col, text=col); tree.column(col, anchor="center")
     tree.pack(fill="both", expand=True, padx=2, pady=2)
     tree.bind("<<TreeviewSelect>>", on_tree_select)
 
     # ── Login history for the pages behind a login (Admin, Model Settings) ──
     hist_head = tk.Frame(content, bg=bg_color)
-    hist_head.pack(fill="x", pady=(20, 8))
+    hist_head.pack(fill="x", pady=(14, 8))
     tk.Label(hist_head, text="LOGIN HISTORY", fg="#e8a000", bg=bg_color,
-             font=("Arial", 13, "bold")).pack(side="left")
-    hist_status = tk.Label(hist_head, text="", fg="#666", bg=bg_color, font=("Arial", 9))
+             font=("Arial", 15, "bold")).pack(side="left")
+    hist_status = tk.Label(hist_head, text="", fg="#666", bg=bg_color, font=("Arial", 11))
     hist_status.pack(side="left", padx=12)
 
     hist_frame = tk.Frame(content, bg="#111", bd=1, relief="solid", highlightbackground="#444", highlightthickness=1)
     hist_frame.pack(fill="both", expand=True)
 
     hist_cols = ("Date", "Time", "Page", "Employee ID", "Name", "Result", "Reason")
-    hist_widths = {"Date": 90, "Time": 80, "Page": 120, "Employee ID": 100,
-                   "Name": 150, "Result": 90, "Reason": 160}
-    tree_hist = ttk.Treeview(hist_frame, columns=hist_cols, show="headings", style="Admin.Treeview")
+    hist_widths = {"Date": 110, "Time": 100, "Page": 150, "Employee ID": 125,
+                   "Name": 180, "Result": 110, "Reason": 200}
+    tree_hist = ttk.Treeview(hist_frame, columns=hist_cols, show="headings", height=4, style="Admin.Treeview")
     for col in hist_cols:
         tree_hist.heading(col, text=col)
         tree_hist.column(col, anchor="center", width=hist_widths.get(col, 100))
@@ -187,7 +187,7 @@ def render(parent):
         else:
             hist_status.config(text="[ no logins recorded yet ]", fg="#666")
 
-    tk.Button(hist_head, text="Refresh", bg="#333", fg="white", font=("Arial", 9, "bold"),
+    tk.Button(hist_head, text="Refresh", bg="#333", fg="white", font=("Arial", 11, "bold"),
               bd=0, padx=14, pady=4, cursor="hand2", command=load_history).pack(side="right")
 
     load_users()

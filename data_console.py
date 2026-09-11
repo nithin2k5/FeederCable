@@ -23,19 +23,19 @@ def render(parent):
     teal_text = "#489fb5" 
     
     style = ttk.Style()
-    style.configure("Treeview.Heading", background="#0a1920", foreground=text_color, font=('Arial', 9, 'bold'), bordercolor=border_color, lightcolor=border_color, darkcolor=border_color)
+    style.configure("Treeview.Heading", background="#0a1920", foreground=text_color, font=('Arial', 11, 'bold'), bordercolor=border_color, lightcolor=border_color, darkcolor=border_color)
     # Column headers otherwise brighten on mouse-over / press (the theme's
     # built-in hover state) -- pin the color so it stays flat in every state.
     style.map("Treeview.Heading", background=[("active", "#0a1920"), ("pressed", "#0a1920")],
               foreground=[("active", text_color), ("pressed", text_color)])
-    style.configure("Treeview", background="#0c131a", foreground=text_color, fieldbackground="#0c131a", font=('Arial', 9), rowheight=28, bordercolor=border_color)
+    style.configure("Treeview", background="#0c131a", foreground=text_color, fieldbackground="#0c131a", font=('Arial', 11), rowheight=32, bordercolor=border_color)
     style.map("Treeview", background=[('selected', '#1a3340')])
     style.configure("TCombobox", fieldbackground="#111", background="#111", foreground="white", bordercolor=border_color)
 
     content = tk.Frame(parent, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
     content.pack(fill="both", expand=True, padx=5, pady=5)
     
-    header = tk.Frame(content, bg=bg_color, height=80, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
+    header = tk.Frame(content, bg=bg_color, height=94, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
     header.pack(fill="x", padx=10, pady=(10, 5))
     header.pack_propagate(False)
     
@@ -44,16 +44,16 @@ def render(parent):
     logo_top = tk.Frame(logo_frame, bg=bg_color); logo_top.pack()
     tk.Label(logo_top, text="IN", fg="red", bg=bg_color, font=('Arial', 18, 'bold')).pack(side="left")
     tk.Label(logo_top, text="FAC", fg=teal_text, bg=bg_color, font=('Arial', 18, 'bold')).pack(side="left")
-    tk.Label(logo_frame, text="INDIA", fg=teal_text, bg=bg_color, font=('Arial', 10, 'bold')).pack()
+    tk.Label(logo_frame, text="INDIA", fg=teal_text, bg=bg_color, font=('Arial', 11, 'bold')).pack()
 
-    tk.Label(header, text="TEST DATA CONSOLE", fg="white", bg=bg_color, font=('Arial', 24, 'bold')).pack(side="left", expand=True, padx=(0, 100))
+    tk.Label(header, text="TEST DATA CONSOLE", fg="white", bg=bg_color, font=('Arial', 26, 'bold')).pack(side="left", expand=True, padx=(0, 100))
 
     filter_bar = tk.Frame(content, bg=bg_color, bd=1, relief="solid", highlightbackground=border_color, highlightthickness=1)
     filter_bar.pack(fill="x", padx=10, pady=5)
     filter_inner = tk.Frame(filter_bar, bg=bg_color, pady=15); filter_inner.pack(side="left", expand=True)
 
     def mk_lbl(parent, txt):
-        return tk.Label(parent, text=txt, bg=bg_color, fg="white", font=('Arial', 9, 'bold'))
+        return tk.Label(parent, text=txt, bg=bg_color, fg="white", font=('Arial', 11, 'bold'))
 
     # PNO List
     try:
@@ -67,22 +67,22 @@ def render(parent):
     # -- instead of the old layout where row 0 held three fields and row 1 held
     # only End Date, leaving it looking lopsided.
     mk_lbl(filter_inner, "PART NUMBER :").grid(row=0, column=0, sticky="e", padx=(0, 10), pady=5)
-    cb_pno = ttk.Combobox(filter_inner, values=pno_list, font=('Arial', 10), width=18, state="readonly")
+    cb_pno = ttk.Combobox(filter_inner, values=pno_list, font=('Arial', 12), width=16, state="readonly")
     cb_pno.current(0)
     cb_pno.grid(row=0, column=1, sticky="w", padx=(0, 30), pady=5)
 
     mk_lbl(filter_inner, "RESULT :").grid(row=0, column=2, sticky="e", padx=(0, 10), pady=5)
-    cb_result = ttk.Combobox(filter_inner, values=["ALL", "PASS", "FAIL"], font=('Arial', 10), width=18, state="readonly")
+    cb_result = ttk.Combobox(filter_inner, values=["ALL", "PASS", "FAIL"], font=('Arial', 12), width=16, state="readonly")
     cb_result.current(0)
     cb_result.grid(row=0, column=3, sticky="w", padx=(0, 30), pady=5)
 
     mk_lbl(filter_inner, "START DATE :").grid(row=1, column=0, sticky="e", padx=(0, 10), pady=5)
-    ent_start = tk.Entry(filter_inner, font=('Arial', 10), width=20, bg="#111", fg="white", insertbackground="white")
+    ent_start = tk.Entry(filter_inner, font=('Arial', 12), width=18, bg="#111", fg="white", insertbackground="white")
     ent_start.insert(0, (datetime.datetime.now() - datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
     ent_start.grid(row=1, column=1, sticky="w", padx=(0, 30), pady=5)
 
     mk_lbl(filter_inner, "END DATE :").grid(row=1, column=2, sticky="e", padx=(0, 10), pady=5)
-    ent_end = tk.Entry(filter_inner, font=('Arial', 10), width=20, bg="#111", fg="white", insertbackground="white")
+    ent_end = tk.Entry(filter_inner, font=('Arial', 12), width=18, bg="#111", fg="white", insertbackground="white")
     ent_end.insert(0, datetime.datetime.now().strftime("%Y-%m-%d"))
     ent_end.grid(row=1, column=3, sticky="w", padx=(0, 30), pady=5)
 
@@ -100,10 +100,10 @@ def render(parent):
     img_box = tk.Frame(preview_outer, bg="#05080a", width=PREVIEW_W, height=PREVIEW_H)
     img_box.pack()
     img_box.pack_propagate(False)
-    preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 9, 'bold'),
+    preview_img_lbl = tk.Label(img_box, bg="#05080a", fg="#555", font=('Arial', 11, 'bold'),
                                text="Vision Result", wraplength=PREVIEW_W - 16, justify="center")
     preview_img_lbl.pack(fill="both", expand=True)
-    preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 8),
+    preview_lot_lbl = tk.Label(preview_outer, bg=bg_color, fg="#999", font=('Consolas', 10),
                                wraplength=PREVIEW_W, justify="center", anchor="center")
     preview_lot_lbl.pack(fill="x", pady=(4, 0))
 
@@ -121,7 +121,7 @@ def render(parent):
     vsb.pack(side="right", fill="y")
     tree.pack(side="top", fill="both", expand=True)
 
-    col_widths = {"SNO": 40, "DATE": 80, "TIME": 70, "CUSTOMER NAME": 100, "MODEL": 80, "P/NUMBER": 100, "P/NAME": 100, "LOTNO": 140, "ALC": 50, "RESULT": 60, "CHANNEL": 60, "IR_VAL": 70, "ACW_VAL": 70, "CONTACT": 70}
+    col_widths = {"SNO": 55, "DATE": 100, "TIME": 90, "CUSTOMER NAME": 145, "MODEL": 100, "P/NUMBER": 125, "P/NAME": 125, "LOTNO": 175, "ALC": 70, "RESULT": 80, "CHANNEL": 90, "IR_VAL": 90, "ACW_VAL": 95, "CONTACT": 95}
     for col in cols: tree.heading(col, text=col); tree.column(col, width=col_widths.get(col, 80), anchor="center")
 
     row_images = {}  # tree item id -> visionimg path from the DB (or "")
@@ -210,10 +210,10 @@ def render(parent):
             except Exception as ex:
                 messagebox.showerror("Export Error", f"Failed to export: {ex}")
 
-    search_btn = tk.Button(btn_frame, text="🔍 Search", bg="#0a2a30", fg="white", font=('Arial', 10, 'bold'), bd=1, relief="solid", highlightbackground=teal_text, highlightthickness=1, padx=15, pady=5, cursor="hand2", command=_do_search)
+    search_btn = tk.Button(btn_frame, text="🔍 Search", bg="#0a2a30", fg="white", font=('Arial', 12, 'bold'), bd=1, relief="solid", highlightbackground=teal_text, highlightthickness=1, padx=15, pady=5, cursor="hand2", command=_do_search)
     search_btn.pack(side="left", padx=10)
     
-    export_btn = tk.Button(btn_frame, text="📄 Export (CSV)", bg="#0a2a30", fg="white", font=('Arial', 10, 'bold'), bd=1, relief="solid", highlightbackground=teal_text, highlightthickness=1, padx=15, pady=5, cursor="hand2", command=_do_export)
+    export_btn = tk.Button(btn_frame, text="📄 Export (CSV)", bg="#0a2a30", fg="white", font=('Arial', 12, 'bold'), bd=1, relief="solid", highlightbackground=teal_text, highlightthickness=1, padx=15, pady=5, cursor="hand2", command=_do_export)
     export_btn.pack(side="left", padx=10)
     
     _do_search() # Initial search

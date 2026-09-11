@@ -143,7 +143,7 @@ class _PnoField:
     to know which one is live underneath.
     """
 
-    def __init__(self, parent, master_parts, font_size=13):
+    def __init__(self, parent, master_parts, font_size=15):
         self._by_label = {}
         self.is_master_backed = master_parts is not None
         if master_parts:
@@ -195,7 +195,7 @@ class _PnoField:
 
 # ── Small widget helpers ───────────────────────────────────────────────────────
 
-def _btn(parent, text, kind=BTN_NEUTRAL, command=None, width=None, font_size=9, pady=6):
+def _btn(parent, text, kind=BTN_NEUTRAL, command=None, width=None, font_size=11, pady=6):
     bg, hover = kind
     b = tk.Button(parent, text=text, bg=bg, fg="white", bd=0, relief="flat",
                   activebackground=hover, activeforeground="white",
@@ -225,10 +225,10 @@ def _card(parent, title, subtitle=None):
 
     head = tk.Frame(inner, bg=PANEL)
     head.pack(fill="x", padx=14, pady=(10, 8))
-    tk.Label(head, text=title, bg=PANEL, fg=TXT, font=("Arial", 11, "bold")).pack(side="left")
+    tk.Label(head, text=title, bg=PANEL, fg=TXT, font=("Arial", 13, "bold")).pack(side="left")
     if subtitle:
         tk.Label(head, text=subtitle, bg=PANEL, fg=TXT_FAINT,
-                 font=("Arial", 9)).pack(side="left", padx=(10, 0))
+                 font=("Arial", 11)).pack(side="left", padx=(10, 0))
     tk.Frame(inner, bg=LINE, height=1).pack(fill="x")
 
     body = tk.Frame(inner, bg=PANEL)
@@ -242,10 +242,10 @@ def _kv_row(parent, label, value="—", value_fg=TXT, mono=False):
     """One label/value line. Returns the value label so callers can update it."""
     f = tk.Frame(parent, bg=parent["bg"])
     f.pack(fill="x", pady=2)
-    tk.Label(f, text=label, bg=parent["bg"], fg=TXT_DIM, font=("Arial", 9),
+    tk.Label(f, text=label, bg=parent["bg"], fg=TXT_DIM, font=("Arial", 11),
              width=11, anchor="w").pack(side="left")
     v = tk.Label(f, text=value, bg=parent["bg"], fg=value_fg, anchor="w",
-                 font=("Consolas", 9) if mono else ("Arial", 9, "bold"))
+                 font=("Consolas", 11) if mono else ("Arial", 9, "bold"))
     v.pack(side="left", fill="x", expand=True)
     return v
 
@@ -433,7 +433,7 @@ class RoiView(tk.Canvas):
 
         if self._view is None:
             self.create_text(cw // 2, ch // 2, text=self._placeholder,
-                             fill=TXT_FAINT, font=("Arial", 11), justify="center")
+                             fill=TXT_FAINT, font=("Arial", 13), justify="center")
             return
 
         s, ox, oy, dw, dh = self._view
@@ -450,7 +450,7 @@ class RoiView(tk.Canvas):
 
         if self._hint:
             self.create_text(cw // 2, ch - 12, text=self._hint, fill=TXT_FAINT,
-                             font=("Arial", 9))
+                             font=("Arial", 11))
 
     def _draw_marker(self):
         s, ox, oy, dw, dh = self._view
@@ -481,7 +481,7 @@ class RoiView(tk.Canvas):
         label = "%d x %d px" % (self._roi["width"], self._roi["height"])
         ly = y0 - 11 if y0 - 11 > oy + 8 else y1 + 12
         tid = self.create_text(x0 + 2, ly, text=label, fill="#07080b", anchor="w",
-                               font=("Consolas", 9, "bold"))
+                               font=("Consolas", 11, "bold"))
         bx0, by0, bx1, by1 = self.bbox(tid)
         rid = self.create_rectangle(bx0 - 4, by0 - 2, bx1 + 4, by1 + 2,
                                     fill=self._accent, outline="")
@@ -616,10 +616,10 @@ def render(parent):
 
     style = ttk.Style()
     style.configure("Vis.Treeview", background=PANEL_ALT, fieldbackground=PANEL_ALT,
-                    foreground="#dfe3ea", rowheight=28, font=("Arial", 9),
+                    foreground="#dfe3ea", rowheight=32, font=("Arial", 11),
                     borderwidth=0, relief="flat")
     style.configure("Vis.Treeview.Heading", background="#1a1e26", foreground=TXT_DIM,
-                    font=("Arial", 8, "bold"), relief="flat", padding=(4, 6))
+                    font=("Arial", 10, "bold"), relief="flat", padding=(4, 6))
     style.map("Vis.Treeview", background=[("selected", "#173a5e")],
               foreground=[("selected", "white")])
     style.map("Vis.Treeview.Heading", background=[("active", "#232833")])
@@ -638,17 +638,17 @@ def render(parent):
     title_box = tk.Frame(header, bg=BG)
     title_box.pack(side="left")
     tk.Label(title_box, text="Vision Inspection", bg=BG, fg=TXT,
-             font=("Arial", 15, "bold")).pack(anchor="w")
+             font=("Arial", 17, "bold")).pack(anchor="w")
     tk.Label(title_box, text="Part-presence verification by template matching "
                              "(normalised cross-correlation)",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 9)).pack(anchor="w")
+             bg=BG, fg=TXT_FAINT, font=("Arial", 11)).pack(anchor="w")
 
     pill = tk.Frame(header, bg="#1c1f25", padx=12, pady=7)
     pill.pack(side="right")
-    pill_dot = tk.Label(pill, text="●", bg="#1c1f25", fg=TXT_FAINT, font=("Arial", 12))
+    pill_dot = tk.Label(pill, text="●", bg="#1c1f25", fg=TXT_FAINT, font=("Arial", 14))
     pill_dot.pack(side="left", padx=(0, 7))
     pill_txt = tk.Label(pill, text="Checking camera…", bg="#1c1f25", fg=TXT_DIM,
-                        font=("Arial", 9, "bold"))
+                        font=("Arial", 11, "bold"))
     pill_txt.pack(side="left")
 
     if not _cv2_ok or not _pil_ok:
@@ -658,7 +658,7 @@ def render(parent):
         bar.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         tk.Label(bar, text="  %s is not installed — vision is unavailable until it is."
                            % missing, bg="#3a2600", fg=WARN,
-                 font=("Arial", 9, "bold"), pady=6).pack(anchor="w")
+                 font=("Arial", 11, "bold"), pady=6).pack(anchor="w")
 
     # ── Body: parts table + right rail ─────────────────────────────────────
     body = tk.Frame(content, bg=BG)
@@ -711,9 +711,9 @@ def render(parent):
     detail.pack(fill="x", pady=(8, 0))
     detail.pack_propagate(False)
     detail_lbl = tk.Label(detail, text="", bg=PANEL, fg=TXT_FAINT,
-                          font=("Arial", 9), anchor="w")
+                          font=("Arial", 11), anchor="w")
     detail_lbl.pack(side="left", fill="x", expand=True)
-    btn_map = _btn(detail, "Map to Part…", BTN_PRIMARY, pady=3, font_size=8)
+    btn_map = _btn(detail, "Map to Part…", BTN_PRIMARY, pady=3, font_size=10)
 
     def _refresh_table(select=None):
         if not alive["page"]:
@@ -844,9 +844,9 @@ def render(parent):
     cov_card.pack(fill="x", pady=(12, 0))
     cvb = cov_card.body
     cov_summary = tk.Label(cvb, text="Checking…", bg=PANEL, fg=TXT_DIM,
-                           font=("Arial", 9, "bold"), anchor="w")
+                           font=("Arial", 11, "bold"), anchor="w")
     cov_summary.pack(fill="x")
-    cov_list = tk.Listbox(cvb, bg=PANEL_ALT, fg=WARN, font=("Consolas", 9),
+    cov_list = tk.Listbox(cvb, bg=PANEL_ALT, fg=WARN, font=("Consolas", 11),
                           bd=0, relief="flat", highlightthickness=0, height=6,
                           selectmode="browse", activestyle="none")
     cov_list.pack(fill="x", pady=(6, 0))
@@ -883,11 +883,11 @@ def render(parent):
 
     chk = tk.Checkbutton(ib, text="  Vision enabled", variable=enabled_var,
                          bg=PANEL, fg=TXT, selectcolor=FIELD, activebackground=PANEL,
-                         activeforeground=TXT, font=("Arial", 10, "bold"),
+                         activeforeground=TXT, font=("Arial", 12, "bold"),
                          bd=0, highlightthickness=0, anchor="w", cursor="hand2")
     chk.pack(fill="x")
     tk.Label(ib, text="When off, the test cycle skips vision entirely.",
-             bg=PANEL, fg=TXT_FAINT, font=("Arial", 8), anchor="w",
+             bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), anchor="w",
              wraplength=265, justify="left").pack(fill="x", padx=(22, 0), pady=(0, 12))
 
     tk.Frame(ib, bg=LINE, height=1).pack(fill="x", pady=(0, 12))
@@ -895,9 +895,9 @@ def render(parent):
     th_head = tk.Frame(ib, bg=PANEL)
     th_head.pack(fill="x")
     tk.Label(th_head, text="Default match threshold", bg=PANEL, fg=TXT,
-             font=("Arial", 9, "bold")).pack(side="left")
+             font=("Arial", 11, "bold")).pack(side="left")
     th_val = tk.Label(th_head, text="0.75", bg=PANEL, fg=ACCENT,
-                      font=("Consolas", 12, "bold"))
+                      font=("Consolas", 14, "bold"))
     th_val.pack(side="right")
 
     scale = ttk.Scale(ib, from_=0.40, to=0.99, orient="horizontal",
@@ -907,25 +907,25 @@ def render(parent):
     ticks = tk.Frame(ib, bg=PANEL)
     ticks.pack(fill="x")
     tk.Label(ticks, text="lenient", bg=PANEL, fg=TXT_FAINT,
-             font=("Arial", 8)).pack(side="left")
+             font=("Arial", 10)).pack(side="left")
     tk.Label(ticks, text="strict", bg=PANEL, fg=TXT_FAINT,
-             font=("Arial", 8)).pack(side="right")
+             font=("Arial", 10)).pack(side="right")
 
-    th_caption = tk.Label(ib, text="", bg=PANEL, fg=TXT_DIM, font=("Arial", 8),
+    th_caption = tk.Label(ib, text="", bg=PANEL, fg=TXT_DIM, font=("Arial", 10),
                           wraplength=265, justify="left", anchor="w")
     th_caption.pack(fill="x", pady=(8, 0))
 
     tk.Label(ib, text="Applies to parts taught from now on. Each taught part keeps "
                       "the threshold it was saved with — change one from the table.",
-             bg=PANEL, fg=TXT_FAINT, font=("Arial", 8), wraplength=265,
+             bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=265,
              justify="left", anchor="w").pack(fill="x", pady=(8, 0))
 
     # ── Footer ─────────────────────────────────────────────────────────────
     footer = tk.Frame(content, bg=BG)
     footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-    dirty_lbl = tk.Label(footer, text="", bg=BG, fg=ACCENT, font=("Arial", 9, "bold"))
+    dirty_lbl = tk.Label(footer, text="", bg=BG, fg=ACCENT, font=("Arial", 11, "bold"))
     dirty_lbl.pack(side="right", padx=(0, 12))
-    btn_save = _btn(footer, "Save Settings", BTN_PRIMARY, font_size=10, pady=8)
+    btn_save = _btn(footer, "Save Settings", BTN_PRIMARY, font_size=12, pady=8)
     btn_save.pack(side="right")
 
     def _on_settings_change(*_a):
@@ -1116,9 +1116,9 @@ def _dialog_header(win, title, subtitle):
     inner = tk.Frame(bar, bg=PANEL)
     inner.pack(fill="x", padx=18, pady=12)
     tk.Label(inner, text=title, bg=PANEL, fg=TXT,
-             font=("Arial", 13, "bold")).pack(anchor="w")
+             font=("Arial", 15, "bold")).pack(anchor="w")
     tk.Label(inner, text=subtitle, bg=PANEL, fg=TXT_FAINT,
-             font=("Arial", 9)).pack(anchor="w")
+             font=("Arial", 11)).pack(anchor="w")
     tk.Frame(win, bg=LINE, height=1).pack(fill="x")
     return bar
 
@@ -1130,10 +1130,10 @@ def _step(parent, number, title):
     head = tk.Frame(wrap, bg=BG)
     head.pack(fill="x")
     badge = tk.Label(head, text=str(number), bg=LINE, fg=TXT,
-                     font=("Arial", 9, "bold"), width=3)
+                     font=("Arial", 11, "bold"), width=3)
     badge.pack(side="left")
     tk.Label(head, text=title, bg=BG, fg=TXT,
-             font=("Arial", 10, "bold")).pack(side="left", padx=(8, 0))
+             font=("Arial", 12, "bold")).pack(side="left", padx=(8, 0))
     body = tk.Frame(wrap, bg=BG)
     body.pack(fill="x", padx=(34, 0), pady=(6, 0))
     wrap.badge = badge
@@ -1184,13 +1184,13 @@ def _open_teach_wizard(parent, cam, part_number=None):
     foot_in = tk.Frame(foot, bg=PANEL)
     foot_in.pack(fill="x", padx=18, pady=12)
 
-    checklist = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Consolas", 9),
+    checklist = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Consolas", 11),
                          anchor="w", justify="left")
     checklist.pack(side="left")
 
-    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=10, pady=8)
+    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=12, pady=8)
     btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=8)
     btn_cancel.pack(side="right", padx=(0, 8))
 
     body = tk.Frame(win, bg=BG)
@@ -1211,7 +1211,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
     view_bar = tk.Frame(left, bg=BG)
     view_bar.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-    frame_lbl = tk.Label(view_bar, text="", bg=BG, fg=TXT_DIM, font=("Consolas", 9))
+    frame_lbl = tk.Label(view_bar, text="", bg=BG, fg=TXT_DIM, font=("Consolas", 11))
     frame_lbl.pack(side="right")
     btn_live = _btn(view_bar, "Live View", BTN_NEUTRAL)
     btn_capture = _btn(view_bar, "◉  Capture Frame", BTN_SUCCESS)
@@ -1260,13 +1260,13 @@ def _open_teach_wizard(parent, cam, part_number=None):
     master_parts = _fetch_master_parts()
     ent_pno = _PnoField(s1, master_parts)
     ent_pno.pack(fill="x", ipady=5)
-    pno_note = tk.Label(s1, text="", bg=BG, fg=TXT_FAINT, font=("Arial", 8),
+    pno_note = tk.Label(s1, text="", bg=BG, fg=TXT_FAINT, font=("Arial", 10),
                         anchor="w", wraplength=270, justify="left")
     pno_note.pack(fill="x", pady=(4, 0))
     if master_parts is None:
         tk.Label(s1, text="Could not reach the part master — typed value won't "
                           "be checked against settingmaster.",
-                 bg=BG, fg=WARN, font=("Arial", 8), wraplength=270,
+                 bg=BG, fg=WARN, font=("Arial", 10), wraplength=270,
                  justify="left", anchor="w").pack(fill="x", pady=(2, 0))
     if reteach:
         ent_pno.set(part_number)
@@ -1279,9 +1279,9 @@ def _open_teach_wizard(parent, cam, part_number=None):
     s2, b2 = _step(rail, 2, "Reference images")
     tk.Label(s2, text="Capture the same good part %d+ times — vary position and "
                       "lighting slightly, the way the line will." % MIN_REFS,
-             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 8))
-    refs_count = tk.Label(s2, text="", bg=BG, fg=TXT_DIM, font=("Arial", 9, "bold"),
+    refs_count = tk.Label(s2, text="", bg=BG, fg=TXT_DIM, font=("Arial", 11, "bold"),
                           anchor="w")
     refs_count.pack(fill="x")
     thumbs = tk.Frame(s2, bg=BG)
@@ -1290,34 +1290,34 @@ def _open_teach_wizard(parent, cam, part_number=None):
     s3, b3 = _step(rail, 3, "Target box")
     tk.Label(s3, text="Box the part on every reference. The box carries over to the "
                       "next image — click to drop it on the part there.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 8))
     roi_row = tk.Frame(s3, bg=BG)
     roi_row.pack(fill="x")
     roi_lbl = tk.Label(roi_row, text="Not drawn", bg=BG, fg=WARN,
-                       font=("Consolas", 10, "bold"), anchor="w")
+                       font=("Consolas", 12, "bold"), anchor="w")
     roi_lbl.pack(side="left")
-    btn_clear_roi = _btn(roi_row, "Clear", BTN_NEUTRAL, pady=3, font_size=8,
+    btn_clear_roi = _btn(roi_row, "Clear", BTN_NEUTRAL, pady=3, font_size=10,
                          command=lambda: view.clear_roi())
     btn_clear_roi.pack(side="right")
 
     lock_var = tk.BooleanVar(value=True)
     tk.Checkbutton(s3, text="  Same size on every reference", variable=lock_var,
                    bg=BG, fg=TXT_DIM, selectcolor=FIELD, activebackground=BG,
-                   activeforeground=TXT, font=("Arial", 8), bd=0,
+                   activeforeground=TXT, font=("Arial", 10), bd=0,
                    highlightthickness=0, anchor="w", cursor="hand2",
                    command=lambda: _apply_lock()).pack(fill="x", pady=(8, 0))
     tk.Label(s3, text="Matching is not scale-invariant, so crops of different sizes "
                       "are not directly comparable. Unlock only if the part changes "
                       "size between references.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(2, 0))
 
     tk.Label(s3, text="TEMPLATES", bg=BG, fg=TXT_FAINT,
-             font=("Arial", 8, "bold"), anchor="w").pack(fill="x", pady=(10, 2))
+             font=("Arial", 10, "bold"), anchor="w").pack(fill="x", pady=(10, 2))
     tk.Label(s3, text="The actual pixels each reference contributes — a crop showing "
                       "background means that box missed the part.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=270,
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 6))
     crops = tk.Frame(s3, bg=BG)
     crops.pack(fill="x")
@@ -1454,7 +1454,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
                 w.bind("<Button-1>", lambda e, i=i: _show_ref(i))
             x = tk.Label(cell, text="✕", bg=edge,
                          fg="#07080b" if selected else TXT_DIM,
-                         font=("Arial", 7, "bold"), cursor="hand2")
+                         font=("Arial", 9, "bold"), cursor="hand2")
             x.place(relx=1.0, rely=0.0, anchor="ne")
             x.bind("<Button-1>", lambda e, i=i: _remove_ref(i))
 
@@ -1722,10 +1722,10 @@ def _draw_score_meter(canvas, score, threshold, verdict_color):
     tx = w * min(max(threshold, 0.0), 1.0)
     canvas.create_line(tx, top - 4, tx, bot + 4, fill=TXT, width=2)
     canvas.create_text(tx, h - 5, text="threshold %.2f" % threshold,
-                       fill=TXT_DIM, font=("Consolas", 7),
+                       fill=TXT_DIM, font=("Consolas", 9),
                        anchor="e" if tx > w * 0.6 else "w")
     canvas.create_text(2, h - 5, text="0.0", fill=TXT_FAINT,
-                       font=("Consolas", 7), anchor="w")
+                       font=("Consolas", 9), anchor="w")
 
 
 def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
@@ -1739,10 +1739,10 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     verdict.pack(fill="x")
     verdict.pack_propagate(False)
     verdict_lbl = tk.Label(verdict, text="RUNNING…", bg="#1c1f25", fg=TXT_DIM,
-                           font=("Arial", 20, "bold"))
+                           font=("Arial", 22, "bold"))
     verdict_lbl.pack(side="left", padx=18)
     verdict_note = tk.Label(verdict, text="", bg="#1c1f25", fg=TXT_DIM,
-                            font=("Arial", 9), anchor="e", justify="right")
+                            font=("Arial", 11), anchor="e", justify="right")
     verdict_note.pack(side="right", padx=18)
 
     body = tk.Frame(win, bg=BG)
@@ -1773,7 +1773,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     meter = tk.Canvas(mb, bg=PANEL, height=34, highlightthickness=0, bd=0)
     meter.pack(fill="x", pady=(10, 0))
 
-    hint = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 8),
+    hint = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10),
                     wraplength=240, justify="left", anchor="w")
     hint.pack(fill="x", pady=(12, 0))
 
@@ -1782,13 +1782,13 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     foot.pack(fill="x")
     foot_in = tk.Frame(foot, bg=PANEL)
     foot_in.pack(fill="x", padx=18, pady=12)
-    btn_close = _btn(foot_in, "Close", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_close = _btn(foot_in, "Close", BTN_NEUTRAL, font_size=12, pady=8)
     btn_close.pack(side="right")
-    btn_rerun = _btn(foot_in, "Run Again", BTN_PRIMARY, font_size=10, pady=8)
+    btn_rerun = _btn(foot_in, "Run Again", BTN_PRIMARY, font_size=12, pady=8)
     btn_rerun.pack(side="right", padx=(0, 8))
-    btn_source = _btn(foot_in, "Test Image…", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_source = _btn(foot_in, "Test Image…", BTN_NEUTRAL, font_size=12, pady=8)
     btn_source.pack(side="right", padx=(0, 8))
-    btn_tune = _btn(foot_in, "Adjust Threshold…", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_tune = _btn(foot_in, "Adjust Threshold…", BTN_NEUTRAL, font_size=12, pady=8)
     btn_tune.pack(side="left")
 
     alive = {"v": True}
@@ -1936,20 +1936,20 @@ def _open_threshold_dialog(parent, ctrl, part_number, current, anchor=None):
     row = tk.Frame(body, bg=BG)
     row.pack(fill="x")
     tk.Label(row, text="Match threshold", bg=BG, fg=TXT,
-             font=("Arial", 10, "bold")).pack(side="left")
+             font=("Arial", 12, "bold")).pack(side="left")
     val = tk.Label(row, text="%.2f" % current, bg=BG, fg=ACCENT,
-                   font=("Consolas", 15, "bold"))
+                   font=("Consolas", 17, "bold"))
     val.pack(side="right")
 
     ttk.Scale(body, from_=0.40, to=0.99, orient="horizontal", variable=var,
               style="Vis.Horizontal.TScale").pack(fill="x", pady=(8, 4))
 
-    caption = tk.Label(body, text="", bg=BG, fg=TXT_DIM, font=("Arial", 9),
+    caption = tk.Label(body, text="", bg=BG, fg=TXT_DIM, font=("Arial", 11),
                        wraplength=380, justify="left", anchor="w")
     caption.pack(fill="x", pady=(6, 0))
     tk.Label(body, text="Lower it if good parts are being rejected; raise it if a "
                         "wrong or missing part still passes.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 8), wraplength=380,
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=380,
              justify="left", anchor="w").pack(fill="x", pady=(10, 0))
 
     def _upd(*_a):
@@ -2002,7 +2002,7 @@ def _prompt_part_number(parent, title, prompt, taken=()):
     field = _PnoField(body, master_parts, font_size=14)
     field.pack(fill="x", ipady=6)
     field.focus_set()
-    note = tk.Label(body, text="", bg=BG, fg=WARN, font=("Arial", 8), anchor="w",
+    note = tk.Label(body, text="", bg=BG, fg=WARN, font=("Arial", 10), anchor="w",
                     wraplength=380, justify="left")
     note.pack(fill="x", pady=(6, 0))
     if master_parts is None:
@@ -2038,7 +2038,7 @@ def _prompt_part_number(parent, title, prompt, taken=()):
     foot.pack(fill="x")
     foot_in = tk.Frame(foot, bg=PANEL)
     foot_in.pack(fill="x", padx=18, pady=12)
-    _btn(foot_in, "OK", BTN_PRIMARY, command=_ok, font_size=10, pady=8).pack(side="right")
+    _btn(foot_in, "OK", BTN_PRIMARY, command=_ok, font_size=12, pady=8).pack(side="right")
     _btn(foot_in, "Cancel", BTN_NEUTRAL, command=win.destroy, font_size=10,
          pady=8).pack(side="right", padx=(0, 8))
 
@@ -2087,32 +2087,32 @@ def _open_camera_dialog(parent):
     card.pack(fill="x")
     cb_body = card.body
 
-    tk.Label(cb_body, text="Camera", bg=PANEL, fg=TXT_DIM, font=("Arial", 9),
+    tk.Label(cb_body, text="Camera", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
              anchor="w").pack(fill="x")
     dev_var = tk.StringVar()
     cmb_dev = ttk.Combobox(cb_body, textvariable=dev_var, state="readonly",
-                           values=["Scanning…"], font=("Arial", 9))
+                           values=["Scanning…"], font=("Arial", 11))
     cmb_dev.pack(fill="x", pady=(3, 10))
 
-    tk.Label(cb_body, text="Resolution", bg=PANEL, fg=TXT_DIM, font=("Arial", 9),
+    tk.Label(cb_body, text="Resolution", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
              anchor="w").pack(fill="x")
     res_var = tk.StringVar()
     cmb_res = ttk.Combobox(cb_body, textvariable=res_var, state="readonly",
                            values=["%dx%d" % r for r in RESOLUTIONS],
-                           font=("Arial", 9))
+                           font=("Arial", 11))
     cmb_res.pack(fill="x", pady=(3, 10))
     res_var.set("%dx%d" % (cam["width"], cam["height"]))
 
     tk.Label(cb_body, text="Reference images are captured at this resolution and "
                            "must keep matching it, so changing it later means "
                            "re-teaching every part.",
-             bg=PANEL, fg=TXT_FAINT, font=("Arial", 8), wraplength=215,
+             bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
              justify="left", anchor="w").pack(fill="x")
 
     btn_rescan = _btn(cb_body, "Re-scan", BTN_NEUTRAL, pady=5)
     btn_rescan.pack(fill="x", pady=(10, 0))
 
-    status = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 9),
+    status = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 11),
                       wraplength=250, justify="left", anchor="w")
     status.pack(fill="x", pady=(12, 0))
 
@@ -2121,9 +2121,9 @@ def _open_camera_dialog(parent):
     foot.pack(fill="x")
     foot_in = tk.Frame(foot, bg=PANEL)
     foot_in.pack(fill="x", padx=18, pady=12)
-    btn_save = _btn(foot_in, "Save", BTN_PRIMARY, font_size=10, pady=8)
+    btn_save = _btn(foot_in, "Save", BTN_PRIMARY, font_size=12, pady=8)
     btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=10, pady=8)
+    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=8)
     btn_cancel.pack(side="right", padx=(0, 8))
 
     DISABLED = "Disabled (no vision capture)"
