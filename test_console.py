@@ -1767,6 +1767,26 @@ def render(parent):
         part starts from a clean box instead of the previous part's result."""
         _lock_scan_entry(); _set_scan_box("")
 
+    def _reset_for_next_part():
+        """Put the whole page back to READY once the verdict and its scan
+        result have had three seconds on screen.
+
+        Clearing the scan box alone left the channel table, the verdict panel
+        and the lot/cycle strip still showing the finished part, so the next
+        operator walked up to a panel that looked like a live result. Nothing
+        is lost by clearing it -- the record is already written and the row is
+        in Today's PASS Records. Skipped when the next test has already
+        started, or when a scan is still outstanding: neither should have its
+        display pulled out from under it."""
+        if state["test_running"] or state.get("awaiting_scan"): return
+        _reset_scan_box()
+        _reset_test_display()
+        try:
+            if scan_lbl.winfo_exists():
+                scan_lbl.config(text="Enter Part Number + Employee ID, then press ENTER or START",
+                                bg="#001830", fg="#555")
+        except Exception: pass
+
     def _fit_scan_wrap(event):
         # wraplength is in pixels and has to follow the panel, or a long code
         # spills past the edge instead of wrapping inside it.
@@ -2411,6 +2431,7 @@ def render(parent):
             else:
                 _after(0, lambda: _set_scan_box(""))
                 _after(500, _input_poll_start)
+                _after(3000, _reset_for_next_part)
         else:
             _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda: scan_lbl.config(text="❌  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
@@ -2444,7 +2465,7 @@ def render(parent):
                 _update_scan_result(state["lot_no"], "DUP")
                 _after(0, lambda p=state["pno"]: _load_today_pass(p))
             _set_awaiting_scan(False)
-            _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
+            _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
             return
         if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
         else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
@@ -2458,7 +2479,7 @@ def render(parent):
         # the new verdict.
         _after(0, lambda p=state["pno"]: _load_today_pass(p))
         _set_awaiting_scan(False)
-        _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
+        _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     def _input_poll_once():
