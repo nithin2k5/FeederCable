@@ -1109,11 +1109,11 @@ def render(parent):
 
     def _open_camera_popup(e, cam_id):
         dlg = tk.Toplevel(parent)
+        dlg.withdraw()
         dlg.title(f"Camera {cam_id} Configuration")
-        dlg.geometry("400x320")
         dlg.configure(bg="#222")
         dlg.transient(parent)
-        dlg.grab_set()
+        dlg.resizable(False, False)
 
         cfg = _load_cam_cfg()
         
@@ -1163,6 +1163,45 @@ def render(parent):
             r_idx = 1
         cmb_r.current(r_idx)
         cmb_r.grid(row=1, column=1, padx=5, pady=5)
+
+        # Live preview. Choosing between "Camera 0" and "Camera 1" from a
+        # dropdown is guesswork on a rig with two identical USB cameras --
+        # the picture is the only thing that says which one is which.
+        _PREV_W, _PREV_H = 320, 240
+        lf2 = tk.LabelFrame(dlg, text="Preview", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
+        lf2.pack(fill="x", padx=10, pady=5)
+        prev_box = tk.Frame(lf2, bg="#111", width=_PREV_W, height=_PREV_H, bd=1, relief="solid")
+        prev_box.pack_propagate(False)
+        prev_box.pack(padx=6, pady=6)
+        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", 10))
+        prev_lbl.pack(fill="both", expand=True)
+
+        preview = {"feed": None}
+
+        def _stop_preview():
+            feed, preview["feed"] = preview["feed"], None
+            if feed is not None:
+                try: feed.stop()
+                except Exception: pass
+
+        def _start_preview(*_a):
+            """(Re)open the preview for whatever the two dropdowns now say."""
+            _stop_preview()
+            prev_lbl.config(image="", text="", fg="#666"); prev_lbl.image = None
+            d_sel, r_sel = cmb_c.current(), cmb_r.current()
+            idx = cam_indices[d_sel] if d_sel > 0 else -1
+            if idx < 0:
+                prev_lbl.config(text="Camera disabled"); return
+            if not (_cv2_ok and _pil_ok):
+                prev_lbl.config(text="Preview unavailable\n(OpenCV or Pillow missing)", fg="#ff9800"); return
+            w, h = resolutions[r_sel][1], resolutions[r_sel][2]
+            prev_lbl.config(text="Opening camera…", fg="#e8a000")
+            feed = CameraFeed(prev_lbl, idx, display_w=_PREV_W, display_h=_PREV_H, width=w, height=h)
+            preview["feed"] = feed
+            feed.start()
+
+        cmb_c.bind("<<ComboboxSelected>>", _start_preview)
+        cmb_r.bind("<<ComboboxSelected>>", _start_preview)
 
         # Active Dataset config (vision_config.json)
         lf3 = tk.LabelFrame(dlg, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
@@ -1216,6 +1255,7 @@ def render(parent):
                     v_cfg["part_mapping"][current_part] = ds_val
                 save_vision_config(v_cfg)
                 
+            _stop_preview()
             dlg.destroy()
             
             # Reload page to apply changes
@@ -1223,6 +1263,49 @@ def render(parent):
             except: pass
 
         tk.Button(dlg, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, command=_save).pack(pady=15)
+
+        def _close(_e=None):
+            """Dismissed without saving. nav_camera stopped the page's own
+            feeds to free the cameras for this dialog, so they have to be put
+            back -- otherwise cancelling left both panels dead until the next
+            navigation."""
+            _stop_preview()
+            for feed in _cam_feeds:
+                try: feed.start()
+                except Exception: pass
+            try: dlg.grab_release()
+            except Exception: pass
+            dlg.destroy()
+        dlg.protocol("WM_DELETE_WINDOW", _close)
+        dlg.bind("<Escape>", _close)
+
+        # Centred on the app window rather than the screen: they are the same
+        # thing on a maximised single monitor and very much not on two.
+        dlg.update_idletasks()
+        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        top = parent.winfo_toplevel()
+        x = top.winfo_rootx() + (top.winfo_width() - w) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - h) // 2
+        x = max(0, min(x, dlg.winfo_screenwidth() - w))
+        y = max(0, min(y, dlg.winfo_screenheight() - h))
+        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.deiconify()
+        dlg.update_idletasks()
+        # Windows places the window *frame* at the requested point, while every
+        # measurement here is of the client area inside it, so the title bar and
+        # border push the dialog down and right of where it was asked to go.
+        # Measure that trim now the window is mapped, and centre the frame --
+        # the whole window is what the eye judges as centred, title bar included.
+        bx = max(0, dlg.winfo_rootx() - x)          # left border
+        by = max(0, dlg.winfo_rooty() - y)          # title bar + top border
+        fw, fh = w + 2 * bx, h + by + bx            # the frame, as the screen sees it
+        x = top.winfo_rootx() + (top.winfo_width() - fw) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - fh) // 2
+        x = max(0, min(x, dlg.winfo_screenwidth() - fw))
+        y = max(0, min(y, dlg.winfo_screenheight() - fh))
+        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.grab_set()
+        _start_preview()
 
     def nav_camera(e, cam_id):
         # Stop feeds before popup
