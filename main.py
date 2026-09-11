@@ -19,7 +19,17 @@ class App:
         self.root.title("Feeder Cable App")
         self.root.bind("<<NavigateVisionSettings>>", lambda e: self.load_page("vision_settings"))
         self.root.bind("<<NavigateHome>>", lambda e: self.load_page("test_console"))
+        # Open filling the screen. The machine runs one part-test page all
+        # shift, and the console's own layout gives its leftover height to the
+        # records table, so a maximised window is worth real rows. geometry is
+        # still set, as that is the size the window restores to if un-maximised,
+        # and "zoomed" is Windows/X11 only -- fall back to sizing the window to
+        # the screen anywhere it is not understood.
         self.root.geometry("1350x860")
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
         self.root.configure(bg="black")
         
         # Handle application shutdown to turn pins to low
@@ -116,10 +126,10 @@ class App:
         # page you were on except the title in the header.
         self.nav_tiles = {}
         self._NAV_IDLE = ("#111", "white", "#444")        # bg, fg, border
-        self._NAV_ACTIVE = ("#e8a000", "black", "#ffc947")
+        self._NAV_ACTIVE = ("#d4d4d4", "black", "#f0f0f0")
 
         sidebar_buttons = [
-            ("🏠", "Home", "test_console"),
+            ("🏠", "Test Console", "test_console"),
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
             ("👁", "Vision Settings", "vision_settings"),
