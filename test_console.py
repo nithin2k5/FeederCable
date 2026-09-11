@@ -53,6 +53,120 @@ try:
 except ImportError:
     _pil_ok = False
 
+# ── Device presence, for the COM Status pills ─────────────────────────────────
+# The label printer and the barcode scanner are not serial devices this page
+# opens, so there is no port to probe: Windows either has them or it does not.
+# Both names are the ones Windows shows -- Printers & scanners for the first,
+# Device Manager for the second.
+_PRINTER_NAME = "EOLPRINTER"
+_SCANNER_NAME = "POS HID Barcode scanner"
+
+def _printer_online(name: str = _PRINTER_NAME) -> bool:
+    """True when a printer by this name is installed and usable.
+
+    Installed is not the same as usable: a printer someone has set to "Use
+    Printer Offline", or one reporting an error, still enumerates, and a pill
+    that went green for it would be lying about where the labels are going.
+    """
+    if not _print_ok:
+        return False
+    try:
+        flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+        wanted = name.strip().lower()
+        match = next((p[2] for p in win32print.EnumPrinters(flags)
+                      if str(p[2]).strip().lower() == wanted), None)
+        if match is None:
+            return False
+    except Exception:
+        return False
+    # Being in the list is the fact that matters; the status query below only
+    # refines it. Some drivers refuse a level-2 read, and a pill that went red
+    # over a driver quirk would send an operator hunting for a printer that is
+    # sitting there working, so a failed refinement keeps the "it is there".
+    try:
+        h = win32print.OpenPrinter(match)
+        try:
+            info = win32print.GetPrinter(h, 2)
+        finally:
+            win32print.ClosePrinter(h)
+        status = int(info.get("Status", 0) or 0)
+        attrs = int(info.get("Attributes", 0) or 0)
+        bad = (getattr(win32print, "PRINTER_STATUS_OFFLINE", 0x00000080)
+               | getattr(win32print, "PRINTER_STATUS_ERROR", 0x00000002)
+               | getattr(win32print, "PRINTER_STATUS_NOT_AVAILABLE", 0x00001000))
+        PRINTER_ATTRIBUTE_WORK_OFFLINE = 0x00000400
+        return not (status & bad) and not (attrs & PRINTER_ATTRIBUTE_WORK_OFFLINE)
+    except Exception:
+        return True
+
+
+def _pnp_device_present(name: str) -> bool:
+    """True when Windows currently reports a plugged-in device by this name.
+
+    SetupAPI rather than WMI: the scanner is a keyboard-wedge HID device with
+    no port to open, and this needs no extra dependency, no COM apartment and
+    no subprocess -- it just walks the present-device list and stops at the
+    first match. Names are compared case-insensitively, and a substring
+    counts, so a scanner that enumerates with a trailing revision still
+    registers.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _DEVINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("ClassGuid", ctypes.c_byte * 16),
+                    ("DevInst", wintypes.DWORD), ("Reserved", ctypes.POINTER(wintypes.ULONG))]
+
+    DIGCF_PRESENT, DIGCF_ALLCLASSES = 0x02, 0x04
+    SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME = 0x00, 0x0C
+    INVALID_HANDLE = ctypes.c_void_p(-1).value
+    try:
+        api = ctypes.WinDLL("setupapi", use_last_error=True)
+    except Exception:
+        return False
+    api.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD]
+    api.SetupDiGetClassDevsW.restype = wintypes.HANDLE
+    api.SetupDiDestroyDeviceInfoList.argtypes = [wintypes.HANDLE]
+    api.SetupDiEnumDeviceInfo.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(_DEVINFO)]
+    api.SetupDiEnumDeviceInfo.restype = wintypes.BOOL
+    api.SetupDiGetDeviceRegistryPropertyW.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(_DEVINFO), wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD)]
+    api.SetupDiGetDeviceRegistryPropertyW.restype = wintypes.BOOL
+
+    wanted = name.strip().lower()
+    if not wanted:
+        return False
+    h = api.SetupDiGetClassDevsW(None, None, None, DIGCF_PRESENT | DIGCF_ALLCLASSES)
+    if not h or h == INVALID_HANDLE:
+        return False
+    try:
+        d = _DEVINFO(); d.cbSize = ctypes.sizeof(_DEVINFO)
+        buf = ctypes.create_unicode_buffer(512)
+        i = 0
+        while api.SetupDiEnumDeviceInfo(h, i, ctypes.byref(d)):
+            i += 1
+            for prop in (SPDRP_FRIENDLYNAME, SPDRP_DEVICEDESC):
+                if api.SetupDiGetDeviceRegistryPropertyW(h, ctypes.byref(d), prop, None,
+                                                         ctypes.byref(buf), ctypes.sizeof(buf), None):
+                    dev = (buf.value or "").strip().lower()
+                    if dev and (dev == wanted or wanted in dev):
+                        return True
+                    break
+        return False
+    except Exception:
+        return False
+    finally:
+        try: api.SetupDiDestroyDeviceInfoList(h)
+        except Exception: pass
+
+
+def _scanner_present(name: str = _SCANNER_NAME) -> bool:
+    """True when the barcode scanner is plugged in."""
+    return _pnp_device_present(name)
+
+
 import auth
 import db
 
@@ -569,7 +683,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         print(f"DB Error generating lot: {ex}")
     return f"{prefix}{highest + 1:04d}"
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = "EOLPRINTER"):
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = _PRINTER_NAME):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
@@ -630,7 +744,7 @@ def _marker_line(y: int, font: str, mul: int, content: str, align_w: int = 0) ->
     x = max(width, min(_MARKER_LABEL_W, (_MARKER_LABEL_W + box) // 2))
     return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
 
-def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = "EOLPRINTER"):
+def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
     """Print the text-only label that brackets a part's run on the roll.
 
     START goes out when a part finishes loading, END when it is released or
@@ -841,7 +955,7 @@ def render(parent):
 
     state = {
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
-        "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "total": 0, "ok": 0, "ng": 0,
+        "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "dev_polling": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
         "ct_last": None, "ct_sum": 0.0, "ct_count": 0,
@@ -951,6 +1065,37 @@ def render(parent):
         if lbl:
             try: _after(0, _update)
             except Exception: pass
+
+    # The printer and the scanner have no port this page opens, so unlike
+    # HiPot and IO Ctrl -- whose pills follow the serial calls the test
+    # sequence makes -- their state has to be asked for. Both lookups touch
+    # Windows (printer spooler, device list) and the device walk takes about
+    # a second, so the poll runs on its own thread and only repaints on a
+    # change, which also keeps the log to one line per plug or unplug.
+    _DEV_POLL_MS = 10000
+    _dev_seen = {"Printer": None, "Scanner": None}
+
+    def _device_status_once():
+        if not state.get("dev_polling"): return
+        def _work():
+            found = {"Printer": _printer_online(_PRINTER_NAME),
+                     "Scanner": _scanner_present(_SCANNER_NAME)}
+            names = {"Printer": _PRINTER_NAME, "Scanner": _SCANNER_NAME}
+            for dev, ok in found.items():
+                if _dev_seen[dev] == ok: continue
+                first = _dev_seen[dev] is None
+                _dev_seen[dev] = ok
+                _after(0, lambda d=dev, o=ok: set_com_status(d, o))
+                _after(0, lambda d=dev, o=ok, n=names[dev], f=first:
+                       _log(f"{d}: {'connected' if o else 'not found'} ('{n}')"
+                            + ("" if f else f" — {'plugged in' if o else 'disconnected'}")))
+            _after(_DEV_POLL_MS, _device_status_once)
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _device_status_start():
+        if state.get("dev_polling"): return
+        state["dev_polling"] = True
+        _device_status_once()
 
     # Camera frames — live feed from OpenCV
     cam_cfg = _load_cam_cfg()
@@ -1125,6 +1270,7 @@ def render(parent):
             for feed in _cam_feeds:
                 feed.stop()
             state["input_polling"] = False
+            state["dev_polling"] = False
             try: plc.close()
             except Exception: pass
     content.bind("<Destroy>", _on_page_destroy)
@@ -2514,4 +2660,5 @@ def render(parent):
 
     _load_today_pass(); _log("System ready. Enter Employee ID and press ENTER.")
     set_com_status("HiPot", False); set_com_status("IO Ctrl", False); set_com_status("Scanner", False); set_com_status("Printer", False)
+    _device_status_start()
     ent_emp.focus_set()
