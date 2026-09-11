@@ -1586,8 +1586,14 @@ def render(parent):
     x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
 
-    # Empty space to pad under M31-M37
-    for i in range(2, 9):
+    # Rework select (aligns under M31). It drives the REWORK badge and which
+    # barcode template gets printed, so it belongs on the panel with the rest
+    # of the inputs rather than only behind a blinking label.
+    x3_lbl = tk.Label(in_row, text="X3", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x3_lbl.pack(side="left", padx=1)
+
+    # Empty space to pad under M32-M37
+    for i in range(3, 9):
         tk.Label(in_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=1)
 
     tk.Frame(in_row, bg="black", width=_IO_GAP).pack(side="left")
@@ -1629,6 +1635,11 @@ def render(parent):
             if x2_lbl.winfo_exists(): x2_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
+    def _set_x3_indicator(active):
+        try:
+            if x3_lbl.winfo_exists(): x3_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
+        except Exception: pass
+
     def _set_x4_indicator(active):
         try:
             if x4_lbl.winfo_exists(): x4_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
@@ -1657,6 +1668,7 @@ def render(parent):
         """
         was_active = _rework_blink["active"]
         state["is_rework"] = active
+        _set_x3_indicator(active)
         _rework_blink["active"] = active
         if active and not was_active:
             _rework_blink["on"] = False
