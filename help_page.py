@@ -305,29 +305,29 @@ def render(parent):
     head = tk.Frame(content, bg=BG)
     head.pack(fill="x", pady=(0, 8))
     tk.Label(head, text="Operator Manual", bg=BG, fg=TXT,
-             font=("Arial", 15, "bold")).pack(side="left")
+             font=("Arial", 17, "bold")).pack(side="left")
     tk.Label(head, text="Feeder Cable EOL Tester", bg=BG, fg=DIM,
-             font=("Arial", 9)).pack(side="left", padx=(12, 0), pady=(7, 0))
+             font=("Arial", 10)).pack(side="left", padx=(12, 0), pady=(8, 0))
 
     body = tk.Frame(content, bg=BG)
     body.pack(fill="both", expand=True)
 
     # ── Contents, left ───────────────────────────────────────────────────────
-    toc_outer = tk.Frame(body, bg=LINE, padx=1, pady=1, width=260)
+    toc_outer = tk.Frame(body, bg=LINE, padx=1, pady=1, width=290)
     toc_outer.pack(side="left", fill="y")
     toc_outer.pack_propagate(False)
 
     toc_head = tk.Frame(toc_outer, bg=HEADER)
     toc_head.pack(fill="x")
     tk.Label(toc_head, text="Contents", bg=HEADER, fg=TXT,
-             font=("Arial", 10, "bold"), padx=12, pady=7).pack(side="left")
+             font=("Arial", 12, "bold"), padx=12, pady=8).pack(side="left")
 
     toc_body = tk.Frame(toc_outer, bg=PANEL)
     toc_body.pack(fill="both", expand=True)
 
     search_wrap = tk.Frame(toc_body, bg=PANEL, padx=8, pady=8)
     search_wrap.pack(fill="x")
-    ent_search = tk.Entry(search_wrap, bg="#111", fg=TXT, font=("Arial", 9),
+    ent_search = tk.Entry(search_wrap, bg="#111", fg=TXT, font=("Arial", 11),
                           bd=0, relief="flat", insertbackground="white",
                           highlightbackground=LINE, highlightcolor=ACCENT,
                           highlightthickness=1)
@@ -344,9 +344,9 @@ def render(parent):
     page_head = tk.Frame(page_outer, bg=HEADER)
     page_head.pack(fill="x")
     title_lbl = tk.Label(page_head, text="", bg=HEADER, fg=TXT,
-                         font=("Arial", 11, "bold"), padx=12, pady=7)
+                         font=("Arial", 13, "bold"), padx=12, pady=8)
     title_lbl.pack(side="left")
-    pos_lbl = tk.Label(page_head, text="", bg=HEADER, fg=DIM, font=("Arial", 9))
+    pos_lbl = tk.Label(page_head, text="", bg=HEADER, fg=DIM, font=("Arial", 10))
     pos_lbl.pack(side="right", padx=12)
 
     scroll_host = tk.Frame(page_outer, bg=PANEL)
@@ -391,7 +391,7 @@ def render(parent):
     content.bind("<Destroy>", lambda e: e.widget == content and _unbind_wheel())
 
     # ── Block renderers ──────────────────────────────────────────────────────
-    def _text(parent_, text, fg=TXT, font=("Arial", 10), indent=0, pady=(0, 0)):
+    def _text(parent_, text, fg=TXT, font=("Arial", 12), indent=0, pady=(0, 0)):
         lbl = tk.Label(parent_, text=text, bg=parent_.cget("bg"), fg=fg,
                        font=font, justify="left", anchor="nw")
         lbl.pack(fill="x", padx=(indent, 0), pady=pady)
@@ -404,9 +404,9 @@ def render(parent):
         bodyf = tk.Frame(wrap, bg="#141414")
         bodyf.pack(fill="x", padx=(3, 0))
         tk.Label(bodyf, text=tag, bg="#141414", fg=accent,
-                 font=("Arial", 8, "bold")).pack(anchor="w", padx=12, pady=(8, 0))
+                 font=("Arial", 9, "bold")).pack(anchor="w", padx=12, pady=(8, 0))
         lbl = tk.Label(bodyf, text=text, bg="#141414", fg=TXT,
-                       font=("Arial", 10), justify="left", anchor="nw")
+                       font=("Arial", 12), justify="left", anchor="nw")
         lbl.pack(fill="x", padx=12, pady=(2, 10))
         wrapped.append((lbl, 30))
 
@@ -416,7 +416,7 @@ def render(parent):
         for c in range(len(headers)):
             outer.columnconfigure(c, weight=1 if c else 0, uniform="" if c == 0 else "tc")
         for c, h in enumerate(headers):
-            tk.Label(outer, text=h, bg=HEADER, fg=TXT, font=("Arial", 9, "bold"),
+            tk.Label(outer, text=h, bg=HEADER, fg=TXT, font=("Arial", 11, "bold"),
                      anchor="w", padx=10, pady=6).grid(row=0, column=c, sticky="nsew",
                                                        padx=1, pady=1)
         for r, row in enumerate(rows, start=1):
@@ -424,7 +424,7 @@ def render(parent):
             for c, cell in enumerate(row):
                 lbl = tk.Label(outer, text=cell, bg=bg,
                                fg=TXT if c == 0 else DIM,
-                               font=("Consolas", 9) if c == 0 else ("Arial", 9),
+                               font=("Consolas", 11) if c == 0 else ("Arial", 11),
                                anchor="nw", justify="left", padx=10, pady=6)
                 lbl.grid(row=r, column=c, sticky="nsew", padx=1, pady=1)
                 if c:
@@ -444,7 +444,7 @@ def render(parent):
         for block in blocks:
             kind = block[0]
             if kind == "h":
-                _text(pad, block[1], fg=ACCENT, font=("Arial", 11, "bold"), pady=(14, 4))
+                _text(pad, block[1], fg=ACCENT, font=("Arial", 13, "bold"), pady=(16, 5))
             elif kind == "p":
                 _text(pad, block[1], fg="#cfcfcf", pady=(0, 6))
             elif kind == "steps":
@@ -452,32 +452,32 @@ def render(parent):
                     row = tk.Frame(pad, bg=PANEL)
                     row.pack(fill="x", pady=2)
                     tk.Label(row, text=f"{i}", bg="#1f1f1f", fg=ACCENT,
-                             font=("Arial", 9, "bold"), width=3, pady=2).pack(side="left", anchor="n")
+                             font=("Arial", 11, "bold"), width=3, pady=2).pack(side="left", anchor="n")
                     lbl = tk.Label(row, text=s, bg=PANEL, fg="#cfcfcf",
-                                   font=("Arial", 10), justify="left", anchor="nw")
+                                   font=("Arial", 12), justify="left", anchor="nw")
                     lbl.pack(side="left", fill="x", expand=True, padx=(10, 0))
-                    wrapped.append((lbl, 60))
+                    wrapped.append((lbl, 70))
             elif kind == "bul":
                 for s in block[1]:
                     row = tk.Frame(pad, bg=PANEL)
                     row.pack(fill="x", pady=2)
                     tk.Label(row, text="•", bg=PANEL, fg=ACCENT,
-                             font=("Arial", 11, "bold")).pack(side="left", anchor="n")
+                             font=("Arial", 13, "bold")).pack(side="left", anchor="n")
                     lbl = tk.Label(row, text=s, bg=PANEL, fg="#cfcfcf",
-                                   font=("Arial", 10), justify="left", anchor="nw")
+                                   font=("Arial", 12), justify="left", anchor="nw")
                     lbl.pack(side="left", fill="x", expand=True, padx=(10, 0))
-                    wrapped.append((lbl, 50))
+                    wrapped.append((lbl, 60))
             elif kind == "kv":
                 for term, desc in block[1]:
                     row = tk.Frame(pad, bg=PANEL)
                     row.pack(fill="x", pady=3)
                     tk.Label(row, text=term, bg=PANEL, fg=BLUE,
-                             font=("Arial", 9, "bold"), width=20, anchor="nw",
-                             justify="left", wraplength=140).pack(side="left", anchor="n")
+                             font=("Arial", 11, "bold"), width=19, anchor="nw",
+                             justify="left", wraplength=175).pack(side="left", anchor="n")
                     lbl = tk.Label(row, text=desc, bg=PANEL, fg="#cfcfcf",
-                                   font=("Arial", 10), justify="left", anchor="nw")
+                                   font=("Arial", 12), justify="left", anchor="nw")
                     lbl.pack(side="left", fill="x", expand=True, padx=(10, 0))
-                    wrapped.append((lbl, 190))
+                    wrapped.append((lbl, 230))
             elif kind == "tbl":
                 _table(pad, block[1], block[2])
             elif kind == "note":
@@ -500,7 +500,7 @@ def render(parent):
             on = i == idx
             lbl.config(bg="#1f1f1f" if on else PANEL,
                        fg=ACCENT if on else DIM,
-                       font=("Arial", 9, "bold") if on else ("Arial", 9))
+                       font=("Arial", 11, "bold") if on else ("Arial", 11))
         _render_chapter(idx)
 
     def _build_toc(match=""):
@@ -514,18 +514,18 @@ def render(parent):
                 continue
             shown += 1
             lbl = tk.Label(toc_list, text=f"{i + 1}.  {name}", bg=PANEL, fg=DIM,
-                           font=("Arial", 9), anchor="w", padx=10, pady=6,
+                           font=("Arial", 11), anchor="w", padx=10, pady=7,
                            cursor="hand2")
             lbl.pack(fill="x", pady=1)
             lbl.bind("<Button-1>", lambda e, k=i: _select(k))
             toc_items.append((i, lbl))
         if needle and not shown:
             tk.Label(toc_list, text="Nothing found", bg=PANEL, fg="#555",
-                     font=("Arial", 9, "italic"), pady=10).pack(fill="x")
+                     font=("Arial", 11, "italic"), pady=10).pack(fill="x")
         # Keep the open chapter highlighted when it survives the filter.
         for i, lbl in toc_items:
             if i == current["idx"]:
-                lbl.config(bg="#1f1f1f", fg=ACCENT, font=("Arial", 9, "bold"))
+                lbl.config(bg="#1f1f1f", fg=ACCENT, font=("Arial", 11, "bold"))
 
     def _chapter_text(name, blocks):
         """Everything in a chapter as one lowercase string, for searching."""
@@ -574,7 +574,7 @@ def render(parent):
             _select(nxt)
 
     for text, delta, side in (("‹  Previous", -1, "left"), ("Next  ›", 1, "right")):
-        tk.Button(foot, text=text, bg="#222", fg=TXT, font=("Arial", 9, "bold"),
+        tk.Button(foot, text=text, bg="#222", fg=TXT, font=("Arial", 11, "bold"),
                   bd=0, padx=14, pady=6, cursor="hand2",
                   activebackground="#333", activeforeground=TXT,
                   command=lambda d=delta: _step(d)).pack(side=side, padx=10, pady=6)

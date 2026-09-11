@@ -30,12 +30,12 @@ def render(parent):
     # which is global -- every other page's table inherited whatever this one
     # asked for, and whichever page rendered last won the argument.
     style.configure("Model.Treeview.Heading", background=HEADER, foreground=TXT,
-                    font=('Arial', 9, 'bold'), bordercolor=LINE, relief="flat")
+                    font=('Arial', 11, 'bold'), bordercolor=LINE, relief="flat")
     style.map("Model.Treeview.Heading",
               background=[("active", HEADER), ("pressed", HEADER)],
               foreground=[("active", TXT), ("pressed", TXT)])
     style.configure("Model.Treeview", background=PANEL, foreground=TXT,
-                    fieldbackground=PANEL, font=('Arial', 9), rowheight=26,
+                    fieldbackground=PANEL, font=('Arial', 11), rowheight=30,
                     bordercolor=LINE)
     style.map("Model.Treeview", background=[('selected', '#1c3a5e')],
               foreground=[('selected', 'white')])
@@ -46,7 +46,7 @@ def render(parent):
 
     # ── Widget factories ──────────────────────────────────────────────────────
     def mk_entry(parent, width=12, state="normal"):
-        e = tk.Entry(parent, bg=FIELD, fg=TXT, font=('Arial', 10),
+        e = tk.Entry(parent, bg=FIELD, fg=TXT, font=('Arial', 12),
                      bd=0, relief="flat", highlightbackground=LINE,
                      highlightcolor=ACCENT, highlightthickness=1,
                      insertbackground="white", width=width,
@@ -55,7 +55,7 @@ def render(parent):
         return e
 
     def mk_combo(parent, values, width=12, state="readonly"):
-        cb = ttk.Combobox(parent, values=values, font=('Arial', 10),
+        cb = ttk.Combobox(parent, values=values, font=('Arial', 12),
                           width=width, state=state)
         if values:
             cb.current(0)
@@ -71,7 +71,7 @@ def render(parent):
         is folded into config itself.
         """
         b = tk.Button(parent, text=text, bg=fill, fg=fg,
-                      font=('Arial', 10, 'bold'), width=width, bd=0,
+                      font=('Arial', 11, 'bold'), width=width, bd=0,
                       padx=10, pady=7, activebackground=hover,
                       activeforeground=fg, cursor="hand2",
                       disabledforeground=BTN_OFF_FG)
@@ -108,9 +108,9 @@ def render(parent):
         outer = tk.Frame(parent, bg=LINE, padx=1, pady=1)
         bar = tk.Frame(outer, bg=HEADER)
         bar.pack(fill="x")
-        tk.Label(bar, text=title, bg=HEADER, fg=TXT, font=('Arial', 10, 'bold'),
+        tk.Label(bar, text=title, bg=HEADER, fg=TXT, font=('Arial', 12, 'bold'),
                  padx=12, pady=7).pack(side="left")
-        note = tk.Label(bar, text="", bg=HEADER, fg=TXT_DIM, font=('Arial', 9))
+        note = tk.Label(bar, text="", bg=HEADER, fg=TXT_DIM, font=('Arial', 10))
         note.pack(side="right", padx=12)
         body = tk.Frame(outer, bg=PANEL)
         body.pack(fill="both", expand=True)
@@ -126,11 +126,11 @@ def render(parent):
     head = tk.Frame(content, bg=BG)
     head.pack(fill="x", pady=(0, 8))
     tk.Label(head, text="Model Settings", bg=BG, fg=TXT,
-             font=('Arial', 15, 'bold')).pack(side="left")
+             font=('Arial', 17, 'bold')).pack(side="left")
     tk.Label(head, text="Part master and per-channel test specifications",
-             bg=BG, fg=TXT_DIM, font=('Arial', 9)).pack(side="left", padx=(12, 0), pady=(7, 0))
+             bg=BG, fg=TXT_DIM, font=('Arial', 10)).pack(side="left", padx=(12, 0), pady=(8, 0))
     mode_chip = tk.Label(head, text="VIEW", bg="#1a1a1a", fg=TXT_DIM,
-                         font=('Arial', 9, 'bold'), padx=14, pady=5,
+                         font=('Arial', 10, 'bold'), padx=14, pady=5,
                          bd=1, relief="solid")
     mode_chip.pack(side="right")
 
@@ -169,7 +169,7 @@ def render(parent):
     f1, f2, f3 = fcols
 
     def field(frame, row, text):
-        tk.Label(frame, text=text, bg=PANEL, fg=TXT_DIM, font=('Arial', 9, 'bold'),
+        tk.Label(frame, text=text, bg=PANEL, fg=TXT_DIM, font=('Arial', 11, 'bold'),
                  anchor="w").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 12))
 
     for _r, _t in enumerate(("PART NUMBER", "PART NAME", "CUSTOMER NAME", "MODEL NAME")):
@@ -197,7 +197,7 @@ def render(parent):
     lbl_wrap.grid(row=1, column=1, sticky="ew", pady=6)
     lbl_wrap.columnconfigure(0, weight=1)
 
-    cb_label = tk.Entry(lbl_wrap, bg=FIELD, fg=TXT, font=('Arial', 10),
+    cb_label = tk.Entry(lbl_wrap, bg=FIELD, fg=TXT, font=('Arial', 12),
                         bd=0, relief="flat", highlightbackground=LINE,
                         highlightcolor=ACCENT, highlightthickness=1,
                         insertbackground="white", width=12,
@@ -230,7 +230,7 @@ def render(parent):
         _set_label_entry(os.path.abspath(path))
 
     btn_browse_label = tk.Button(lbl_wrap, text="Browse", bg="#2a2a2a", fg=TXT,
-                                 font=('Arial', 9), bd=0, padx=10, pady=3,
+                                 font=('Arial', 10), bd=0, padx=10, pady=4,
                                  activebackground="#3a3a3a", activeforeground=TXT,
                                  cursor="hand2", command=on_browse_label)
     btn_browse_label.grid(row=0, column=1, padx=(6, 0))
@@ -250,7 +250,7 @@ def render(parent):
     tab_bar.pack(fill="x")
 
     tk.Label(tab_bar, text="CHANNEL", bg=PANEL, fg=TXT_DIM,
-             font=('Arial', 9, 'bold')).pack(side="left", padx=(0, 10))
+             font=('Arial', 11, 'bold')).pack(side="left", padx=(0, 10))
 
     # Channel tabs
     ch_tab_frame = tk.Frame(tab_bar, bg=PANEL)
@@ -258,7 +258,7 @@ def render(parent):
     ch_labels = []
     for i in range(1, 9):
         lbl = tk.Label(ch_tab_frame, text=str(i), bg="#1a1a1a", fg=TXT_DIM,
-                       font=('Arial', 10, 'bold'), width=4, pady=5,
+                       font=('Arial', 12, 'bold'), width=4, pady=6,
                        bd=0, cursor="hand2")
         lbl.pack(side="left", padx=(0, 3))
         ch_labels.append(lbl)
@@ -298,19 +298,19 @@ def render(parent):
         for col_i, h in enumerate(spec_headers):
             table_frame.columnconfigure(col_i, weight=0 if col_i == 0 else 1)
             tk.Label(table_frame, text=h, bg=HEADER, fg=TXT,
-                     font=('Arial', 9, 'bold'), pady=7,
-                     width=22 if col_i == 0 else 0).grid(
+                     font=('Arial', 11, 'bold'), pady=8,
+                     width=20 if col_i == 0 else 0).grid(
                 row=0, column=col_i, sticky="nsew", padx=1, pady=1)
 
         for row_i, (test_name, pretty, accent) in enumerate(_SPEC_ROWS, start=1):
             vals = spec_data[ch][test_name]
             tk.Label(table_frame, text=pretty, bg="#131313", fg=accent,
-                     font=('Arial', 9, 'bold'), pady=7, anchor="w", padx=12).grid(
+                     font=('Arial', 11, 'bold'), pady=9, anchor="w", padx=12).grid(
                 row=row_i, column=0, sticky="nsew", padx=1, pady=1)
             row_entries = []
             for col_i, val in enumerate(vals, start=1):
                 e = tk.Entry(table_frame, bg=FIELD, fg=TXT,
-                             font=('Arial', 10), bd=0, relief="flat",
+                             font=('Arial', 12), bd=0, relief="flat",
                              justify="center", insertbackground="white",
                              highlightbackground=LINE, highlightcolor=accent,
                              highlightthickness=1)
@@ -401,8 +401,8 @@ def render(parent):
     tree_bot.tag_configure("odd", background="#0f0f0f")
     tree_bot.tag_configure("even", background="#141414")
 
-    col_widths = {"SL": 50, "PART NUMBER": 150, "PART NAME": 170,
-                  "CUSTOMER": 140, "MODEL": 120, "ALC": 80, "CH#": 60, "MACHINE": 90}
+    col_widths = {"SL": 55, "PART NUMBER": 175, "PART NAME": 195,
+                  "CUSTOMER": 160, "MODEL": 135, "ALC": 90, "CH#": 70, "MACHINE": 105}
     for col in cols_bot:
         tree_bot.heading(col, text=col)
         tree_bot.column(col, anchor="center", width=col_widths.get(col, 90),
