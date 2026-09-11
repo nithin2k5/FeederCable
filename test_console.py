@@ -841,7 +841,7 @@ def render(parent):
 
     state = {
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
-        "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "total": 0, "ok": 0, "ng": 0,
+        "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
         "ct_last": None, "ct_sum": 0.0, "ct_count": 0,
@@ -1237,18 +1237,18 @@ def render(parent):
     MAX_CH = 8
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
-    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 8, "bold"), bd=1, relief="solid", pady=6).grid(row=0, column=i, sticky="nsew")
+    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 10, "bold"), bd=1, relief="solid", pady=7).grid(row=0, column=i, sticky="nsew")
     test_rows_def = [("IR", "Insulation (IR)", "MΩ"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
-        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 8), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
-        tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", 8, "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
+        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 10), bd=1, relief="solid", pady=9).grid(row=r_idx, column=0, sticky="nsew")
+        tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", 10, "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
         row_cells = []
         for ch_i in range(MAX_CH):
-            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 8), bd=1, relief="solid", pady=6)
+            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 11), bd=1, relief="solid", pady=9)
             lbl.grid(row=r_idx, column=2 + ch_i, sticky="nsew")
             row_cells.append(lbl)
-        res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 9, "bold"), bd=1, relief="solid")
+        res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 11, "bold"), bd=1, relief="solid")
         res_lbl.grid(row=r_idx, column=2 + MAX_CH, sticky="nsew")
         result_rows[key] = {"cells": row_cells, "result": res_lbl}
 
@@ -1283,10 +1283,16 @@ def render(parent):
     lot_widths = {"#": 30, "LOT NO": 160, "ALC": 70, "RESULT": 60, "SCAN": 60,
                   "CAM1": 55, "CAM2": 55, "EMP": 70, "TIME": 70}
     for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
-    tree_lot.pack(fill="x")
 
     btn_start = tk.Button(left_area, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 14, "bold"), pady=10, bd=0, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
-    btn_start.pack(fill="x", pady=(6, 0))
+    # Anchored to the bottom and packed before the records table, so the
+    # button keeps its full height no matter how tight the column gets --
+    # a squeezed START button is far worse than one record row fewer.
+    btn_start.pack(side="bottom", fill="x", pady=(6, 0))
+
+    # The only stretchy widget in the column: the leftover height that used to
+    # sit as dead black space under START TEST becomes extra record rows.
+    tree_lot.pack(fill="both", expand=True)
 
     bottom = tk.Frame(content, bg="black", height=110)
     bottom.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(4, 0))
@@ -1495,6 +1501,24 @@ def render(parent):
         except Exception: pass
     _set_scan_box("")
 
+    def _set_awaiting_scan(on: bool):
+        """Hold the next test until the printed label has been scanned.
+
+        A PASS with "Scan required" checked left the physical START button
+        dead -- the input poll stays off until the scan lands -- but the
+        on-screen button was handed straight back, so a click started the
+        next part with the previous label never verified. Both routes are
+        now gated on the same flag.
+        """
+        state["awaiting_scan"] = on
+        try:
+            if not btn_start.winfo_exists(): return
+            if on:
+                btn_start.config(state="disabled", bg="#4a3800", fg="#ffcc00", text="⤷  SCAN LABEL TO CONTINUE")
+            elif not state["test_running"]:
+                btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")
+        except Exception: pass
+
     def _reset_scan_box():
         """Put the box back to idle once the operator has had a moment to read
         the verdict. The verdict is not lost by clearing it -- by this point it
@@ -1547,7 +1571,7 @@ def render(parent):
         except Exception as ex:
             _log(f"Could not save the label scan setting: {ex}")
         # The idle text of the box spells out which mode it is in.
-        if not want: _lock_scan_entry()
+        if not want: _lock_scan_entry(); _set_awaiting_scan(False)
         _set_scan_box("")
         _log(f"Label scan {'ENABLED' if want else 'DISABLED'} — "
              f"{'required' if want else 'not required'} after a PASS.")
@@ -2136,6 +2160,7 @@ def render(parent):
             _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
             if cfg.get("scan_enabled", True):
+                state["awaiting_scan"] = True
                 # Focus immediately, not after a delay: printers eject a label
                 # fast enough that a delay left the entry still readonly when
                 # the operator's actual scan arrived, dropping it silently and
@@ -2149,6 +2174,8 @@ def render(parent):
             _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda: scan_lbl.config(text="❌  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
+        # Queued after the restore above, so the gate has the last word.
+        if state.get("awaiting_scan"): _after(0, lambda: _set_awaiting_scan(True))
         if overall == "FAIL": _after(200, _input_poll_start)
 
     def _show_scan_entry():
@@ -2175,6 +2202,7 @@ def render(parent):
                 # and a duplicate must not overwrite it.
                 _update_scan_result(state["lot_no"], "DUP")
                 _after(0, lambda p=state["pno"]: _load_today_pass(p))
+            _set_awaiting_scan(False)
             _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
             return
         if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
@@ -2188,6 +2216,7 @@ def render(parent):
         # _after(0, ...) runs after this callback returns -- so the reload sees
         # the new verdict.
         _after(0, lambda p=state["pno"]: _load_today_pass(p))
+        _set_awaiting_scan(False)
         _after(2000, _reset_scan_box); _after(2100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
@@ -2247,6 +2276,11 @@ def render(parent):
 
     def _trigger_test():
         if state["test_running"]: return
+        if state.get("awaiting_scan"):
+            _log("Scan the printed label before testing the next part.")
+            messagebox.showwarning("Scan Required", "Scan the printed barcode label for the last part before starting the next test.")
+            _show_scan_entry()   # focus lands on the entry as the dialog closes
+            return
         if not state["pno"]: _log("No part number loaded."); return
         if not ent_emp.get().strip(): _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID before testing.")); return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
@@ -2278,7 +2312,7 @@ def render(parent):
         ent_jig.config(state="normal"); ent_jig.delete(0, "end"); ent_jig.config(state="readonly", bg="#0d0d0d")
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); _reset_test_display()
-        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_scan_box("")
+        spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_awaiting_scan(False); _set_scan_box("")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None,
                       "ct_last": None, "ct_sum": 0.0, "ct_count": 0})
         btn_start.config(bg="#1a1a1a", fg="#444")
