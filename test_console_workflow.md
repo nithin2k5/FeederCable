@@ -18,9 +18,11 @@ Once the operator presses the physical **START button** (or clicks the UI button
 
 ```mermaid
 flowchart TD
-    Start((START Pressed)) --> CheckCable{Cable in Jig? <br/> PLC X0}
-    CheckCable -- No --> Abort[Abort Test & Alert]
-    CheckCable -- Yes --> IRTest[IR Test Sequence]
+    Start((START Pressed)) --> LastCh{"CH n (part's last channel)<br/> X2 Contact OK?"}
+    LastCh -- No --> AbortSeat["Abort — cable not seated"]
+    LastCh -- Yes --> NextCh{"CH n+1 <br/> X2 must be LOW <br/> (skipped when n = 8)"}
+    NextCh -- "X2 High" --> AbortWrong["Abort — wrong cable or JIG"]
+    NextCh -- "X2 Low" --> IRTest[IR Test Sequence]
     
     IRTest --> M28ON[Turn Safety Relay M28 ON <br/> High Voltage Mode]
     M28ON --> AllCoilsON[Turn All Channel Coils ON]

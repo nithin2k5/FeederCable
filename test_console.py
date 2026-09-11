@@ -1740,13 +1740,27 @@ def render(parent):
         _after(0, lambda p=all_pass: _set_row_result("Contact", p))
         _log(f"Contact: {'PASS' if all_pass else 'FAIL'}"); return all_pass, contact_res
 
-    def _run_contact_ch1_check() -> bool:
-        """Quick contact check on CH1 only — verifies cable is in jig."""
-        _log("Contact CH1 check → cable in jig?")
+    def _run_contact_boundary_check(n_ch: int) -> str:
+        """Pre-test jig check on the part's channel boundary.
+
+        Driving CH1 alone only proved *something* was in the jig. Driving the
+        part's highest channel proves the whole harness is seated, and driving
+        the one past it proves nothing extra is bridging -- a wrong cable or
+        wrong jig that shares the first conductors answers CH1 exactly like
+        the right one does.
+
+        Returns "OK", "NOT_SEATED" (the part's last channel gave no contact),
+        "EXTRA" (the channel past it answered when this part has no conductor
+        there) or "PLC" (port unreachable).
+        """
+        last = max(1, min(n_ch, MAX_CH))
+        nxt = last + 1 if last < MAX_CH else None
+        _log(f"Contact boundary check → CH{last} expect OK" +
+             (f", CH{nxt} expect NG" if nxt else f" (CH{last} is the last channel — nothing above it to probe)"))
         if not _plc_open():
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
-            return False
-            
+            return "PLC"
+
         # 1) Turn on Safety Relay and confirm X4
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
         plc.safety_relay_to_contact()
@@ -1754,26 +1768,39 @@ def render(parent):
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
         _after(0, lambda a=x4_ack: _set_x4_indicator(a))
-        
-        # 2) Turn on CH1 and read X2
-        plc.set_channel(1, True)
-        _after(0, lambda: _set_io(io_contact_labels, 0, True))
-        time.sleep(0.5)
-        passed_ack = plc.read_channel_ack(1)
-        passed_x2 = plc.is_contact_ok()
-        _after(0, lambda a=passed_ack: _set_io(io_in_labels, 0, a))
-        
-        plc.set_channel(1, False)
-        _after(0, lambda: _set_io(io_contact_labels, 0, False))
-        
-        if not passed_x2:
-            _log("CH1 contact: NG — X2 (Contact OK) is False. Cable not detected.")
+
+        def _probe(ch: int) -> bool:
+            """Drive one contact channel, read X2, then put the coil back."""
+            idx = ch - 1
+            plc.set_channel(ch, True)
+            _after(0, lambda i=idx: _set_io(io_contact_labels, i, True))
+            time.sleep(0.5)
+            ack = plc.read_channel_ack(ch)
+            x2 = plc.is_contact_ok()
+            _after(0, lambda i=idx, a=ack: _set_io(io_in_labels, i, a))
+            plc.set_channel(ch, False)
+            _after(0, lambda i=idx: _set_io(io_contact_labels, i, False))
+            return x2
+
+        # 2) The part's own last channel must make contact.
+        if not _probe(last):
+            _log(f"CH{last} contact: NG — X2 (Contact OK) is Low. Cable not seated.")
             plc.close()
-            return False
-            
-        _log("CH1 contact: OK — X2 is High (cable in jig)")
-        
-        # 3) Turn off safety relay M28 and ensure no X4 feedback is received
+            return "NOT_SEATED"
+        _log(f"CH{last} contact: OK — X2 is High (cable in jig)")
+
+        # 3) One past the part's channels must NOT. An answer there means a
+        #    conductor exists where this part has none.
+        if nxt is None:
+            _log(f"CH{last + 1} probe skipped — the fixture has only {MAX_CH} channels")
+        else:
+            if _probe(nxt):
+                _log(f"CH{nxt} contact: NG — X2 is High, but this part has only {last} channels. Wrong cable or wrong jig.")
+                plc.close()
+                return "EXTRA"
+            _log(f"CH{nxt} contact: OK — X2 is Low, as expected for a {last}-channel part")
+
+        # 4) Turn off safety relay M28 and ensure no X4 feedback is received
         _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
         plc.safety_relay_to_hv()
         _after(0, lambda: _set_safety_indicator(False))
@@ -1781,9 +1808,9 @@ def render(parent):
         x4_off = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'Still ON! (WARNING)' if x4_off else 'OFF (Low - OK)'}")
         _after(0, lambda a=x4_off: _set_x4_indicator(a))
-        
+
         plc.close()
-        return True
+        return "OK"
 
     def _plc_reset():
         """Reset all channel coils and safety relay to OFF."""
@@ -2028,10 +2055,30 @@ def render(parent):
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
 
-        _after(0, lambda: scan_lbl.config(text="Checking contact (CH1)...", bg="#001830", fg="#e8a000"))
+        _after(0, lambda: scan_lbl.config(text=f"Checking contact (CH{min(n_ch, MAX_CH)}"
+                                               + (f" / CH{min(n_ch, MAX_CH) + 1})..." if min(n_ch, MAX_CH) < MAX_CH else ")..."),
+                                          bg="#001830", fg="#e8a000"))
         if _modbus_ok:
-            if not _run_contact_ch1_check():
-                _log("Contact NOT OK (X2) — aborting"); _after(0, lambda: messagebox.showwarning("Contact", "Contact NOT OK. Please check the jig.")); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda: scan_lbl.config(text="❌  Contact NOT OK — check and retry", bg="#220000", fg="#ff5555"))
+            verdict = _run_contact_boundary_check(n_ch)
+            if verdict != "OK":
+                # Each failure gets its own wording: "not seated" and "wrong
+                # cable/jig" need different things done to the fixture, and
+                # one generic message had the operator re-seating a cable
+                # that was never the right one.
+                if verdict == "EXTRA":
+                    title, popup = "Wrong Cable / JIG", (f"Contact found on CH{min(n_ch, MAX_CH) + 1}, but this part has only "
+                                                         f"{min(n_ch, MAX_CH)} channels.\n\n"
+                                                         "Wrong cable or wrong JIG — please check.")
+                    banner = "❌  Extra channel detected — wrong cable or JIG"
+                elif verdict == "NOT_SEATED":
+                    title, popup = "Contact", (f"No contact on CH{min(n_ch, MAX_CH)}.\n\n"
+                                               "The cable is not fully seated. Please check the jig.")
+                    banner = "❌  Contact NOT OK — check and retry"
+                else:
+                    title, popup = "PLC", "PLC Modbus port blocked or disconnected."
+                    banner = "❌  PLC not reachable — check the connection"
+                _log(f"Contact boundary check failed ({verdict}) — aborting")
+                _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
                 state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
