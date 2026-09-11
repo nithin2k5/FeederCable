@@ -803,13 +803,13 @@ def render(parent):
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
     style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
-    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="#76ff03", font=("Arial", 8, "bold"))
+    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", 8, "bold"))
     style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 8), rowheight=22)
     # Column headers otherwise brighten on mouse-over / press -- pin each
     # heading style's color so it stays flat in every state.
     for heading_style, bg, fg in (
         ("Spec.Treeview.Heading", "#1a1a1a", "white"),
-        ("Lot.Treeview.Heading", "#0a1a00", "#76ff03"),
+        ("Lot.Treeview.Heading", "#0a1a00", "white"),
     ):
         style.map(heading_style, background=[("active", bg), ("pressed", bg)],
                   foreground=[("active", fg), ("pressed", fg)])
@@ -1200,13 +1200,30 @@ def render(parent):
     spec_status_lbl = tk.Label(shf, text="[ No part loaded ]", bg="black", fg="#444", font=("Arial", 9))
     spec_status_lbl.pack(side="left", padx=10)
     cols_spec = ("TEST", "CH", "APPLIED VOLTS (V)", "TEST TIME (S)", "MIN", "MAX")
-    tree_spec = ttk.Treeview(left_area, columns=cols_spec, show="headings", height=5, style="Spec.Treeview")
+    # One channel's specs are three rows -- IR, ACW, Contact -- and the grid
+    # is sized to show exactly that block, scrolling to whichever channel the
+    # test is on. An eight-channel part used to lay all 24 rows in a box that
+    # showed five, so the spec actually being applied was usually out of view.
+    _SPEC_ROWS_PER_CH = 3
+    tree_spec = ttk.Treeview(left_area, columns=cols_spec, show="headings", height=_SPEC_ROWS_PER_CH, style="Spec.Treeview")
     spec_widths = {"TEST": 160, "CH": 45, "APPLIED VOLTS (V)": 130, "TEST TIME (S)": 110, "MIN": 80, "MAX": 80}
     for col in cols_spec: tree_spec.heading(col, text=col); tree_spec.column(col, anchor="center", width=spec_widths.get(col, 90))
     tree_spec.tag_configure("ir", background="#0d1a0d", foreground="#8bc34a")
     tree_spec.tag_configure("acw", background="#0d0d1a", foreground="#64b5f6")
     tree_spec.tag_configure("contact", background="#1a1a0d", foreground="#ffd54f")
     tree_spec.pack(fill="x")
+
+    def _spec_focus(ch: int):
+        """Scroll the spec grid to one channel's block and highlight it.
+
+        Must run on the UI thread -- the test sequence calls it through
+        _after() like every other display update.
+        """
+        items = tree_spec.get_children()
+        first = (ch - 1) * _SPEC_ROWS_PER_CH
+        if not items or ch < 1 or first >= len(items): return
+        tree_spec.yview_moveto(first / len(items))
+        tree_spec.selection_set(items[first:first + _SPEC_ROWS_PER_CH])
 
     tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(8, 2))
     # Outer white border, the same 1px padded-wrapper trick the verdict and
@@ -1240,6 +1257,7 @@ def render(parent):
             for cell in result_rows[key]["cells"]: cell.config(text="—", bg="#0d0d0d", fg="#333")
             result_rows[key]["result"].config(text="—", bg="#0d0d0d", fg="#333")
         _set_verdict("READY", "#1a1a1a", "#555")
+        _spec_focus(1)
         lot_lbl.config(text="—"); elapsed_lbl.config(text="—"); blink_start()
 
     def _set_cell(test_key, ch_idx, value, passed):
@@ -1567,6 +1585,7 @@ def render(parent):
                 for test_key, tag, sp in [("Insulation Test", "ir", spec_ir.get(ch, {})), ("Withstand Test", "acw", spec_acw.get(ch, {}))]:
                     tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), sp.get("appvol", "—"), sp.get("testtime", "—"), sp.get("min", "—"), sp.get("max", "—")))
                 tree_spec.insert("", "end", tags=("contact",), values=("Contact Test", str(ch), "—", "—", "—", "—"))
+            _spec_focus(1)
             spec_status_lbl.config(text=f"[ {channel} channel(s) loaded ]", fg="#4caf50")
             _log(f"Specs loaded for {pno} ({channel} ch)")
             return True
@@ -1715,6 +1734,7 @@ def render(parent):
         contact_res = {}; all_pass = True
         for ch in range(1, n_ch + 1):
             _log(f"Contact Test: Testing CH{ch}...")
+            _after(0, lambda c=ch: _spec_focus(c))
             # Turn ON channel coil
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
@@ -1783,6 +1803,7 @@ def render(parent):
             return x2
 
         # 2) The part's own last channel must make contact.
+        _after(0, lambda c=last: _spec_focus(c))
         if not _probe(last):
             _log(f"CH{last} contact: NG — X2 (Contact OK) is Low. Cable not seated.")
             plc.close()
@@ -1876,6 +1897,7 @@ def render(parent):
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"IR Test: Testing CH{ch}...")
+                _after(0, lambda c=ch: _spec_focus(c))
                 ack_ok = True
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
@@ -1954,6 +1976,7 @@ def render(parent):
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"ACW Test: Testing CH{ch}...")
+                _after(0, lambda c=ch: _spec_focus(c))
                 ack_ok = True
                 if plc.is_open:
                     _log(f"CH{ch} -> ON")
