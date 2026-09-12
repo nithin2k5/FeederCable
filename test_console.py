@@ -1784,11 +1784,17 @@ def render(parent):
         where a just-finished test still shows stale "glowing" pins, most
         visibly after a PASS since polling doesn't resume until the operator
         scans the label.
+
+        X2 and X4 are cleared with them -- both are test-time feedback and go
+        low once the coils drop. X3 is deliberately left alone: it reports the
+        position of the operator's rework selector, not anything the test
+        drives, so blanking it would claim the switch had moved.
         """
         for i in range(8):
             _after(0, lambda idx=i: (_set_io(io_contact_labels, idx, False),
                                       _set_io(io_ir_acw_labels, idx, False),
                                       _set_io(io_in_labels, idx, False)))
+        _after(0, lambda: (_set_x2_indicator(False), _set_x4_indicator(False)))
     scan_lf = ttk.LabelFrame(bottom, text="Label Scan Result", style="TC.TLabelframe")
     scan_lf.grid(row=0, column=1, sticky="nsew", padx=(0, 4))
     scan_inner = tk.Frame(scan_lf, bg="black", padx=6, pady=4); scan_inner.pack(fill="both", expand=True)
