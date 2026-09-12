@@ -2475,14 +2475,20 @@ def render(parent):
 
         # --- VISION VERIFICATION (Contour Matching) ---
         vision_failed = []   # every enabled camera that did not come back OK
-        _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
-            
             vision_ctrl.reload_config()
 
-            if not vision_ctrl.has_model(state["pno"]):
+            if not vision_ctrl.config.get("vision_enabled", True):
+                # Off in Vision Settings means the cycle skips vision, not that
+                # every part fails it. inspect() reports a disabled engine as
+                # ERROR, and that ERROR used to land in vision_failed and NG the
+                # part before the electrical tests even ran -- so the switch
+                # read as "fail everything" instead of "skip".
+                _log("Vision disabled in settings — skipping vision verification.")
+            elif not vision_ctrl.has_model(state["pno"]):
                 _log(f"Vision WARNING: No vision model configured for part '{state['pno']}'. Skipping vision.")
             else:
+                _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
                 # Each enabled camera is inspected in turn against the part's
                 # one taught model, so the record can say which camera saw the
                 # part. The configured camera_source stays the "primary": it
@@ -2955,6 +2961,10 @@ def render(parent):
             _paint("Ready", "#4caf50"); return
 
         vision_ctrl.reload_config()
+        if not vision_ctrl.config.get("vision_enabled", True):
+            # Nothing to warn about while vision is switched off -- the cycle
+            # will not run it, taught model or not.
+            _paint("Ready", "#4caf50"); return
         if not vision_ctrl.has_model(pno):
             _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
             _paint("NO VISION MODEL", "#e8a000"); return
