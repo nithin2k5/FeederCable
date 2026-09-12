@@ -10,3 +10,6 @@ vision_captures/
 
 # Runtime scratch for the START/END marker labels (rendered from MARKER.prn)
 TEMPMARKER_*.prn
+
+# Runtime scratch for the lot (box) label (rendered from LOTPRN.prn)
+TEMPLOTPRN.prn

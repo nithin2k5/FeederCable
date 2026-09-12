@@ -1,0 +1,39 @@
+SIZE 35 mm, 25 mm
+GAP 3 mm, 0 mm
+DIRECTION 0,0
+REFERENCE 0,0
+OFFSET 0 mm
+SET PEEL OFF
+SET CUTTER OFF
+SET PARTIAL_CUTTER OFF
+SET TEAR ON
+CLS
+CODEPAGE 1252
+; Lot (box) label. Printed by _print_lot_label() in test_console.py when the
+; operator presses OK on the "Lot quantity reached" dialog, and sent to the
+; printer Windows knows as LOTPRINTER.
+;
+; Every @name@ below is substituted before the file is sent, so this layout
+; can be redrawn in the label designer without touching any Python. The full
+; set of placeholders, all optional -- anything left out is simply not
+; replaced, and anything with no value becomes an empty string:
+;
+;   @partNumber@   @modelName@   @alcCode@    @vendorCode@  @eoNumber@
+;   @lotNo@        @lotQty@      @lotCount@   @empCode@
+;   @machineID@    @machineID_NoAlphabet@
+;   @ddMMyy@       @dd/MM/yy@    @HH:mm:ss@
+;
+; @lotQty@ is the box size the operator typed; @lotCount@ is the running OK
+; count that reached it, so the second box of 50 reads QTY 50 / COUNT 100.
+;
+; Rotation 180 matches the part labels, which come off the roll the same way
+; up. Under 180 the x below is the reading-LEFT edge of the line, so the
+; shared x is what lines the block up down its left margin.
+TEXT 265,172,"3",180,1,1,"LOT LABEL"
+TEXT 265,140,"2",180,1,1,"P/NO  : @partNumber@"
+TEXT 265,116,"2",180,1,1,"MODEL : @modelName@"
+TEXT 265,92,"2",180,1,1,"QTY   : @lotQty@"
+TEXT 265,68,"2",180,1,1,"LOT   : @lotNo@"
+TEXT 265,44,"2",180,1,1,"DATE  : @dd/MM/yy@  @HH:mm:ss@"
+TEXT 265,20,"2",180,1,1,"MC ID : @machineID@"
+PRINT 1,1

@@ -6,6 +6,7 @@ Mirrors TestConsole.cs logic from the C# reference project.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkinter import font as tkfont
 import mysql.connector
 import threading
 import datetime
@@ -60,6 +61,10 @@ except ImportError:
 # Device Manager for the second.
 _PRINTER_NAME = "EOLPRINTER"
 _SCANNER_NAME = "POS HID Barcode scanner"
+# The lot (box) label goes to its own printer, on its own stock -- the part
+# labels on EOLPRINTER are 35x25mm and come out one per PASS, and a lot label
+# in that stream would be read as a part's label.
+_LOT_PRINTER_NAME = "LOTPRINTER"
 
 def _printer_online(name: str = _PRINTER_NAME) -> bool:
     """True when a printer by this name is installed and usable.
@@ -184,6 +189,7 @@ def _load_cfg() -> dict:
         "hp_baud":    cfg.getint("COM", "hp_baud",  fallback=0),
         "machine_id": cfg.get("COM", "machine_id", fallback="PB1"),
         "scan_enabled": cfg.getboolean("COM", "scan_enabled", fallback=True),
+        "lot_label_enabled": cfg.getboolean("COM", "lot_label_enabled", fallback=True),
     }
 def _save_cfg(d: dict):
     cfg = configparser.ConfigParser()
@@ -258,13 +264,19 @@ def _play_wav(filename: str):
         except Exception:
             pass
 
-def _print_raw(printer_name: str, filename: str):
+def _print_raw(printer_name: str, filename: str) -> bool:
+    """Send a .prn file to a printer verbatim. True when the spooler took it.
+
+    The return value is for callers that tell the operator what happened --
+    the lot label, which is printed once per box on an explicit click. The
+    per-part callers ignore it and rely on the console trace, as before.
+    """
     if not _print_ok:
         print("[PRINT DEBUG] win32print not available (pywin32 not installed) -- cannot print")
-        return
+        return False
     if not os.path.exists(filename):
         print(f"[PRINT DEBUG] label file not found: {filename}")
-        return
+        return False
     try:
         installed = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
         print(f"[PRINT DEBUG] installed printers: {installed}")
@@ -288,8 +300,10 @@ def _print_raw(printer_name: str, filename: str):
                 win32print.EndDocPrinter(hPrinter)
         finally:
             win32print.ClosePrinter(hPrinter)
+        return True
     except Exception as ex:
         print(f"[PRINT DEBUG] print FAILED: {ex}")
+        return False
 # ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
 # Memory Coils (M):      base 0x0800  (write via FC05/FC15)
 # Discrete Inputs (X):   base 0x0400  (read via FC02, octal numbering)
@@ -803,6 +817,59 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         _print_raw(printer_name, tmp)
     except Exception as ex:
         print(f"[PRINT DEBUG] failed building/sending marker label: {ex}")
+
+def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number: str,
+                     lot_no: str, qty: int, count: int, emp: str, machine_id: str,
+                     printer_name: str = _LOT_PRINTER_NAME) -> bool:
+    """Print the box label for a completed lot. True when it went to the spooler.
+
+    Fired from the lot dialog's OK button, never from the test cycle: the
+    label is for a box the operator is closing, and printing it the instant
+    the count ticked over put it on the roll while they were still holding the
+    part that tripped it.
+
+    LOTPRN.prn is a plain TSPL template with @placeholders@ in it, the same
+    arrangement the part labels use, so the layout can be redrawn in the label
+    designer without touching this file.
+    """
+    base = os.path.dirname(__file__)
+    prn_file = os.path.join(base, "LOTPRN.prn")
+    if not os.path.exists(prn_file):
+        print(f"[PRINT DEBUG] lot label template not found ({prn_file}) -- aborting print")
+        return False
+    now = datetime.datetime.now()
+    fields = {
+        "@partNumber@":  pno,
+        "@modelName@":   model,
+        "@alcCode@":     alc,
+        "@vendorCode@":  vendor_code,
+        "@eoNumber@":    eo_number,
+        "@lotNo@":       lot_no,
+        "@lotQty@":      str(qty),
+        "@lotCount@":    str(count),
+        "@empCode@":     emp,
+        "@machineID@":   machine_id,
+        "@machineID_NoAlphabet@": machine_id.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                                    "abcdefghijklmnopqrstuvwxyz"),
+        "@ddMMyy@":      now.strftime("%d%m%y"),
+        "@dd/MM/yy@":    now.strftime("%d/%m/%y"),
+        "@HH:mm:ss@":    now.strftime("%H:%M:%S"),
+    }
+    try:
+        with open(prn_file, "r", encoding="latin-1") as f:
+            text = f.read()
+        for key, val in fields.items():
+            text = text.replace(key, val or "")
+        # Its own scratch file: the part label owns TEMPPRN.prn and the marker
+        # labels own TEMPMARKER_*.prn, and all three go out on background
+        # threads that can overlap.
+        tmp = os.path.join(base, "TEMPLOTPRN.prn")
+        with open(tmp, "w", encoding="latin-1") as f:
+            f.write(text)
+        return _print_raw(printer_name, tmp)
+    except Exception as ex:
+        print(f"[PRINT DEBUG] failed building/sending lot label: {ex}")
+        return False
 
 # render() publishes a callback here so main.py can close out the loaded
 # part's run when the program exits; None when no Test Console page is live.
@@ -1436,7 +1503,18 @@ def render(parent):
     # is what the running mean cycle time used to occupy this row doing --
     # a number nobody acted on, next to the live CT that they do.
     _lbl(ci, "Lot Qty").grid(row=3, column=0, sticky="w", pady=5); ent_lot_qty = _ent(ci, w=5, editable=True); ent_lot_qty.grid(row=3, column=1, columnspan=3, sticky="ew", padx=5)
-    
+
+    # No login on this one, unlike Scan required: it decides whether a box
+    # gets its own label, not whether a part ships unverified, and the person
+    # who knows if this box needs one is the operator packing it.
+    lot_label_var = tk.BooleanVar(value=cfg.get("lot_label_enabled", True))
+    tk.Checkbutton(ci, text="Print lot label", variable=lot_label_var,
+                   bg="black", fg="#888", font=("Arial", 8), selectcolor="#1a1a1a",
+                   activebackground="black", activeforeground="white",
+                   highlightthickness=0, bd=0, cursor="hand2", anchor="w",
+                   command=lambda: _toggle_lot_label()).grid(
+        row=4, column=0, columnspan=4, sticky="w", pady=(2, 0))
+
     def _update_counts():
         t = state["total"]; o = state["ok"]; n = state["ng"]
         pct = f"{(n/t*100):.1f}%" if t > 0 else "0.0%"
@@ -1454,6 +1532,20 @@ def render(parent):
         number -- which is the off switch for the announcement below."""
         try: return int(ent_lot_qty.get().strip())
         except (AttributeError, TypeError, ValueError): return 0
+
+    def _toggle_lot_label():
+        """Turn the lot (box) label on or off. Deliberately not behind a login.
+
+        Persisted the same way the scan setting is, so the choice survives a
+        restart rather than quietly coming back on at the start of a shift.
+        """
+        want = lot_label_var.get()
+        cfg["lot_label_enabled"] = want
+        try:
+            _save_cfg_key("lot_label_enabled", want)
+        except Exception as ex:
+            _log(f"Could not save the lot label setting: {ex}")
+        _log(f"Lot label printing {'ENABLED' if want else 'DISABLED'}.")
 
     def _check_lot_target():
         """Announce each time the day's OK count reaches a multiple of the
@@ -1500,23 +1592,121 @@ def render(parent):
         tk.Label(body, text="Lot quantity reached!", bg="#111", fg="white",
                  font=("Arial", 20, "bold")).pack(pady=(8, 0))
 
-        def _close(_e=None):
+        # What the box label will carry, taken now: the dialog is modal, so
+        # nothing can move on underneath it, and reading it here keeps the
+        # print path off the live state entirely.
+        lot_info = dict(
+            pno=state["pno"], model=state["model"], alc=state["alc"],
+            vendor_code=state["vendor_code"], eo_number=state["eo_number"],
+            lot_no=state.get("lot_no") or "", qty=_lot_qty(), count=state["ok"],
+            emp=ent_emp.get().strip(), machine_id=cfg["machine_id"],
+        )
+
+        # The printer line is sized for its longest wording up front, inside a
+        # strut of that width. The dialog measures itself once, before the
+        # probe has answered, so a line that grew afterwards would be clipped
+        # by a window already sized for the "Checking..." it replaced.
+        _prn_font = tkfont.Font(family="Arial", size=9)
+        _prn_msgs = (
+            "Lot label printing is off",
+            f"Checking {_LOT_PRINTER_NAME}…",
+            f"{_LOT_PRINTER_NAME} ready — the lot label prints when you press OK",
+            f"{_LOT_PRINTER_NAME} not available — no lot label will print",
+        )
+        prn_strut = tk.Frame(body, bg="#111",
+                             width=max(_prn_font.measure(m) for m in _prn_msgs),
+                             height=_prn_font.metrics("linespace"))
+        prn_strut.pack(pady=(12, 0))
+        prn_strut.pack_propagate(False)
+        prn_lbl = tk.Label(prn_strut, text="", bg="#111", fg="#666", font=_prn_font)
+        prn_lbl.pack(fill="both", expand=True)
+
+        def _paint_printer(text, fg):
+            try:
+                if prn_lbl.winfo_exists(): prn_lbl.config(text=text, fg=fg)
+            except Exception: pass
+
+        # None until the probe answers, so an OK clicked before it lands asks
+        # again on the print thread instead of reading "not ready" off a check
+        # that had not finished.
+        printer = {"ready": None}
+
+        if not lot_label_var.get():
+            _paint_printer("Lot label printing is off", "#666")
+        else:
+            _paint_printer(f"Checking {_LOT_PRINTER_NAME}…", "#666")
+
+            def _probe():
+                ok = _printer_online(_LOT_PRINTER_NAME)
+                printer["ready"] = ok
+                _after(0, lambda o=ok: _paint_printer(
+                    f"{_LOT_PRINTER_NAME} ready — the lot label prints when you press OK"
+                    if o else
+                    f"{_LOT_PRINTER_NAME} not available — no lot label will print",
+                    "#76ff03" if o else "#ff9800"))
+            threading.Thread(target=_probe, daemon=True).start()
+
+        def _print_lot_now():
+            """Runs off the OK button, on its own thread: the availability
+            re-check and the spooler write both touch Windows, and the operator
+            should not be looking at a frozen dialog while they do."""
+            if not lot_label_var.get():
+                _log("Lot label not printed — lot label printing is switched off.")
+                return
+
+            def _work():
+                ready = printer["ready"]
+                if ready is None:
+                    ready = _printer_online(_LOT_PRINTER_NAME)
+                if not ready:
+                    _after(0, lambda: _log(f"Lot label NOT printed — "
+                                           f"'{_LOT_PRINTER_NAME}' is not available."))
+                    return
+                sent = _print_lot_label(**lot_info)
+                _after(0, lambda ok=sent: _log(
+                    f"Lot label sent to {_LOT_PRINTER_NAME} "
+                    f"(qty {lot_info['qty']}, part {lot_info['pno']})." if ok else
+                    "Lot label FAILED to print — check LOTPRN.prn and the printer."))
+            threading.Thread(target=_work, daemon=True).start()
+
+        # Tk's Button class binding already fires the command on <space>, and
+        # the dialog binds <space> too, so an acknowledgement by keyboard
+        # arrives twice. Harmless when all it did was close the window; not
+        # harmless now that it prints a label.
+        done = {"v": False}
+
+        def _close(_e=None, do_print=False):
+            if done["v"]: return
+            done["v"] = True
             try: dlg.grab_release()
             except Exception: pass
             dlg.destroy()
+            if do_print:
+                _print_lot_now()
+            elif lot_label_var.get():
+                # Dismissed rather than acknowledged. Said out loud, because a
+                # box that silently never got its label is found at the next
+                # station, not at this one.
+                _log("Lot dialog dismissed — lot label not printed.")
             # The grab took the keyboard off the scan entry that the PASS had
             # just focused, and a wedge scanner types wherever the focus is --
             # so hand it back, or the scan after a lot would land nowhere.
             if state.get("awaiting_scan"): _show_scan_entry()
 
+        def _ok(_e=None):
+            _close(do_print=True)
+
         btn = tk.Button(body, text="OK", bg="#1b5e20", fg="white",
                         font=("Arial", 13, "bold"), bd=0, padx=48, pady=9,
                         cursor="hand2", activebackground="#2e7d32",
-                        activeforeground="white", command=_close)
+                        activeforeground="white", command=_ok)
         btn.pack(pady=(22, 0))
+        # OK is what releases the label, so only the keys that mean OK print.
+        # Escape and the window X stay a way out that does not.
         dlg.protocol("WM_DELETE_WINDOW", _close)
-        for key in ("<Return>", "<KP_Enter>", "<space>", "<Escape>"):
-            dlg.bind(key, _close)
+        for key in ("<Return>", "<KP_Enter>", "<space>"):
+            dlg.bind(key, _ok)
+        dlg.bind("<Escape>", _close)
 
         # Centred on the app window, not the screen -- the same thing on one
         # maximised monitor and very much not on two. Measured twice because
