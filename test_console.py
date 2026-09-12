@@ -713,7 +713,28 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         print(f"DB Error generating lot: {ex}")
     return f"{prefix}{highest + 1:04d}"
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, printer_name: str = _PRINTER_NAME):
+def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
+    """One channel's measured value per slot, in channel order, comma separated.
+
+    Formatted the way the Testing grid showed it -- IR to the whole MO, ACW to
+    two decimals -- so the number on the label is the number the operator
+    watched go past rather than a second rounding of it.
+
+    A channel with no reading leaves its slot empty instead of being dropped:
+    the nth value between the commas has to stay CH n, or a label with a gap in
+    it reads as a different channel's result.
+    """
+    out = []
+    for ch in range(1, n_ch + 1):
+        value = (ch_res or {}).get(ch, {}).get("value")
+        try:
+            out.append(format(float(value), fmt))
+        except (TypeError, ValueError):
+            out.append("")
+    return ",".join(out)
+
+
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
     base = os.path.dirname(__file__)
     lbl_sel = ""
     try:
@@ -743,6 +764,12 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
         text = text.replace("@alcCode@", alc).replace("@partNumber@", pno).replace("@modelName@", model).replace("@vendorCode@", vendor_code).replace("@eoNumber@", eo_number).replace("@lotNo@", lot_no).replace("@traceabilityCode@", lot_no)
         text = text.replace("@ddMMyy@", now.strftime("%d%m%y")).replace("@HH:mm:ss@", now.strftime("%H:%M:%S")).replace("@machineID_NoAlphabet@", machine_id.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
+        # The measured readings, CH1 first: "1204,1198,1210" for a 3-channel
+        # part. A template that wants them per channel can still have them --
+        # splitting one field on the comma is the label designer's job, and it
+        # beats a placeholder per channel on a part whose channel count varies.
+        text = text.replace("@irValues@", _fmt_channel_values(ir_ch, num_channels, ".0f"))
+        text = text.replace("@acwValues@", _fmt_channel_values(acw_ch, num_channels, ".2f"))
         tmp = os.path.join(base, "TEMPPRN.prn")
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
@@ -2787,7 +2814,13 @@ def render(parent):
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
             _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
-            threading.Thread(target=_print_barcode_label, args=(pno, state["alc"], state["model"], state["vendor_code"], state["eo_number"], lot_no, cfg["machine_id"], state.get("is_rework", False)), daemon=True).start()
+            threading.Thread(target=_print_barcode_label,
+                             args=(pno, state["alc"], state["model"], state["vendor_code"],
+                                   state["eo_number"], lot_no, cfg["machine_id"],
+                                   state.get("is_rework", False)),
+                             kwargs={"num_channels": state["num_channels"],
+                                     "ir_ch": ir_ch, "acw_ch": acw_ch},
+                             daemon=True).start()
             if cfg.get("scan_enabled", True):
                 state["awaiting_scan"] = True
                 # Focus immediately, not after a delay: printers eject a label

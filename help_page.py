@@ -198,15 +198,22 @@ CHAPTERS = [
         ["@eoNumber@", "The EO number"],
         ["@lotNo@", "The lot number of this test"],
         ["@traceabilityCode@", "The lot number again, under the name some templates use for it"],
+        ["@irValues@", "The measured insulation resistance of every channel, CH1 first, comma separated — 1204,1198,1211 for a three-channel part"],
+        ["@acwValues@", "The measured withstand current of every channel the same way, to two decimals — 0.12,0.50,1.00"],
         ["@machineID_NoAlphabet@", "The machine ID with its leading letters removed — PB1 becomes 1"],
         ["@ddMMyy@", "The date the label was printed, six digits"],
         ["@HH:mm:ss@", "The time the label was printed"],
     ]),
+    ("note", "@irValues@ and @acwValues@ hold every channel in one field, "
+             "because the number of channels changes from part to part. The "
+             "values are in channel order and a channel with no reading leaves "
+             "its slot empty, so the third value is CH3 whatever else happened."),
 
     ("h", "Lot label placeholders"),
-    ("p", "LOTPRN.prn takes all of the above except @traceabilityCode@, and adds "
-          "the five below. The file lists the whole set in its own comments as "
-          "well, next to the layout."),
+    ("p", "LOTPRN.prn takes all of the above except @traceabilityCode@, "
+          "@irValues@ and @acwValues@ — which belong to one cable, not a box — "
+          "and adds the five below. The file lists the whole set in its own "
+          "comments as well, next to the layout."),
     ("tbl", ["Placeholder", "Replaced with"], [
         ["@lotQty@", "The Lot Qty typed on the Test Console — how many good parts make one box"],
         ["@lotCount@", "The running OK count that reached it, so the second box of 50 reads QTY 50 and COUNT 100"],
