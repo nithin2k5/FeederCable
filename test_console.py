@@ -1857,7 +1857,7 @@ def render(parent):
     # height of this column goes to the records table.
     tree_lot.pack(fill="both", expand=True)
 
-    bottom = tk.Frame(content, bg="black", height=110)
+    bottom = tk.Frame(content, bg="black", height=128)
     bottom.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(4, 0))
     bottom.grid_propagate(False)
     bottom.columnconfigure(0, weight=0)                # I/O: only as wide as its indicator grid
@@ -1873,29 +1873,64 @@ def render(parent):
     # exactly wide enough for its "M29"/"X20" text.
     _IO_CELL_W, _IO_LBL_W, _IO_GAP = 3, 9, 6
 
-    # ── ROW 0: channel-number header, aligned with the M/X columns below ──
+    # Off = flat near-black, blending into the panel like an unlit bulb.
+    # On = a solid, vivid fill with dark text -- meant to visibly pop, not
+    # just shift to a slightly different shade of dark. Relays (M coils) and
+    # acks (X inputs) keep their own fill colors in both states -- green-family
+    # for relays, amber-family for acks -- so the two stay visually separate
+    # categories even when both are off, not just two shades of "off".
+    #
+    # The text is white in both states. It used to darken with the fill, which
+    # meant an unlit cell hid which coil it was: the panel only told you what
+    # you were looking at once it lit up, and reading M32 off a dark cell is
+    # exactly what you want to do when it is NOT firing. State is carried by
+    # the fill, which is what the eye picks up across the room anyway.
+    _IO_OFF_BG,     _IO_OFF_FG     = "#0d0d0d", "#ffffff"    # relays, off
+    _IO_ON_BG,      _IO_ON_FG      = "#00e676", "#003d14"    # relays, on (vivid green)
+    _IO_ACK_OFF_BG, _IO_ACK_OFF_FG = "#141008", "#ffffff"    # acks, off (dark amber tint)
+    _IO_ACK_ON_BG,  _IO_ACK_ON_FG  = "#ffea00", "#3d3300"    # acks, on (vivid amber)
+
+    # ── ROW 0: what each bank of eight is ──
+    # The cells say M32 and X22; without this they do not say which of the
+    # two banks of eight they belong to, so the panel had to be read against
+    # the PLC map to know whether a lit cell was a contact relay or an HV one.
+    # Placed from the cells' own measured positions rather than packed to a
+    # width in characters: Tk measures `width` in characters of the widget's
+    # own font, and this row's font is not the cells' font, so any character
+    # count that lines up is a coincidence waiting for a font change to break.
+    # _align_bank_captions() below does it off the real geometry, once.
+    grp_row = tk.Frame(io_inner, bg="black", height=15); grp_row.pack(fill="x")
+    grp_row.pack_propagate(False)
+    _CAP = {"bg": "black", "fg": "#9a9a9a", "font": ("Arial", 7, "bold")}
+    cap_contact = tk.Label(grp_row, text="CONTACT", **_CAP)
+    cap_hv = tk.Label(grp_row, text="IR / ACW", **_CAP)
+
+    # ── ROW 1: channel-number header, aligned with the M/X columns below ──
     # so a lit cell reads as "channel N", not "go look up what M32 means".
+    # Bright enough to actually be read: at #555 on black these were the one
+    # thing on the panel that answered "which channel is that?", and they were
+    # the dimmest thing on it.
     hdr_row = tk.Frame(io_inner, bg="black"); hdr_row.pack(anchor="w")
-    tk.Label(hdr_row, text="CH #:", bg="black", fg="#555", font=("Arial", 7), width=_IO_LBL_W, anchor="w").pack(side="left")
+    tk.Label(hdr_row, text="CH #:", bg="black", fg="#cfcfcf", font=("Arial", 7, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
     tk.Label(hdr_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=(0, _IO_GAP))  # spacer over Safety/ACK cell
-    for ch in range(1, 9):
-        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=_IO_CELL_W).pack(side="left", padx=1)
-    tk.Frame(hdr_row, bg="black", width=_IO_GAP).pack(side="left")
-    for ch in range(1, 9):
-        tk.Label(hdr_row, text=str(ch), bg="black", fg="#555", font=("Arial", 7), width=_IO_CELL_W).pack(side="left", padx=1)
+    for bank in range(2):
+        for ch in range(1, 9):
+            tk.Label(hdr_row, text=str(ch), bg="black", fg="#cfcfcf", font=("Arial", 7, "bold"), width=_IO_CELL_W).pack(side="left", padx=1)
+        if bank == 0:
+            tk.Frame(hdr_row, bg="black", width=_IO_GAP).pack(side="left")
 
     # ── ROW 1: PLC Outputs (M Coils) ──
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 5))
     tk.Label(out_row, text="OUT (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
 
     # Safety Relay
-    safety_lbl = tk.Label(out_row, text="M28", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    safety_lbl = tk.Label(out_row, text="M28", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     safety_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # Contact Relays
     io_contact_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{29+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(out_row, text=f"M{29+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_contact_labels.append(lbl)
 
@@ -1904,7 +1939,7 @@ def render(parent):
     # HV Relays
     io_ir_acw_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{19+i}", bg="#0d0d0d", fg="#3a3a3a", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(out_row, text=f"M{19+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_ir_acw_labels.append(lbl)
 
@@ -1913,7 +1948,7 @@ def render(parent):
     tk.Label(in_row, text="IN (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
 
     # Safety ACK
-    x4_lbl = tk.Label(in_row, text="X4", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x4_lbl = tk.Label(in_row, text="X4", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x4_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # The machine-wide inputs, in X order. None of these is per-channel --
@@ -1927,41 +1962,50 @@ def render(parent):
     #   X3  rework select -- drives the REWORK badge and which barcode
     #       template gets printed, so it belongs on the panel with the rest of
     #       the inputs rather than only behind a blinking label
-    x0_lbl = tk.Label(in_row, text="X0", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x0_lbl = tk.Label(in_row, text="X0", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x0_lbl.pack(side="left", padx=1)
 
-    x1_lbl = tk.Label(in_row, text="X1", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x1_lbl = tk.Label(in_row, text="X1", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x1_lbl.pack(side="left", padx=1)
 
-    x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x2_lbl = tk.Label(in_row, text="X2", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
 
-    x3_lbl = tk.Label(in_row, text="X3", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x3_lbl = tk.Label(in_row, text="X3", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x3_lbl.pack(side="left", padx=1)
 
-    # Empty space to pad under M34-M37
-    for i in range(5, 9):
-        tk.Label(in_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=1)
+    # X4 and X0-X3 are machine-wide signals that happen to sit under channel
+    # columns 1-4, which reads as "X0 is channel 1" and is the one place the
+    # CH # header lies. The dead cells under M34-M37 are the natural place to
+    # say so, and cost nothing: they were empty padding.
+    tk.Label(in_row, text="← not per-channel", bg="black", fg="#888",
+             font=("Arial", 6), anchor="w",
+             width=_IO_CELL_W * 4 + 4).pack(side="left", padx=1)
 
     tk.Frame(in_row, bg="black", width=_IO_GAP).pack(side="left")
 
     # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"X{19+i}", bg="#141008", fg="#4a3f26", font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
-    
-    # Off = flat near-black, blending into the panel like an unlit bulb.
-    # On = a solid, vivid fill with dark text -- meant to visibly pop, not
-    # just shift to a slightly different shade of dark. Relays (M coils) and
-    # acks (X inputs) keep their own colors in both states -- green-family
-    # for relays, amber-family for acks -- so the two stay visually separate
-    # categories even when both are off, not just two shades of "off".
-    _IO_OFF_BG,     _IO_OFF_FG     = "#0d0d0d", "#3a3a3a"    # relays, off
-    _IO_ON_BG,      _IO_ON_FG      = "#00e676", "#003d14"    # relays, on (vivid green)
-    _IO_ACK_OFF_BG, _IO_ACK_OFF_FG = "#141008", "#4a3f26"    # acks, off (dark amber tint)
-    _IO_ACK_ON_BG,  _IO_ACK_ON_FG  = "#ffea00", "#3d3300"    # acks, on (vivid amber)
+
+    def _align_bank_captions():
+        """Sit each bank caption exactly over the eight cells it names.
+
+        grp_row and out_row are both packed to the full width of io_inner, so
+        a cell's x inside out_row is the same x inside grp_row.
+        """
+        try:
+            io_inner.update_idletasks()
+            for cap, cells in ((cap_contact, io_contact_labels),
+                               (cap_hv, io_ir_acw_labels)):
+                x0 = cells[0].winfo_x()
+                cap.place(x=x0, y=0, relheight=1.0,
+                          width=cells[-1].winfo_x() + cells[-1].winfo_width() - x0)
+        except Exception: pass
+    io_inner.after(0, _align_bank_captions)
 
     def _set_io(io_list, ch_idx, active):
         is_ack = io_list is io_in_labels
