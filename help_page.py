@@ -253,12 +253,12 @@ CHAPTERS = [
           "Settings page."),
 ]),
 
-("Test Data", [
+("Report", [
     ("p", "Every cycle is written to the database as it finishes: the part, lot "
           "number, date and time, employee, overall verdict, per-camera vision "
           "results, and the per-channel readings for each test."),
     ("p", "Today's PASS Records on the Test Console shows the current part's runs "
-          "for today. The Test Data page is the full history, for any part and "
+          "for today. The Report page is the full history, for any part and "
           "any date."),
 ]),
 

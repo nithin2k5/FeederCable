@@ -4,7 +4,7 @@ import auth
 import db
 
 # Enough to cover a long shift without turning the panel into a data dump --
-# Test Data is the place to go digging further back.
+# Report is the place to go digging further back.
 _HISTORY_LIMIT = 200
 
 def _get_conn():

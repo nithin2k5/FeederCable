@@ -133,7 +133,7 @@ class App:
             ("👤", "Admin", "admin"),
             ("⚙", "Settings", "model_settings"),
             ("👁", "Vision Settings", "vision_settings"),
-            ("📋", "Test Data", "data_console"),
+            ("📋", "Report", "data_console"),
             ("🔧", "COM Setting", "comport_settings"),
             ("❓", "Help", "help"),
             ("📞", "Contact", "contact"),
