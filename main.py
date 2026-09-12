@@ -191,11 +191,22 @@ class App:
             except Exception:
                 pass
 
+    # Pages nobody reaches without a login. Vision Settings is in here
+    # because teaching, re-teaching or deleting a model changes what the line
+    # accepts as a good part, the same way the electrical limits behind Model
+    # Settings do -- and every attempt lands in loginhistory under the page
+    # name, so a re-taught model can be traced back to whoever opened the page.
+    _LOGIN_PAGES = {
+        "admin": "Admin Login",
+        "model_settings": "Settings Login",
+        "vision_settings": "Vision Login",
+    }
+
     def load_page(self, page_name):
         # Authentication check
-        if page_name in ["admin", "model_settings"]:
-            title_str = "Admin Login" if page_name == "admin" else "Settings Login"
-            if not auth.show_login(self.root, title=title_str, page=page_name):
+        if page_name in self._LOGIN_PAGES:
+            if not auth.show_login(self.root, title=self._LOGIN_PAGES[page_name],
+                                   page=page_name):
                 return
 
         self._set_active_nav(page_name)
