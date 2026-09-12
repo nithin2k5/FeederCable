@@ -1683,18 +1683,31 @@ def render(parent):
     x4_lbl = tk.Label(in_row, text="X4", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x4_lbl.pack(side="left", padx=(0, _IO_GAP))
 
-    # Contact OK (aligns under M30)
+    # The machine-wide inputs, in X order. None of these is per-channel --
+    # unlike X20-X27 further along, they sit above the contact coils only
+    # because that is where the row has room, so they are ordered to read as a
+    # panel rather than to pair with whichever M coil is above each one.
+    #
+    #   X0  physical START button -- the idle poll reads it to launch a test
+    #   X1  physical NG Reset button
+    #   X2  contact OK (one global signal, not per-channel)
+    #   X3  rework select -- drives the REWORK badge and which barcode
+    #       template gets printed, so it belongs on the panel with the rest of
+    #       the inputs rather than only behind a blinking label
+    x0_lbl = tk.Label(in_row, text="X0", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x0_lbl.pack(side="left", padx=1)
+
+    x1_lbl = tk.Label(in_row, text="X1", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x1_lbl.pack(side="left", padx=1)
+
     x2_lbl = tk.Label(in_row, text="X2", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
 
-    # Rework select (aligns under M31). It drives the REWORK badge and which
-    # barcode template gets printed, so it belongs on the panel with the rest
-    # of the inputs rather than only behind a blinking label.
     x3_lbl = tk.Label(in_row, text="X3", bg="#141008", fg="#4a3f26", font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x3_lbl.pack(side="left", padx=1)
 
-    # Empty space to pad under M32-M37
-    for i in range(3, 9):
+    # Empty space to pad under M34-M37
+    for i in range(5, 9):
         tk.Label(in_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=1)
 
     tk.Frame(in_row, bg="black", width=_IO_GAP).pack(side="left")
@@ -1729,6 +1742,16 @@ def render(parent):
     def _set_safety_indicator(active):
         try:
             if safety_lbl.winfo_exists(): safety_lbl.config(bg=_IO_ON_BG if active else _IO_OFF_BG, fg=_IO_ON_FG if active else _IO_OFF_FG)
+        except Exception: pass
+
+    def _set_x0_indicator(active):
+        try:
+            if x0_lbl.winfo_exists(): x0_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
+        except Exception: pass
+
+    def _set_x1_indicator(active):
+        try:
+            if x1_lbl.winfo_exists(): x1_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
     def _set_x2_indicator(active):
@@ -1788,7 +1811,9 @@ def render(parent):
         X2 and X4 are cleared with them -- both are test-time feedback and go
         low once the coils drop. X3 is deliberately left alone: it reports the
         position of the operator's rework selector, not anything the test
-        drives, so blanking it would claim the switch had moved.
+        drives, so blanking it would claim the switch had moved. X0/X1 are not
+        here either -- _input_poll_stop already blanks the two button cells the
+        moment it stops reading them, which is before the test starts.
         """
         for i in range(8):
             _after(0, lambda idx=i: (_set_io(io_contact_labels, idx, False),
@@ -2602,13 +2627,19 @@ def render(parent):
         if state["test_running"] or not state["pno"]: _after(500, _input_poll_once); return
         def _poll():
             pressed = _update_io_display()
-            if pressed: _log("START button pressed (PLC X1)"); _after(0, _trigger_test)
+            if pressed: _log("START button pressed (PLC X0)"); _after(0, _trigger_test)
             else: _after(500, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
     def _input_poll_start():
         if not _modbus_ok or state.get("input_polling"): return
         state["input_polling"] = True; _input_poll_once()
-    def _input_poll_stop(): state["input_polling"] = False
+    def _input_poll_stop():
+        """Stop reading the inputs -- and blank the two button cells, because
+        X0/X1 are momentary: the poll tick that sees START pressed is the one
+        that stops itself to run the test, so leaving the cell as-read would
+        show the button held down for the whole cycle."""
+        state["input_polling"] = False
+        _after(0, lambda: (_set_x0_indicator(False), _set_x1_indicator(False)))
     def _update_io_display() -> bool:
         """Refresh IO indicators from PLC (reads X0~X7 and X20~X27 inputs and
         actual channel coils) in a single open/close cycle, and report whether
@@ -2638,12 +2669,16 @@ def render(parent):
             m28_state = plc.read_coil(0x081C)
             _after(0, lambda a=m28_state: _set_safety_indicator(a))
             
-            # Sync X0-X7 to get X0 (START), X2 (Contact OK), X3 (Rework select) and X4 (Safety ACK)
+            # Sync X0-X7 to get X0 (START), X1 (NG Reset), X2 (Contact OK),
+            # X3 (Rework select) and X4 (Safety ACK)
             x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
             pressed = x0_7_bits[0] if x0_7_bits else False
+            x1_state = x0_7_bits[1] if x0_7_bits and len(x0_7_bits) > 1 else False
             x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
             x3_state = x0_7_bits[3] if x0_7_bits and len(x0_7_bits) > 3 else False
             x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
+            _after(0, lambda a=pressed: _set_x0_indicator(a))
+            _after(0, lambda a=x1_state: _set_x1_indicator(a))
             _after(0, lambda a=x2_state: _set_x2_indicator(a))
             _after(0, lambda a=x3_state: _set_rework_active(a))
             _after(0, lambda a=x4_state: _set_x4_indicator(a))
