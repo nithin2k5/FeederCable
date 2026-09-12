@@ -334,6 +334,14 @@ _PLC_CH_INPUTS = {
     8: 0x0417,  # X27
 }
 
+# X0-X27 and M20-M37 are each one unbroken run of addresses. That is what lets
+# the polling loop read every input the panel shows in a single transaction and
+# every coil in a second one, instead of five reads for the same picture.
+_PLC_X_BASE  = 0x0400   # X0  — X0-X7, then the unused X10-X17, then X20-X27
+_PLC_X_COUNT = 24
+_PLC_M_BASE  = 0x0814   # M20 — M20-M27, M28, the unused M29, then M30-M37
+_PLC_M_COUNT = 18
+
 _PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
 _PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M28)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
@@ -428,10 +436,17 @@ class DeltaPLC:
             self.close()
             return False
 
-    def read_inputs_bulk(self, address: int, count: int) -> list:
-        """Read multiple consecutive discrete inputs (FC02)."""
+    def read_inputs_bulk(self, address: int, count: int, strict: bool = False) -> list:
+        """Read multiple consecutive discrete inputs (FC02).
+
+        strict=True returns None instead of all-False when the read fails, so a
+        caller can tell a refused read from a genuine "every input is low" --
+        they are the same list otherwise, and a panel that blanks itself on a
+        dropped frame looks exactly like a machine with nothing energised.
+        """
+        fail = None if strict else [False] * count
         if not self.is_open:
-            return [False] * count
+            return fail
         try:
             result = self._client.read_discrete_inputs(address, count=count, device_id=self._slave_id)
             if result.isError():
@@ -439,12 +454,12 @@ class DeltaPLC:
                 offset = address - 0x0400 if address >= 0x0400 else address
                 result = self._client.read_discrete_inputs(0, offset + count, device_id=self._slave_id)
                 if result.isError():
-                    return [False] * count
+                    return fail
                 return list(result.bits[offset:offset + count])
             return list(result.bits[:count])
         except Exception:
             self.close()
-            return [False] * count
+            return fail
 
     def read_coil(self, address: int) -> bool:
         """Read a single coil (FC01)."""
@@ -459,18 +474,19 @@ class DeltaPLC:
             self.close()
             return False
 
-    def read_coils_bulk(self, address: int, count: int) -> list:
-        """Read multiple consecutive coils (FC01)."""
+    def read_coils_bulk(self, address: int, count: int, strict: bool = False) -> list:
+        """Read multiple consecutive coils (FC01). strict=True as above."""
+        fail = None if strict else [False] * count
         if not self.is_open:
-            return [False] * count
+            return fail
         try:
             result = self._client.read_coils(address, count=count, device_id=self._slave_id)
             if result.isError():
-                return [False] * count
+                return fail
             return list(result.bits[:count])
         except Exception:
             self.close()
-            return [False] * count
+            return fail
 
     # ── Channel relay control ────────────────────────────────────────────
 
@@ -2622,68 +2638,117 @@ def render(parent):
         _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
+    # Gap between poll ticks. A tick is two transactions on an already-open
+    # port -- roughly 80ms of wire time -- so this is what sets how far behind
+    # a pin the panel runs, and 150ms reads as live to the eye.
+    _IO_POLL_MS = 150
+
     def _input_poll_once():
         if not state.get("input_polling"): return
         if state["test_running"] or not state["pno"]: _after(500, _input_poll_once); return
         def _poll():
             pressed = _update_io_display()
             if pressed: _log("START button pressed (PLC X0)"); _after(0, _trigger_test)
-            else: _after(500, _input_poll_once)
+            else: _after(_IO_POLL_MS, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
     def _input_poll_start():
         if not _modbus_ok or state.get("input_polling"): return
         state["input_polling"] = True; _input_poll_once()
     def _input_poll_stop():
-        """Stop reading the inputs -- and blank the two button cells, because
+        """Stop reading the inputs, blank the two button cells and hand the
+        port back.
+
         X0/X1 are momentary: the poll tick that sees START pressed is the one
         that stops itself to run the test, so leaving the cell as-read would
-        show the button held down for the whole cycle."""
+        show the button held down for the whole cycle.
+
+        Closing here is what releases the port, since the loop now holds it
+        open between ticks -- the test sequence and the other pages open it
+        for themselves straight after this returns.
+        """
         state["input_polling"] = False
         _after(0, lambda: (_set_x0_indicator(False), _set_x1_indicator(False)))
-    def _update_io_display() -> bool:
-        """Refresh IO indicators from PLC (reads X0~X7 and X20~X27 inputs and
-        actual channel coils) in a single open/close cycle, and report whether
-        the physical START button (X0) is pressed.
+        try: plc.close()
+        except Exception: pass
 
-        This used to be two separate open/close cycles per poll tick (one just
-        to check X0, another for everything else) — reopening the port only
-        ~15ms after closing it was flaky on this USB-serial adapter and was
-        the main source of intermittent "could not open Modbus RTU port"
-        errors, including fighting a manual test from COM Port Settings.
+    def _poll_plc_open() -> bool:
+        """Open the port for the polling loop and leave it open between ticks.
+
+        Every tick used to be bracketed by a USB-serial open and close. That is
+        the same reopen-shortly-after-close pattern this adapter was already
+        known to drop transactions on, and it cost more time than the reads it
+        wrapped. Holding the handle removes both problems; _input_poll_stop
+        gives the port up whenever anything else needs it.
         """
-        if not _plc_open(): return False
+        # A tick already in flight can reach here just after _input_poll_stop
+        # closed the port for the test sequence. Without this guard it would
+        # reopen the handle underneath the test about to claim it.
+        if not _modbus_ok or not state.get("input_polling"): return False
+        if plc.is_open: return True
+        ok = plc.open()
+        # Logged on change only. At this poll rate an unplugged PLC would
+        # otherwise write several identical lines a second into the log.
+        if state.get("poll_port_ok") != ok:
+            state["poll_port_ok"] = ok
+            _after(0, lambda o=ok: set_com_status("IO Ctrl", o))
+            if not ok: _after(0, lambda: _log("PLC: could not open Modbus port"))
+        return ok
+    def _update_io_display() -> bool:
+        """Refresh every I/O indicator from the PLC and report whether the
+        physical START button (X0) is pressed.
+
+        Two transactions, inputs first, on a port the loop keeps open.
+
+        X0-X27 are one unbroken run of discrete inputs and M20-M37 one
+        unbroken run of coils, so a single FC02 of 24 bits carries the START
+        button, X1-X4 and all eight channel acks, and a single FC01 of 18 bits
+        carries the HV relays, the safety relay and the contact relays. That
+        replaces five transactions wrapped in an open/close: at 9600 baud with
+        ASCII framing each transaction is ~35ms on the wire and the port
+        open/close cost as much again, so X2 -- read last of the five -- was
+        already a quarter-second stale before the poll gap was added to it.
+
+        The X indicators are painted before the coil read rather than after it,
+        so the pins an operator actually watches are as fresh as the link
+        allows.
+        """
+        if not _poll_plc_open(): return False
         pressed = False
         try:
-            # Sync inputs (X20-X27)
-            bits = plc.read_inputs_bulk(0x0410, 8)
-            for i in range(8): _after(0, lambda idx=i, a=bits[i]: _set_io(io_in_labels, idx, a))
-            # Sync actual outputs (M20-M27 and M30-M37)
-            ir_acw_bits = plc.read_coils_bulk(0x0814, 8)
-            contact_bits = plc.read_coils_bulk(0x081E, 8)
-            for ch in range(1, 9):
-                o_ir = ir_acw_bits[ch-1] if ir_acw_bits and len(ir_acw_bits) >= ch else False
-                o_cont = contact_bits[ch-1] if contact_bits and len(contact_bits) >= ch else False
-                _after(0, lambda idx=ch-1, o_ir=o_ir, o_cont=o_cont: (_set_io(io_ir_acw_labels, idx, o_ir), _set_io(io_contact_labels, idx, o_cont)))
-                
-            # Sync safety relay (M28)
-            m28_state = plc.read_coil(0x081C)
-            _after(0, lambda a=m28_state: _set_safety_indicator(a))
-            
-            # Sync X0-X7 to get X0 (START), X1 (NG Reset), X2 (Contact OK),
-            # X3 (Rework select) and X4 (Safety ACK)
-            x0_7_bits = plc.read_inputs_bulk(0x0400, 8)
-            pressed = x0_7_bits[0] if x0_7_bits else False
-            x1_state = x0_7_bits[1] if x0_7_bits and len(x0_7_bits) > 1 else False
-            x2_state = x0_7_bits[2] if x0_7_bits and len(x0_7_bits) > 2 else False
-            x3_state = x0_7_bits[3] if x0_7_bits and len(x0_7_bits) > 3 else False
-            x4_state = x0_7_bits[4] if x0_7_bits and len(x0_7_bits) > 4 else False
-            _after(0, lambda a=pressed: _set_x0_indicator(a))
-            _after(0, lambda a=x1_state: _set_x1_indicator(a))
-            _after(0, lambda a=x2_state: _set_x2_indicator(a))
-            _after(0, lambda a=x3_state: _set_rework_active(a))
-            _after(0, lambda a=x4_state: _set_x4_indicator(a))
+            x = plc.read_inputs_bulk(_PLC_X_BASE, _PLC_X_COUNT, strict=True)
+            if x is None:
+                # The PLC would not serve the wide read. Fall back to the two
+                # narrow ones for this tick rather than blanking the panel --
+                # X10-X17 are not wired to anything, so the gap is padding.
+                x = (list(plc.read_inputs_bulk(_PLC_X_BASE, 8)) + [False] * 8 +
+                     list(plc.read_inputs_bulk(_PLC_ACK_BASE, 8)))
+            pressed = x[0]
+            x1, x2, x3, x4 = x[1], x[2], x[3], x[4]
+            acks = x[16:24]
+
+            def _paint_inputs(p=pressed, a1=x1, a2=x2, a3=x3, a4=x4, ak=acks):
+                _set_x0_indicator(p); _set_x1_indicator(a1); _set_x2_indicator(a2)
+                _set_rework_active(a3); _set_x4_indicator(a4)
+                for i, bit in enumerate(ak): _set_io(io_in_labels, i, bit)
+            _after(0, _paint_inputs)
+
+            # A test or a page change can land between the two reads. The coils
+            # only mirror what this program just commanded, so give the port up
+            # now rather than holding it for a picture nobody is waiting on.
+            if not state.get("input_polling"): return pressed
+
+            m = plc.read_coils_bulk(_PLC_M_BASE, _PLC_M_COUNT, strict=True)
+            if m is None:
+                m = (list(plc.read_coils_bulk(_PLC_M_BASE, 8)) + [False] * 2 +
+                     list(plc.read_coils_bulk(_PLC_CONTACT_COILS[1], 8)))
+
+            def _paint_coils(bits=m):
+                _set_safety_indicator(bits[8])                     # M28
+                for i in range(8):
+                    _set_io(io_ir_acw_labels, i, bits[i])          # M20-M27
+                    _set_io(io_contact_labels, i, bits[10 + i])    # M30-M37
+            _after(0, _paint_coils)
         except Exception: pass
-        finally: plc.close()
         return pressed
 
     def _trigger_test():
