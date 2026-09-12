@@ -2132,6 +2132,7 @@ def render(parent):
             # Note: X20-X27 are hardware-linked to IR/ACW relays only, so we do not check them here.
             x2_passed = plc.is_contact_ok()
             _log(f"X2 (Contact OK): {'OK (High)' if x2_passed else 'NG (Low)'}")
+            _after(0, lambda a=x2_passed: _set_x2_indicator(a))
             passed = x2_passed
             
             contact_res[ch] = {"result": "PASS" if passed else "FAIL"}
@@ -2186,6 +2187,7 @@ def render(parent):
             ack = plc.read_channel_ack(ch)
             x2 = plc.is_contact_ok()
             _after(0, lambda i=idx, a=ack: _set_io(io_in_labels, i, a))
+            _after(0, lambda a=x2: _set_x2_indicator(a))
             plc.set_channel(ch, False)
             _after(0, lambda i=idx: _set_io(io_contact_labels, i, False))
             return x2
