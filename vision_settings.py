@@ -14,6 +14,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+import auth
+
 try:
     import cv2
     _cv2_ok = True
@@ -881,12 +883,45 @@ def render(parent):
         value=float(v_cfg.get("match_threshold", DEFAULT_MATCH_THRESHOLD)))
     initial = (enabled_var.get(), round(thresh_var.get(), 2))
 
+    def _toggle_vision_enabled():
+        """Switching vision off takes the cameras out of the verdict for every
+        part on the line, so it is asked for with a login and recorded in the
+        login history like the other gated settings.
+
+        The Checkbutton has already flipped the variable by the time this runs,
+        so a refused login has to put it back -- otherwise the box would show a
+        state nobody authorised, and Save would write it.
+        """
+        nonlocal initial
+        want = enabled_var.get()
+        if not auth.show_login(parent.winfo_toplevel(),
+                               title="Vision Check Setting", page="vision_enable_toggle"):
+            enabled_var.set(not want)
+            return
+        # Applied on the spot rather than left for Save: the operator has just
+        # authenticated for this one change, and leaving it pending invites it
+        # being abandoned unsaved, or carried in later with an unrelated edit
+        # that nobody authenticated for.
+        v_cfg["vision_enabled"] = want
+        save_vision_config(v_cfg)
+        ctrl.reload_config()
+        initial = (want, initial[1])
+        _set_btn_enabled(btn_save, round(thresh_var.get(), 2) != initial[1])
+        dirty_lbl.config(text="Vision check " + ("ENABLED" if want else "DISABLED"),
+                         fg=OK_GREEN if want else WARN)
+        # Hand the strip back to the threshold's dirty state once the
+        # confirmation has been read, instead of blanking it over an edit that
+        # really is still unsaved.
+        parent.after(2400, lambda: _on_settings_change() if alive["page"] else None)
+
     chk = tk.Checkbutton(ib, text="  Vision enabled", variable=enabled_var,
                          bg=PANEL, fg=TXT, selectcolor=FIELD, activebackground=PANEL,
                          activeforeground=TXT, font=("Arial", 12, "bold"),
-                         bd=0, highlightthickness=0, anchor="w", cursor="hand2")
+                         bd=0, highlightthickness=0, anchor="w", cursor="hand2",
+                         command=_toggle_vision_enabled)
     chk.pack(fill="x")
-    tk.Label(ib, text="When off, the test cycle skips vision entirely.",
+    tk.Label(ib, text="When off, the test cycle skips vision entirely. "
+                      "Changing it needs a login and is recorded.",
              bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), anchor="w",
              wraplength=265, justify="left").pack(fill="x", padx=(22, 0), pady=(0, 12))
 
@@ -934,7 +969,7 @@ def render(parent):
         caption, color = _threshold_caption(val)
         th_caption.config(text=caption, fg=color)
         changed = (enabled_var.get(), val) != initial
-        dirty_lbl.config(text="Unsaved changes" if changed else "")
+        dirty_lbl.config(text="Unsaved changes" if changed else "", fg=ACCENT)
         _set_btn_enabled(btn_save, changed)
 
     thresh_var.trace_add("write", _on_settings_change)
