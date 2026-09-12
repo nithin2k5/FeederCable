@@ -19,8 +19,13 @@ import db
 # same here as it did on the machine.
 BG        = "#081014"   # page ground
 PANEL     = "#0b1620"   # tiles, entries, buttons
-BORDER    = "#182c35"   # panel outlines
-BORDER_HI = "#23404d"   # outlines that should read as a step brighter
+# Panel outlines. Drawn as a highlight ring rather than a solid bd border --
+# at white the two together read as a white line with a black one inside it.
+BORDER    = "#ffffff"
+# Was a step brighter than BORDER back when outlines were near-black; with
+# white outlines there is nothing above it to step to. Kept as its own name so
+# the tiles can be told apart from the panels again without hunting call sites.
+BORDER_HI = "#ffffff"
 TXT       = "#e8f1f4"
 TXT_DIM   = "#6f8794"   # captions, hints, units
 TEAL      = "#489fb5"   # the brand accent
@@ -89,25 +94,19 @@ def render(parent):
               fieldbackground=[("readonly", PANEL)], foreground=[("readonly", TXT)],
               selectbackground=[("readonly", PANEL)], selectforeground=[("readonly", TXT)])
 
-    content = tk.Frame(parent, bg=BG, bd=1, relief="solid",
+    content = tk.Frame(parent, bg=BG,
                        highlightbackground=BORDER, highlightthickness=1)
     content.pack(fill="both", expand=True, padx=5, pady=5)
 
-    # ── Header: brand, page name, and the numbers that summarise the search ──
-    header = tk.Frame(content, bg=BG, height=86, bd=1, relief="solid",
+    # ── Header: page name and the numbers that summarise the search ─────────
+    header = tk.Frame(content, bg=BG, height=86,
                       highlightbackground=BORDER, highlightthickness=1)
     header.pack(fill="x", padx=10, pady=(10, 5))
     header.pack_propagate(False)
 
-    logo_frame = tk.Frame(header, bg=BG, bd=1, relief="solid",
-                          highlightbackground=TEAL, highlightthickness=1, padx=14, pady=4)
-    logo_frame.pack(side="left", padx=(16, 18), pady=10)
-    logo_top = tk.Frame(logo_frame, bg=BG); logo_top.pack()
-    tk.Label(logo_top, text="IN", fg="red", bg=BG, font=("Arial", 17, "bold")).pack(side="left")
-    tk.Label(logo_top, text="FAC", fg=TEAL, bg=BG, font=("Arial", 17, "bold")).pack(side="left")
-    tk.Label(logo_frame, text="INDIA", fg=TEAL, bg=BG, font=("Arial", 10, "bold")).pack()
-
-    title_box = tk.Frame(header, bg=BG); title_box.pack(side="left", pady=10)
+    # Takes the left margin the brand lockup used to hold, so the title starts
+    # where the eye already expects the header to begin.
+    title_box = tk.Frame(header, bg=BG); title_box.pack(side="left", padx=(16, 0), pady=10)
     tk.Label(title_box, text="REPORT", fg=TXT, bg=BG,
              font=("Arial", 24, "bold")).pack(anchor="w")
     tk.Label(title_box, text="TEST HISTORY  ·  ALL PARTS  ·  ALL SHIFTS", fg=TXT_DIM, bg=BG,
@@ -119,7 +118,7 @@ def render(parent):
     stats_box.pack(side="right", padx=(0, 16), pady=10)
 
     def _stat_tile(caption, color):
-        box = tk.Frame(stats_box, bg=PANEL, bd=1, relief="solid",
+        box = tk.Frame(stats_box, bg=PANEL,
                        highlightbackground=BORDER_HI, highlightthickness=1,
                        padx=16, pady=5)
         box.pack(side="right", padx=(8, 0))
@@ -134,7 +133,7 @@ def render(parent):
     st_total = _stat_tile("PARTS", TXT)
 
     # ── Filter bar: the query on the left, the judged frame on the right ─────
-    filter_bar = tk.Frame(content, bg=BG, bd=1, relief="solid",
+    filter_bar = tk.Frame(content, bg=BG,
                           highlightbackground=BORDER, highlightthickness=1)
     filter_bar.pack(fill="x", padx=10, pady=5)
 
@@ -226,7 +225,7 @@ def render(parent):
     tk.Label(preview_outer, text="VISION FRAME", bg=BG, fg=TXT_DIM,
              font=("Arial", 8, "bold")).pack(anchor="w")
     img_box = tk.Frame(preview_outer, bg="#05080a", width=PREVIEW_W, height=PREVIEW_H,
-                       bd=1, relief="solid", highlightbackground=BORDER, highlightthickness=1)
+                       highlightbackground=BORDER, highlightthickness=1)
     img_box.pack(pady=(2, 0))
     img_box.pack_propagate(False)
     preview_img_lbl = tk.Label(img_box, bg="#05080a", fg=TXT_DIM, font=("Arial", 10, "bold"),
@@ -237,7 +236,7 @@ def render(parent):
     preview_lot_lbl.pack(fill="x", pady=(3, 0))
 
     # ── Status bar, packed before the table so it stays pinned to the bottom ──
-    status_bar = tk.Frame(content, bg=BG, bd=1, relief="solid",
+    status_bar = tk.Frame(content, bg=BG,
                          highlightbackground=BORDER, highlightthickness=1)
     status_bar.pack(side="bottom", fill="x", padx=10, pady=(0, 10))
     status_lbl = tk.Label(status_bar, text="", bg=BG, fg=TXT_DIM,
@@ -247,7 +246,7 @@ def render(parent):
              bg=BG, fg="#3f5662", font=("Arial", 8), anchor="e", padx=10).pack(side="right")
 
     # ── Table ────────────────────────────────────────────────────────────────
-    table_outer = tk.Frame(content, bg=BG, bd=1, relief="solid",
+    table_outer = tk.Frame(content, bg=BG,
                            highlightbackground=BORDER, highlightthickness=1)
     table_outer.pack(fill="both", expand=True, padx=10, pady=(5, 5))
 
