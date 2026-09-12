@@ -2474,6 +2474,7 @@ def render(parent):
             _after(0, lambda a=is_rework: _set_rework_active(a))
 
         # --- VISION VERIFICATION (Contour Matching) ---
+        vision_failed = []   # every enabled camera that did not come back OK
         _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
         if vision_ctrl:
             
@@ -2498,6 +2499,7 @@ def render(parent):
                     if frame is None:
                         state["cam_results"][cid] = "ERROR"
                         _log(f"Vision CAM{cid} ERROR: no frame from the camera")
+                        vision_failed.append(cid)
                         continue
                     r = vision_ctrl.inspect(state["pno"], frame=frame)
                     state["cam_results"][cid] = r.judgement
@@ -2507,13 +2509,27 @@ def render(parent):
                         state["last_vision_result"] = r
                     if r.judgement == "ERROR":
                         _log(f"Vision CAM{cid} ERROR: {r.error}")
+                        vision_failed.append(cid)
                     elif not r.ok:
                         _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}")
+                        vision_failed.append(cid)
                     else:
                         _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms")
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
+
+        # Vision is part of the verdict, not just a line in the log and a
+        # column in the record: a part the cameras did not pass used to ship
+        # as a PASS so long as the electrical tests passed. The cycle ends
+        # here -- there is nothing to learn from putting 1kV through a part
+        # vision says is not the part.
+        if vision_failed:
+            failed_cams = ", ".join(f"CAM{cid}" for cid in vision_failed)
+            _log(f"Vision failed on {failed_cams} — NG, electrical tests skipped")
+            state["flag"] = False
+            _finish_test("FAIL", {}, {}, {}, fail_banner=f"❌  NG — vision failed on {failed_cams}")
+            return
 
         _after(0, lambda: scan_lbl.config(text=f"Checking contact (CH{min(n_ch, MAX_CH)}"
                                                + (f" / CH{min(n_ch, MAX_CH) + 1})..." if min(n_ch, MAX_CH) < MAX_CH else ")..."),
@@ -2549,7 +2565,7 @@ def render(parent):
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
-    def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict):
+    def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, fail_banner: str = None):
         _clear_all_io_indicators()
         if _plc_open():
             _log("Resetting all PLC pins (Contact + IR/ACW + Safety Relay)...")
@@ -2589,7 +2605,7 @@ def render(parent):
                 _after(500, _input_poll_start)
                 _after(3000, _reset_for_next_part)
         else:
-            _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda: scan_lbl.config(text="❌  FAIL — Check cable and retry", bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+            _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         # Queued after the restore above, so the gate has the last word.
@@ -2921,13 +2937,14 @@ def render(parent):
             except Exception: pass
         _overlay_jobs[cam_id] = _after(4000, lambda cid=cam_id: _restore_cam(cid))
 
-    def _vision_check_loaded_part(pno: str):
-        """Verify the just-loaded part in front of the camera, before testing starts.
+    def _announce_part_loaded(pno: str):
+        """Say the part is loaded, and warn if no vision model is taught for it.
 
-        Runs the same inspect() path the cycle uses, so the operator finds out the
-        part is wrong (or the camera is blind) while they can still act on it —
-        not after committing to a run. Off the UI thread: a capture takes ~1.5s
-        and must not freeze the console.
+        This used to inspect the part here as well, a full ~1.5s capture and
+        match at JIG-scan time. Vision belongs to the cycle: it now runs once,
+        after START, where its verdict counts. Checking a part the operator has
+        not started testing yet only told them something the cycle would say
+        again a moment later, off a frame taken before the part was settled.
         """
         base = f"Part '{pno}' loaded ({state['num_channels']} ch)"
 
@@ -2942,35 +2959,7 @@ def render(parent):
             _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
             _paint("NO VISION MODEL", "#e8a000"); return
 
-        _paint("👁  Checking vision…", "#e8a000")
-
-        def _work():
-            try:
-                result = vision_ctrl.inspect(pno)
-            except Exception as ex:
-                # Never leave the operator staring at "Checking vision…" forever.
-                result = VisionResult(ok=False, judgement="ERROR", part_number=pno,
-                                      error=str(ex))
-
-            def _apply():
-                # The operator may have moved on to another part while the
-                # capture was in flight — a stale verdict must not overwrite it.
-                if state.get("pno") != pno: return
-                state["vision_result"] = result.judgement
-                _show_vision_frame(result)
-                if result.judgement == "OK":
-                    _log(f"Vision OK: score={result.match_score:.4f} in {result.processing_time_ms}ms")
-                    _paint(f"Vision OK ({result.match_score:.2f})", "#4caf50")
-                elif result.judgement == "NG":
-                    _log(f"Vision NG: {result.error} (score={result.match_score:.4f})")
-                    _paint(f"VISION NG ({result.match_score:.2f}) — check the part", "#ff5555", bg="#220000")
-                else:
-                    _log(f"Vision ERROR: {result.error}")
-                    _paint(f"VISION ERROR — {result.error}", "#e8a000")
-            try: _after(0, _apply)
-            except Exception: pass
-
-        threading.Thread(target=_work, daemon=True).start()
+        _paint("Ready", "#4caf50")
 
     def _on_jig_enter(event=None):
         jig = ent_jig.get().strip().upper()
@@ -2992,7 +2981,7 @@ def render(parent):
         if _load_specs(pno):
             _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
             _print_marker("START", pno)
-            _vision_check_loaded_part(pno)
+            _announce_part_loaded(pno)
             # Focus goes to Lot Qty rather than START: it is the only field the
             # operator still has to fill, and _trigger_test refuses to run
             # without it. Pre-selected so typing a new quantity replaces the
