@@ -2704,7 +2704,11 @@ def render(parent):
             return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
-    ent_lot_qty.bind("<Return>", lambda e: _trigger_test())
+    # ENTER here moves to START, it does not press it. A test begins only on a
+    # deliberate act -- clicking START, or the physical button pulling X0 high
+    # -- so that typing the last digit of a quantity can never set the machine
+    # running on a part the operator has not finished loading.
+    ent_lot_qty.bind("<Return>", lambda e: btn_start.focus_set())
 
     def _print_marker(marker: str, pno: str):
         """Send a START/END marker label off the UI thread -- printing blocks
@@ -2927,9 +2931,9 @@ def render(parent):
             # Focus goes to Lot Qty rather than START: it is the only field the
             # operator still has to fill, and _trigger_test refuses to run
             # without it. Pre-selected so typing a new quantity replaces the
-            # last one instead of appending digits to it, and ENTER there
-            # starts the test -- the same key that got them through Part No,
-            # EMP ID and the JIG scan.
+            # last one instead of appending digits to it. ENTER moves on to
+            # START without pressing it -- starting the test stays a separate,
+            # deliberate act.
             ent_lot_qty.focus_set(); ent_lot_qty.select_range(0, "end"); ent_lot_qty.icursor("end")
             _after(500, _input_poll_start)
         else:
