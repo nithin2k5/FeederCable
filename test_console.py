@@ -2695,8 +2695,16 @@ def render(parent):
             return
         if not state["pno"]: _log("No part number loaded."); return
         if not ent_emp.get().strip(): _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID before testing.")); return
+        if _lot_qty() <= 0:
+            # Without it the lot announcement never fires, so the operator has
+            # no cue to close off a box -- which is only noticed at the end of
+            # a lot, too late. Ask for it up front instead.
+            _after(0, lambda: messagebox.showwarning("Validation", "Enter the Lot Qty (how many good parts make one lot) before testing."))
+            _after(0, lambda: (ent_lot_qty.focus_set(), ent_lot_qty.select_range(0, "end")))
+            return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
+    ent_lot_qty.bind("<Return>", lambda e: _trigger_test())
 
     def _print_marker(marker: str, pno: str):
         """Send a START/END marker label off the UI thread -- printing blocks
@@ -2916,7 +2924,14 @@ def render(parent):
             _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
             _print_marker("START", pno)
             _vision_check_loaded_part(pno)
-            btn_start.focus_set(); _after(500, _input_poll_start)
+            # Focus goes to Lot Qty rather than START: it is the only field the
+            # operator still has to fill, and _trigger_test refuses to run
+            # without it. Pre-selected so typing a new quantity replaces the
+            # last one instead of appending digits to it, and ENTER there
+            # starts the test -- the same key that got them through Part No,
+            # EMP ID and the JIG scan.
+            ent_lot_qty.focus_set(); ent_lot_qty.select_range(0, "end"); ent_lot_qty.icursor("end")
+            _after(500, _input_poll_start)
         else:
             # An unknown part number is a typo, not the end of the shift --
             # release just the part and ask for it again, rather than logging
