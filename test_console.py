@@ -2425,6 +2425,32 @@ def render(parent):
         else: set_com_status("IO Ctrl", True)
         return ok
 
+    def _wait_x2_low(ctx: str, timeout: float = 2.0, poll: float = 0.1) -> bool:
+        """Wait for X2 (Contact OK) to fall after a channel coil is dropped.
+
+        X2 is one global signal shared by all eight channels, not one per
+        channel, so a channel's verdict is only its own if the previous
+        channel's contact has cleared before this one is energised. A blind
+        sleep never proved that: a coil whose OFF write never landed, or a jig
+        that keeps holding continuity, leaves X2 high and the next channel
+        then reads the last one's contact as its own -- which is how one
+        seated cable can carry every remaining channel to PASS.
+
+        Polls until X2 reads Low and returns True, or gives up after `timeout`
+        and returns False. The caller decides what a stuck X2 means; here it
+        is only reported, never judged.
+        """
+        deadline = time.time() + timeout
+        while True:
+            if not plc.is_contact_ok():
+                _after(0, lambda: _set_x2_indicator(False))
+                return True
+            if time.time() >= deadline:
+                _after(0, lambda: _set_x2_indicator(True))
+                _log(f"{ctx}: X2 (Contact OK) is still High {timeout:.1f}s after the coil was dropped.")
+                return False
+            time.sleep(poll)
+
     def _run_contact_test(n_ch: int) -> tuple:
         """Contact test via PLC — set each channel coil, read acknowledge input."""
         _log("Contact Test → PLC Modbus (M coils / X inputs)")
@@ -2460,11 +2486,24 @@ def render(parent):
                 all_pass = False
                 _log(f"Contact (CH{ch}): Failed — X2 (Contact OK) went Low!")
             _after(0, lambda c=ch-1, p=passed: _set_cell("Contact", c, "OK" if p else "NG", p))
-            # Turn OFF channel coil before next
+            # Turn OFF the channel coil and confirm X2 actually falls before
+            # the next channel goes up. Waiting a fixed 0.5s here only assumed
+            # it had; every channel after a coil that failed to drop was then
+            # reading this channel's contact instead of its own.
             _log(f"CH{ch} -> OFF")
-            plc.set_channel(ch, False)
+            if not plc.set_channel(ch, False):
+                _log(f"CH{ch}: coil OFF write was refused by the PLC.")
             _after(0, lambda c=ch-1: _set_io(io_contact_labels, c, False))
-            time.sleep(0.5)
+            if not _wait_x2_low(f"CH{ch} -> OFF"):
+                # This channel's own reading stands -- it was taken with the
+                # coil up. What cannot stand is every channel after it, so
+                # mark those unjudged rather than pass them on a stale X2.
+                all_pass = False
+                for rest in range(ch + 1, n_ch + 1):
+                    contact_res[rest] = {"result": "FAIL"}
+                    _after(0, lambda c=rest-1: _set_cell("Contact", c, "NG", False))
+                _log("Contact: aborting — X2 will not clear, so no later channel can be judged on its own.")
+                break
         plc.close()
         _after(0, lambda p=all_pass: _set_row_result("Contact", p))
         _log(f"Contact: {'PASS' if all_pass else 'FAIL'}"); return all_pass, contact_res
@@ -2479,6 +2518,8 @@ def render(parent):
         the right one does.
 
         Returns "OK", "NOT_SEATED" (the part's last channel gave no contact),
+        "STUCK" (X2 never fell again after that channel was switched off, so
+        the channel above it cannot be judged on its own reading),
         "EXTRA" (the channel past it answered when this part has no conductor
         there) or "PLC" (port unreachable).
         """
@@ -2498,8 +2539,15 @@ def render(parent):
         _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
         _after(0, lambda a=x4_ack: _set_x4_indicator(a))
 
-        def _probe(ch: int) -> bool:
-            """Drive one contact channel, read X2, then put the coil back."""
+        def _probe(ch: int) -> tuple:
+            """Drive one contact channel, read X2, then put the coil back.
+
+            Returns (contact, cleared): whether X2 was High with the coil up,
+            and whether it fell again once the coil was dropped. The second
+            half is what makes the *next* probe's reading its own -- X2 is one
+            signal shared by every channel, so a probe that starts while the
+            last channel's contact is still up reads that contact, not its own.
+            """
             idx = ch - 1
             plc.set_channel(ch, True)
             _after(0, lambda i=idx: _set_io(io_contact_labels, i, True))
@@ -2508,24 +2556,34 @@ def render(parent):
             x2 = plc.is_contact_ok()
             _after(0, lambda i=idx, a=ack: _set_io(io_in_labels, i, a))
             _after(0, lambda a=x2: _set_x2_indicator(a))
-            plc.set_channel(ch, False)
+            if not plc.set_channel(ch, False):
+                _log(f"CH{ch}: coil OFF write was refused by the PLC.")
             _after(0, lambda i=idx: _set_io(io_contact_labels, i, False))
-            return x2
+            return x2, _wait_x2_low(f"CH{ch} -> OFF")
 
         # 2) The part's own last channel must make contact.
         _after(0, lambda c=last: _spec_focus(c))
-        if not _probe(last):
+        seated, cleared = _probe(last)
+        if not seated:
             _log(f"CH{last} contact: NG — X2 (Contact OK) is Low. Cable not seated.")
             plc.close()
             return "NOT_SEATED"
         _log(f"CH{last} contact: OK — X2 is High (cable in jig)")
+        if not cleared:
+            # Probing CH last+1 on an X2 that never came down would only read
+            # CH last's contact again and call a good part a wrong cable. The
+            # fixture is what is wrong, so say that instead of blaming the cable.
+            _log(f"CH{last} contact: X2 never returned Low — CH{last + 1} cannot be judged.")
+            plc.close()
+            return "STUCK"
 
         # 3) One past the part's channels must NOT. An answer there means a
         #    conductor exists where this part has none.
         if nxt is None:
             _log(f"CH{last + 1} probe skipped — the fixture has only {MAX_CH} channels")
         else:
-            if _probe(nxt):
+            extra, _ = _probe(nxt)
+            if extra:
                 _log(f"CH{nxt} contact: NG — X2 is High, but this part has only {last} channels. Wrong cable or wrong jig.")
                 plc.close()
                 return "EXTRA"
@@ -2829,6 +2887,13 @@ def render(parent):
                     title, popup = "Contact", (f"No contact on CH{min(n_ch, MAX_CH)}.\n\n"
                                                "The cable is not fully seated. Please check the jig.")
                     banner = "❌  Contact NOT OK — check and retry"
+                elif verdict == "STUCK":
+                    title, popup = "Contact Signal Stuck", (f"X2 (Contact OK) stayed High after "
+                                                            f"CH{min(n_ch, MAX_CH)} was switched off.\n\n"
+                                                            "A channel relay is not dropping out, or the jig is still "
+                                                            "holding continuity. Check the fixture — this is not a "
+                                                            "fault with the cable.")
+                    banner = "❌  X2 stuck High — check the JIG, not the cable"
                 else:
                     title, popup = "PLC", "PLC Modbus port blocked or disconnected."
                     banner = "❌  PLC not reachable — check the connection"
