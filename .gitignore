@@ -13,3 +13,10 @@ TEMPMARKER_*.prn
 
 # Runtime scratch for the lot (box) label (rendered from LOTPRN.prn)
 TEMPLOTPRN.prn
+
+# PyInstaller build output and the build virtualenv (see install.sh)
+.venv/
+build/
+dist/
+FeederCable.spec
+.install.lock/
