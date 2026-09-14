@@ -2331,7 +2331,17 @@ def render(parent):
 
     def _save_vision_pass_image(lot_no: str) -> str:
         """If vision passed on this cycle, save the judged (boxed) frame to
-        vision_captures/<lotno>.jpg and return its path, else None.
+        vision_captures/<yyyy-mm>/<lotno>.jpg and return its path, else None.
+
+        One folder per month. A station saves an image per PASS all shift, so
+        a flat directory reached tens of thousands of files inside a year --
+        slow to open, and with no way to archive or clear down one month at a
+        time. The folder is named <yyyy-mm> rather than by month name so it
+        sorts chronologically and never merges the same month of two years.
+
+        Each record stores its own path in testmaster.visionimg, so rows
+        written before this keep pointing at the flat layout and still
+        preview; existing files are left exactly where they are.
         """
         result = state.get("last_vision_result")
         if result is None or result.judgement != "OK" or not _cv2_ok:
@@ -2340,8 +2350,10 @@ def render(parent):
         if frame is None:
             return None
         try:
-            os.makedirs(_VISION_IMG_DIR, exist_ok=True)
-            path = os.path.join(_VISION_IMG_DIR, f"{lot_no}.jpg")
+            month_dir = os.path.join(_VISION_IMG_DIR,
+                                     datetime.datetime.now().strftime("%Y-%m"))
+            os.makedirs(month_dir, exist_ok=True)
+            path = os.path.join(month_dir, f"{lot_no}.jpg")
             cv2.imwrite(path, frame)
             _log(f"Vision pass image saved: {path}")
             return path
