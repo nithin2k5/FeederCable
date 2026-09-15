@@ -2371,15 +2371,7 @@ def render(parent):
             _log(f"Vision image save error: {ex}")
             return None
 
-    def _save_result(lot_no: str, overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, vision_img: str = None) -> bool:
-        """Write the run to testmaster/testresult. True when the row landed.
-
-        The caller needs the answer: the printed label, the day's counts and
-        the lot announcement all speak for a record, and this insert can be
-        refused -- (pno, lotno) is UNIQUE, so moving the system date onto a
-        day this part has already been tested on lands the run on a lot
-        number that is taken.
-        """
+    def _save_result(lot_no: str, overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, vision_img: str = None):
         try:
             with db.get_cursor(commit=True) as cur:
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
@@ -2387,10 +2379,7 @@ def render(parent):
                 for ch in range(1, state["num_channels"] + 1):
                     cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} → {lot_no}")
-            return True
-        except Exception as ex:
-            _log(f"Save error: {ex}")
-            return False
+        except Exception as ex: _log(f"Save error: {ex}")
 
     def _update_scan_result(lot_no: str, scan_res: str):
         try:
@@ -2946,38 +2935,15 @@ def render(parent):
         # the sidebar strip and the Count box's CT both show.
         if elapsed is not None:
             state["ct_last"] = elapsed
-        # Saved before anything is counted, announced or printed: all three
-        # stand for a record, and the insert can be refused -- most often on
-        # the UNIQUE (pno, lotno) after the system date has been moved onto a
-        # day this part already has lots for.
-        vision_img_path = _save_vision_pass_image(lot_no)
-        saved = _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
         _after(0, _update_counts)
         # Queued, not called here: this runs on the test thread and the
-        # announcement is a modal dialog. A lot that a part never got into
-        # closes off a box that is one part short, and the dialog prints a
-        # lot label of its own, so an unsaved part must not trip it.
-        if overall == "PASS" and saved: _after(0, _check_lot_target)
+        # announcement is a modal dialog.
+        if overall == "PASS": _after(0, _check_lot_target)
         _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
-        if overall == "PASS" and not saved:
-            # No record, no label. A lot number on a printed label with no row
-            # behind it is a part nothing can be traced back to -- and worse,
-            # _generate_lot_number reads the numbers it has issued back out of
-            # testmaster, so the very next part is given the same one and two
-            # boxes leave the line wearing one number.
-            _after(0, lambda: _set_verdict("NOT SAVED", "#e65100", "white"))
-            _after(0, lambda: scan_lbl.config(text="⚠  PASS but NOT SAVED — no label printed. Check the database, then retest.", bg="#221100", fg="#ffab40"))
-            _play_wav("NG.WAV"); blink_stop()
-            _after(0, lambda l=lot_no: messagebox.showwarning(
-                "Result Not Saved",
-                f"The PASS for lot {l} could not be written to the database, "
-                f"so no label has been printed.\n\n"
-                f"Check the database (a changed system date puts the run on a "
-                f"lot number that is already taken), then test the part again."))
-            _after(0, lambda: _set_scan_box(""))
-            _after(500, _input_poll_start)
-        elif overall == "PASS":
+        vision_img_path = _save_vision_pass_image(lot_no)
+        _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
+        if overall == "PASS":
             _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label,
                              args=(pno, state["alc"], state["model"], state["vendor_code"],
