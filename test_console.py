@@ -2564,7 +2564,17 @@ def render(parent):
                 for ch in range(1, state["num_channels"] + 1):
                     cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), _meas_db(ir_ch.get(ch, {}).get("value")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), _meas_db(acw_ch.get(ch, {}).get("value")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} → {lot_no}")
-        except Exception as ex: _log(f"Save error: {ex}")
+        except Exception as ex:
+            # The part has already been tested and its label may already be
+            # printed, so there is nothing to undo -- but the operator has to
+            # know the run left no record, while they still have the part.
+            _log(f"Save error: {ex}")
+            _after(0, lambda e=ex, l=lot_no, o=overall: messagebox.showerror(
+                "Result NOT Saved",
+                f"Lot {l} tested {o}, but the result could not be written to "
+                f"the database.\n\n{e}\n\n"
+                "There is no record of this part. Note the lot number and its "
+                "verdict now, and tell your supervisor before carrying on."))
 
     def _update_scan_result(lot_no: str, scan_res: str):
         try:
@@ -3316,65 +3326,79 @@ def render(parent):
         except Exception: pass
         return pressed
 
-    def _newest_tested_on() -> datetime.date:
-        """The latest date this machine has already tested on, or None.
+    def _db_state() -> tuple:
+        """(reachable, newest date this machine has already tested on).
+
+        One query answers both station-level questions, so START probes the
+        database and reads its own clock history in a single round trip.
 
         MAX(STR_TO_DATE(...)) rather than MAX(date) because the column is a
         VARCHAR: a row written in some other date format would otherwise sort
         above every real one and read as a date from the future. STR_TO_DATE
-        gives NULL for anything that does not match, and MAX skips the NULLs,
+        gives NULL for anything that does not match and MAX skips the NULLs,
         so unrecognised rows are ignored instead of trusted.
 
-        Scoped to this machine. Another station's clock being wrong is that
-        station's problem, and letting it stop this line would turn one bad
-        PC into an idle shop floor.
+        The history is scoped to this machine. Another station's clock being
+        wrong is that station's problem, and letting it stop this line would
+        turn one bad PC into an idle shop floor. Reachability is not scoped to
+        anything -- the database is either there or it is not.
         """
         try:
             with db.get_cursor() as cur:
                 # The format goes in as a parameter, not inline: the driver
                 # does not unescape %% here, so an inline format string
                 # reaches MySQL literally, matches no date at all, and
-                # quietly turns this whole check into a no-op.
+                # quietly turns the clock check into a no-op.
                 cur.execute("SELECT MAX(STR_TO_DATE(date, %s)) "
                             "FROM testmaster WHERE machine = %s",
                             ("%Y-%m-%d", cfg["machine_id"]))
                 row = cur.fetchone()
         except Exception as ex:
-            # A database that cannot be reached is not evidence the clock is
-            # wrong, and the test sequence has its own DB errors to report.
-            _log(f"Date check skipped -- database unreachable ({ex})")
-            return None
+            _log(f"Database unreachable: {ex}")
+            return False, None
         newest = row[0] if row else None
         if isinstance(newest, datetime.datetime): newest = newest.date()
-        return newest
+        return True, newest
 
-    def _date_check_ok() -> bool:
-        """False, with a popup, when today is behind this machine's history.
+    def _station_checks_ok() -> bool:
+        """The two gates that are the station's problem, not the operator's.
 
-        Every lot number starts with the system date and continues from the
-        highest number already issued that day, so a clock that has gone
-        backwards re-issues numbers that are already on printed labels and the
-        traceability record stops being unique. Refusing the test costs one
-        part; unpicking a shift of duplicated lot numbers costs a great deal
-        more.
-
-        Testing again on the same date is ordinary production and is allowed.
-        Only a date earlier than one already tested on is refused.
+        Both refuse the run rather than warn, because in both cases the part
+        would have to be tested again afterwards: a run with no database is
+        never recorded, and a run under a clock that has gone back is recorded
+        under a lot number that is already on somebody else's label.
         """
-        newest = _newest_tested_on()
+        reachable, newest = _db_state()
+        if not reachable:
+            _log("TEST REFUSED: database unreachable -- the result could not be saved.")
+            _after(0, lambda: messagebox.showerror(
+                "Database Unreachable",
+                "This test is blocked because the database cannot be reached.\n\n"
+                "A part tested now would not be recorded at all, and its label "
+                "would carry a duplicate lot number, so it would have to be "
+                "tested again once the database is back.\n\n"
+                "Check the database server and the network connection, then "
+                "start the test again."))
+            return False
         today = datetime.date.today()
-        if newest is None or today >= newest: return True
-        _log(f"TEST REFUSED: system date {today:%d/%m/%Y} is before the last test "
-             f"on this machine ({newest:%d/%m/%Y}) -- check the PC date.")
-        _after(0, lambda t=today, n=newest: messagebox.showerror(
-            "Check the Date",
-            f"The system date is {t:%d/%m/%Y}, but this machine has already "
-            f"tested parts on {n:%d/%m/%Y}.\n\n"
-            "Testing is blocked because the lot number is built from the date: "
-            "running now would issue lot numbers that are already on printed "
-            "labels.\n\n"
-            "Correct the date and time on this PC, then start the test again."))
-        return False
+        if newest is not None and today < newest:
+            # Every lot number starts with the system date and continues from
+            # the highest already issued that day, so a clock that has gone
+            # backwards re-issues numbers that are already on printed labels.
+            # Testing again on the same date is ordinary production; only an
+            # earlier date is refused.
+            _log(f"TEST REFUSED: system date {today:%d/%m/%Y} is before the last test "
+                 f"on this machine ({newest:%d/%m/%Y}) -- check the PC date.")
+            _after(0, lambda t=today, n=newest: messagebox.showerror(
+                "Check the Date",
+                f"The system date is {t:%d/%m/%Y}, but this machine has already "
+                f"tested parts on {n:%d/%m/%Y}.\n\n"
+                "Testing is blocked because the lot number is built from the "
+                "date: running now would issue lot numbers that are already on "
+                "printed labels.\n\n"
+                "Correct the date and time on this PC, then start the test again."))
+            return False
+        return True
 
     def _trigger_test():
         if state["test_running"]: return
@@ -3393,8 +3417,8 @@ def render(parent):
             _after(0, lambda: (ent_lot_qty.focus_set(), ent_lot_qty.select_range(0, "end")))
             return
         # Last gate before the run: the others are fields the operator can
-        # fix on the spot, this one is the station's clock.
-        if not _date_check_ok(): return
+        # fix on the spot, these are the station's database and clock.
+        if not _station_checks_ok(): return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
     # ENTER here moves to START, it does not press it. A test begins only on a
