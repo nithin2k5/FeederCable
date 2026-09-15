@@ -840,6 +840,79 @@ def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
     return ",".join(out)
 
 
+# ── Lot date code ─────────────────────────────────────────────────────────────
+# The three character code that stands for today's date on a label: one
+# character for the day, one for the month, one for the year, in that order.
+#
+# The characters themselves are not derived, they are looked up in date.txt,
+# month.txt and year.txt beside this file -- plain comma separated tables, day
+# 1 first, month 1 first, YEAR_FIRST first. Keeping them in files rather than
+# in code is the point: a customer with a different coding scheme is a text
+# edit, not a rebuild, and the tables are re-read on every print so an edit
+# takes effect on the very next label.
+_LOT_CODE_TABLES = {"day": "date.txt", "month": "month.txt", "year": "year.txt"}
+_LOT_CODE_YEAR_FIRST = 2026
+# Used only when a table is missing, empty or unreadable, so a broken file
+# still prints a label instead of stopping the line. Same values the shipped
+# files hold: days 1-9 as digits then A-V, months A-L, years A-Y from 2026.
+_LOT_CODE_FALLBACK = {
+    "day":   [str(d) for d in range(1, 10)] + [chr(ord("A") + i) for i in range(22)],
+    "month": [chr(ord("A") + i) for i in range(12)],
+    "year":  [chr(ord("A") + i) for i in range(25)],
+}
+# What goes on the label when the date falls outside a table -- a year past the
+# end of year.txt, say. Deliberately something an operator will notice rather
+# than a character that reads as a real code.
+_LOT_CODE_UNKNOWN = "?"
+
+
+def _read_lot_code_table(kind: str) -> list:
+    """One code table, from its file, falling back to the built-in copy."""
+    path = os.path.join(os.path.dirname(__file__), _LOT_CODE_TABLES[kind])
+    try:
+        with open(path, "r", encoding="latin-1") as f:
+            table = [part.strip() for part in f.read().split(",")]
+        table = [part for part in table if part]
+        if table:
+            return table
+        print(f"[LOT CODE] {path} holds no entries -- using the built-in table")
+    except Exception as ex:
+        print(f"[LOT CODE] cannot read {path} ({ex}) -- using the built-in table")
+    return list(_LOT_CODE_FALLBACK[kind])
+
+
+def _lot_3_letters(when: datetime.datetime = None) -> str:
+    """Today's date as the three character lot code, day then month then year.
+
+    Pass `when` to code a date other than now; the label printers leave it
+    unset and get the system date.
+    """
+    now = when or datetime.datetime.now()
+    slots = (("day", now.day - 1), ("month", now.month - 1),
+             ("year", now.year - _LOT_CODE_YEAR_FIRST))
+    out = []
+    for kind, index in slots:
+        table = _read_lot_code_table(kind)
+        if 0 <= index < len(table):
+            out.append(table[index])
+        else:
+            print(f"[LOT CODE] no {kind} code for {now:%d/%m/%Y}: "
+                  f"{_LOT_CODE_TABLES[kind]} holds {len(table)} entries")
+            out.append(_LOT_CODE_UNKNOWN)
+    return "".join(out)
+
+
+def _apply_lot_3_letters(text: str, code: str) -> str:
+    """Substitute the lot code placeholder, with or without its closing @.
+
+    @lot3letters@ is the spelling that matches every other placeholder, but a
+    template written as @lot3letters is accepted too -- an unclosed one would
+    otherwise print as itself and the mistake is easy to make. The closed form
+    goes first so the bare replacement cannot leave a stray @ behind.
+    """
+    return text.replace("@lot3letters@", code).replace("@lot3letters", code)
+
+
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
     base = os.path.dirname(__file__)
     lbl_sel = ""
@@ -874,6 +947,7 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         # part. A template that wants them per channel can still have them --
         # splitting one field on the comma is the label designer's job, and it
         # beats a placeholder per channel on a part whose channel count varies.
+        text = _apply_lot_3_letters(text, _lot_3_letters(now))
         text = text.replace("@irValues@", _fmt_channel_values(ir_ch, num_channels, ".0f"))
         text = text.replace("@acwValues@", _fmt_channel_values(acw_ch, num_channels, ".2f"))
         tmp = os.path.join(base, "TEMPPRN.prn")
@@ -993,6 +1067,7 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
             text = f.read()
         for key, val in fields.items():
             text = text.replace(key, val or "")
+        text = _apply_lot_3_letters(text, _lot_3_letters(now))
         # Its own scratch file: the part label owns TEMPPRN.prn and the marker
         # labels own TEMPMARKER_*.prn, and all three go out on background
         # threads that can overlap.

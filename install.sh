@@ -119,7 +119,9 @@ trap cleanup EXIT INT TERM
 # ── What the frozen app needs beside itself ──────────────────────────────────
 # Read-only assets, shipped inside the bundle. Label templates are chosen per
 # part in Model Settings, so every .prn ships -- a part whose template is
-# missing falls back to TEMPPRN.prn and prints the wrong label.
+# missing falls back to TEMPPRN.prn and prints the wrong label. The three
+# date code tables ship with them, for the same reason: a station missing
+# one falls back to the built-in scheme and prints a code nobody chose.
 ASSET_FILES=(
     "BARCODE FINAL.prn"
     "DATAMATRIX FINAL.prn"
@@ -130,6 +132,9 @@ ASSET_FILES=(
     "TEMPPRN.prn"
     "VW DATAMATRIX.prn"
     "nice DATAMATRIX1.prn"
+    "date.txt"
+    "month.txt"
+    "year.txt"
     "OK.WAV"
     "NG.WAV"
     "FC EOL.ico"
