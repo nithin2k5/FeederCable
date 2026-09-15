@@ -638,11 +638,25 @@ class HiPotSerial:
         if self.is_open:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
+    def stop_test(self):
+        """Take the tester out of the TEST state and clear its status.
+
+        MANU:EDIT: setup commands -- the mode switch included -- are only
+        accepted while the instrument is idle. Anything sent while a test is
+        still running is dropped on the floor, so every run has to start from
+        a stopped instrument rather than stopping itself halfway through its
+        own setup.
+        """
+        self.write_line("FUNC:TEST OFF")
+        self.write_line("*CLS")
+        time.sleep(0.3)
+        self.flush()
     def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min: float, ir_max: float) -> tuple:
+        self.stop_test()
         instr = [
             "MANU:EDIT:MODE IR", "TEST:RET ON", f"MANU:IR:VOLT {ir_volt_kv:.4f}",
             "MANU:IR:RHIS 9999", "MANU:IR:RLOS 1", f"MANU:IR:TTIM {ir_time_s:.1f}",
-            "MANU:IR:REF 0", "FUNC:TEST OFF", "*CLS", "FUNC:TEST ON"
+            "MANU:IR:REF 0", "FUNC:TEST ON"
         ]
         for cmd in instr: self.write_line(cmd)
         time.sleep(0.9)
@@ -658,10 +672,11 @@ class HiPotSerial:
         print(f"[HIPOT DEBUG] IR: commanded {ir_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={ir_val}")
         return ir_min <= ir_val <= ir_max, ir_val
     def run_acw_test(self, acw_volt_kv: float, acw_time_s: float, acw_min: float, acw_max: float) -> tuple:
+        self.stop_test()
         instr = [
             "MANU:EDIT:MODE ACW", "TEST:RET ON", f"MANU:ACW:VOLT {acw_volt_kv:.4f}",
             "MANU:ACW:FREQ 60", "MANU:ACW:CLOS 0.00", f"MANU:ACW:TTIM {acw_time_s:.1f}",
-            "MANU:ACW:REF 0.00", "FUNC:TEST OFF", "*CLS", "FUNC:TEST ON"
+            "MANU:ACW:REF 0.00", "FUNC:TEST ON"
         ]
         for cmd in instr: self.write_line(cmd)
         time.sleep(0.9)
