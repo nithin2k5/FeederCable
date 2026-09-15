@@ -13,6 +13,7 @@ import datetime
 from vision_engine.vision_controller import VisionController, VisionResult
 import time
 import os
+import re
 import configparser
 
 # ── Optional hardware libraries (graceful degradation) ─────────────────────────
@@ -594,6 +595,65 @@ class DeltaPLC:
         return self.read_input(_PLC_REWORK_ON_INPUT)
 
 
+# The measurement sits in the fourth comma separated field of a MEAS? reply.
+# It can carry a unit suffix and comes back in exponent form on large readings,
+# so the number is matched out of the field rather than sliced to a fixed
+# width: the old fixed slice read "1.234E+04" as 1.23 and a field with a
+# leading space as a tenth of its real value.
+_MEAS_FIELD = 3
+_MEAS_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+# Text shown in the grid, and the per-channel verdict stored against the run,
+# when a channel was never actually measured.
+_NO_READING_TEXT = "NO RD"
+_NO_READING_RESULT = "COMM"
+
+
+def _meas_dwell(test_time_s: float) -> float:
+    """How long to hold the test before reading it back.
+
+    Long enough for the programmed test time to elapse, so the reading is the
+    end-of-dwell value the spec limits are written against rather than one
+    taken while the cable is still charging. The 0.9 s floor keeps the old
+    behaviour for parts specced shorter than that.
+    """
+    try: return max(float(test_time_s) + 0.3, 0.9)
+    except (TypeError, ValueError): return 0.9
+
+
+def _parse_meas(response: str):
+    """The measured number from a MEAS? reply, or None if there isn't one.
+
+    None is not 0.0 on purpose. An empty reply, a short one and one whose
+    measurement field holds no number are all comms faults, and filing them as
+    a reading of zero made them indistinguishable from a part that genuinely
+    failed its insulation.
+    """
+    parts = (response or "").split(",")
+    if len(parts) <= _MEAS_FIELD: return None
+    m = _MEAS_NUMBER.search(parts[_MEAS_FIELD])
+    if not m: return None
+    try: return float(m.group())
+    except ValueError: return None
+
+
+def _meas_text(value, fmt: str) -> str:
+    """Grid and log text for one measurement -- the number, or NO RD."""
+    if value is None: return _NO_READING_TEXT
+    try: return format(float(value), fmt)
+    except (TypeError, ValueError): return _NO_READING_TEXT
+
+
+def _meas_result(value, passed: bool) -> str:
+    """Per-channel verdict, with COMM for a channel that was never measured."""
+    if value is None: return _NO_READING_RESULT
+    return "PASS" if passed else "FAIL"
+
+
+def _meas_db(value) -> str:
+    """Measurement as stored. A channel with no reading stores blank, not 0."""
+    return "" if value is None else str(value)
+
+
 class HiPotSerial:
     def __init__(self, port: str, baud: int = 9600):
         self._port = port
@@ -605,7 +665,11 @@ class HiPotSerial:
             if self._ser and self._ser.is_open:
                 self._ser.close()
                 time.sleep(0.5)
-            self._ser = serial.Serial(self._port, self._baud, timeout=3.0, write_timeout=0.5)
+            # A write timeout this generous only fires on a genuinely stuck
+            # port. The longest command here is ~30 ms on the wire at 9600
+            # baud, and the old 0.5 s tripped on ordinary flow-control stalls
+            # -- which then closed the port for the rest of the run.
+            self._ser = serial.Serial(self._port, self._baud, timeout=3.0, write_timeout=2.0)
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
             return True
@@ -616,15 +680,35 @@ class HiPotSerial:
         except Exception: pass
     @property
     def is_open(self): return self._ser is not None and self._ser.is_open
-    def write_line(self, cmd: str):
-        if not self.is_open: return
-        try:
-            self._ser.write((cmd + "\r\n").encode("ascii"))
-            print(f"[HIPOT DEBUG] >> {cmd}")
-        except Exception as e:
-            print(f"[HIPOT DEBUG] write_line EXCEPTION on '{cmd}': {e}")
-            self.close()
-        time.sleep(0.025)
+    def ensure_open(self) -> bool:
+        """Reopen the port if something closed it part way through a run.
+
+        The port is opened once for a whole test phase rather than once per
+        channel, so a single failed write used to leave every remaining
+        channel writing into a closed port and reading nothing back -- which
+        the caller then filed as a measurement of zero.
+        """
+        if self.is_open: return True
+        print("[HIPOT DEBUG] port closed mid-run -- reopening")
+        return self.open()
+    def write_line(self, cmd: str) -> bool:
+        """Send one command; False if it could not be got onto the wire.
+
+        A failed write reopens the port and retries once, so a momentary stall
+        costs one command instead of every channel after it.
+        """
+        for attempt in (1, 2):
+            if not self.ensure_open(): break
+            try:
+                self._ser.write((cmd + "\r\n").encode("ascii"))
+                print(f"[HIPOT DEBUG] >> {cmd}")
+                time.sleep(0.025)
+                return True
+            except Exception as e:
+                print(f"[HIPOT DEBUG] write_line EXCEPTION on '{cmd}' (attempt {attempt}): {e}")
+                self.close()
+        print(f"[HIPOT DEBUG] write_line GAVE UP on '{cmd}'")
+        return False
     def read_line(self) -> str:
         if not self.is_open: return ""
         try:
@@ -651,45 +735,52 @@ class HiPotSerial:
         self.write_line("*CLS")
         time.sleep(0.3)
         self.flush()
-    def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min: float, ir_max: float) -> tuple:
+    def _measure(self, instr: list, dwell_s: float, label: str):
+        """Run one configured test and read it back. None means no reading.
+
+        The instrument is stopped and its buffer flushed on both sides of the
+        measurement. TEST:RET ON makes it volunteer a result line of its own
+        when the test ends, and with only a trailing flush that line landed
+        after the flush and was still sitting there when the next channel came
+        to read -- so the next channel parsed the previous one's leftovers.
+
+        Nothing here falls back to 0.0. A failed write, a timed-out read and a
+        reply with no number in it all return None, so the caller can tell a
+        comms fault from a part that really does measure zero.
+        """
         self.stop_test()
+        sent = all([self.write_line(cmd) for cmd in instr])
+        if not sent:
+            print(f"[HIPOT DEBUG] {label}: setup did not reach the instrument")
+            self.stop_test()
+            return None
+        time.sleep(dwell_s)
+        if not self.write_line("MEAS?"):
+            self.stop_test()
+            return None
+        time.sleep(0.02)
+        response = self.read_line()
+        self.stop_test()
+        value = _parse_meas(response)
+        print(f"[HIPOT DEBUG] {label}: MEAS? -> {response!r}, parsed value={value}")
+        return value
+    def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min: float, ir_max: float) -> tuple:
         instr = [
             "MANU:EDIT:MODE IR", "TEST:RET ON", f"MANU:IR:VOLT {ir_volt_kv:.4f}",
             "MANU:IR:RHIS 9999", "MANU:IR:RLOS 1", f"MANU:IR:TTIM {ir_time_s:.1f}",
             "MANU:IR:REF 0", "FUNC:TEST ON"
         ]
-        for cmd in instr: self.write_line(cmd)
-        time.sleep(0.9)
-        self.write_line("MEAS?")
-        time.sleep(0.02)
-        response = self.read_line()
-        self.flush()
-        ir_val = 0.0
-        try:
-            parts = response.split(",")
-            if len(parts) > 3: ir_val = float(parts[3][:4])
-        except (ValueError, IndexError): ir_val = 0.0
-        print(f"[HIPOT DEBUG] IR: commanded {ir_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={ir_val}")
+        ir_val = self._measure(instr, _meas_dwell(ir_time_s), f"IR @ {ir_volt_kv:.4f} kV")
+        if ir_val is None: return False, None
         return ir_min <= ir_val <= ir_max, ir_val
     def run_acw_test(self, acw_volt_kv: float, acw_time_s: float, acw_min: float, acw_max: float) -> tuple:
-        self.stop_test()
         instr = [
             "MANU:EDIT:MODE ACW", "TEST:RET ON", f"MANU:ACW:VOLT {acw_volt_kv:.4f}",
             "MANU:ACW:FREQ 60", "MANU:ACW:CLOS 0.00", f"MANU:ACW:TTIM {acw_time_s:.1f}",
             "MANU:ACW:REF 0.00", "FUNC:TEST ON"
         ]
-        for cmd in instr: self.write_line(cmd)
-        time.sleep(0.9)
-        self.write_line("MEAS?")
-        time.sleep(0.02)
-        response = self.read_line()
-        self.flush()
-        acw_val = 0.0
-        try:
-            parts = response.split(",")
-            if len(parts) > 3: acw_val = float(parts[3][:5])
-        except (ValueError, IndexError): acw_val = 0.0
-        print(f"[HIPOT DEBUG] ACW: commanded {acw_volt_kv:.4f} kV, MEAS? -> {response!r}, parsed value={acw_val}")
+        acw_val = self._measure(instr, _meas_dwell(acw_time_s), f"ACW @ {acw_volt_kv:.4f} kV")
+        if acw_val is None: return False, None
         return acw_min <= acw_val <= acw_max, acw_val
 
 def _generate_lot_number(pno: str, machine_id: str) -> str:
@@ -2302,7 +2393,11 @@ def render(parent):
             tree_spec.delete(*tree_spec.get_children())
             for ch in range(1, channel + 1):
                 for test_key, tag, sp in [("Insulation Test", "ir", spec_ir.get(ch, {})), ("Withstand Test", "acw", spec_acw.get(ch, {}))]:
-                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), sp.get("appvol", "—"), sp.get("testtime", "—"), sp.get("min", "—"), sp.get("max", "—")))
+                    # Applied volts is a whole number on the spec sheet, but the
+                    # column is read out of the DB as a float, which put it in
+                    # the grid as "500.0".
+                    appvol = f"{sp['appvol']:.0f}" if "appvol" in sp else "—"
+                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), appvol, sp.get("testtime", "—"), sp.get("min", "—"), sp.get("max", "—")))
                 tree_spec.insert("", "end", tags=("contact",), values=("Contact Test", str(ch), "—", "—", "—", "—"))
             _spec_focus(1)
             spec_status_lbl.config(text=f"[ {channel} channel(s) loaded ]", fg="#4caf50")
@@ -2392,7 +2487,7 @@ def render(parent):
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
                 cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg, cam1result, cam2result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img, state["cam_results"].get(1), state["cam_results"].get(2)))
                 for ch in range(1, state["num_channels"] + 1):
-                    cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), str(ir_ch.get(ch, {}).get("value", "")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), str(acw_ch.get(ch, {}).get("value", "")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
+                    cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), _meas_db(ir_ch.get(ch, {}).get("value")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), _meas_db(acw_ch.get(ch, {}).get("value")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} → {lot_no}")
         except Exception as ex: _log(f"Save error: {ex}")
 
@@ -2678,15 +2773,16 @@ def render(parent):
             s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
             _log(f"IR: commanding {s0.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
+            if ir_val is None: _log("IR (Combined): NO READING from HiPot -- comms fault, not a measurement")
             for ch in range(1, n_ch + 1):
-                s = state["spec_ir"].get(ch, {}); passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                s = state["spec_ir"].get(ch, {}); passed = ir_val is not None and float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
                 if not passed: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if passed else "FAIL"}
-                _after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=passed: _set_cell("IR", c, v, p))
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _meas_result(ir_val, passed)}
+                _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
                 for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
-            _log(f"IR (Combined): {ir_val:.0f} MΩ — {'PASS' if all_pass else 'FAIL'}")
+            _log(f"IR (Combined): {_meas_text(ir_val, '.0f')} MΩ — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"IR Test: Testing CH{ch}...")
@@ -2705,10 +2801,11 @@ def render(parent):
                 s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
                 _log(f"IR CH{ch}: commanding {s.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
-                passed = float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                if ir_val is None: _log(f"IR CH{ch}: NO READING from HiPot -- comms fault, not a measurement")
+                passed = ir_val is not None and float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
                 if not passed or not ack_ok: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
-                _after(0, lambda c=ch-1, v=f"{ir_val:.0f}", p=(passed and ack_ok): _set_cell("IR", c, v, p))
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _meas_result(ir_val, passed and ack_ok)}
+                _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
@@ -2757,15 +2854,16 @@ def render(parent):
             s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
             _log(f"ACW: commanding {s0.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
+            if acw_val is None: _log("ACW (Combined): NO READING from HiPot -- comms fault, not a measurement")
             for ch in range(1, n_ch + 1):
-                s = state["spec_acw"].get(ch, {}); passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                s = state["spec_acw"].get(ch, {}); passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if passed else "FAIL"}
-                _after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=passed: _set_cell("ACW", c, v, p))
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed)}
+                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".2f"), p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
                 for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
-            _log(f"ACW (Combined): {acw_val:.2f} mA — {'PASS' if all_pass else 'FAIL'}")
+            _log(f"ACW (Combined): {_meas_text(acw_val, '.2f')} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"ACW Test: Testing CH{ch}...")
@@ -2784,10 +2882,11 @@ def render(parent):
                 s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = float(s.get("min", 0.0)); v_max = float(s.get("max", 10.0))
                 _log(f"ACW CH{ch}: commanding {s.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
-                passed = float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                if acw_val is None: _log(f"ACW CH{ch}: NO READING from HiPot -- comms fault, not a measurement")
+                passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed or not ack_ok: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": "PASS" if (passed and ack_ok) else "FAIL"}
-                _after(0, lambda c=ch-1, v=f"{acw_val:.2f}", p=(passed and ack_ok): _set_cell("ACW", c, v, p))
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed and ack_ok)}
+                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".2f"), p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
