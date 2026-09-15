@@ -3316,6 +3316,66 @@ def render(parent):
         except Exception: pass
         return pressed
 
+    def _newest_tested_on() -> datetime.date:
+        """The latest date this machine has already tested on, or None.
+
+        MAX(STR_TO_DATE(...)) rather than MAX(date) because the column is a
+        VARCHAR: a row written in some other date format would otherwise sort
+        above every real one and read as a date from the future. STR_TO_DATE
+        gives NULL for anything that does not match, and MAX skips the NULLs,
+        so unrecognised rows are ignored instead of trusted.
+
+        Scoped to this machine. Another station's clock being wrong is that
+        station's problem, and letting it stop this line would turn one bad
+        PC into an idle shop floor.
+        """
+        try:
+            with db.get_cursor() as cur:
+                # The format goes in as a parameter, not inline: the driver
+                # does not unescape %% here, so an inline format string
+                # reaches MySQL literally, matches no date at all, and
+                # quietly turns this whole check into a no-op.
+                cur.execute("SELECT MAX(STR_TO_DATE(date, %s)) "
+                            "FROM testmaster WHERE machine = %s",
+                            ("%Y-%m-%d", cfg["machine_id"]))
+                row = cur.fetchone()
+        except Exception as ex:
+            # A database that cannot be reached is not evidence the clock is
+            # wrong, and the test sequence has its own DB errors to report.
+            _log(f"Date check skipped -- database unreachable ({ex})")
+            return None
+        newest = row[0] if row else None
+        if isinstance(newest, datetime.datetime): newest = newest.date()
+        return newest
+
+    def _date_check_ok() -> bool:
+        """False, with a popup, when today is behind this machine's history.
+
+        Every lot number starts with the system date and continues from the
+        highest number already issued that day, so a clock that has gone
+        backwards re-issues numbers that are already on printed labels and the
+        traceability record stops being unique. Refusing the test costs one
+        part; unpicking a shift of duplicated lot numbers costs a great deal
+        more.
+
+        Testing again on the same date is ordinary production and is allowed.
+        Only a date earlier than one already tested on is refused.
+        """
+        newest = _newest_tested_on()
+        today = datetime.date.today()
+        if newest is None or today >= newest: return True
+        _log(f"TEST REFUSED: system date {today:%d/%m/%Y} is before the last test "
+             f"on this machine ({newest:%d/%m/%Y}) -- check the PC date.")
+        _after(0, lambda t=today, n=newest: messagebox.showerror(
+            "Check the Date",
+            f"The system date is {t:%d/%m/%Y}, but this machine has already "
+            f"tested parts on {n:%d/%m/%Y}.\n\n"
+            "Testing is blocked because the lot number is built from the date: "
+            "running now would issue lot numbers that are already on printed "
+            "labels.\n\n"
+            "Correct the date and time on this PC, then start the test again."))
+        return False
+
     def _trigger_test():
         if state["test_running"]: return
         if state.get("awaiting_scan"):
@@ -3332,6 +3392,9 @@ def render(parent):
             _after(0, lambda: messagebox.showwarning("Validation", "Enter the Lot Qty (how many good parts make one lot) before testing."))
             _after(0, lambda: (ent_lot_qty.focus_set(), ent_lot_qty.select_range(0, "end")))
             return
+        # Last gate before the run: the others are fields the operator can
+        # fix on the spot, this one is the station's clock.
+        if not _date_check_ok(): return
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
     # ENTER here moves to START, it does not press it. A test begins only on a
