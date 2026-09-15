@@ -2241,7 +2241,17 @@ def render(parent):
         except Exception as ex:
             _log(f"Could not save the label scan setting: {ex}")
         # The idle text of the box spells out which mode it is in.
-        if not want: _lock_scan_entry(); _set_awaiting_scan(False)
+        if not want:
+            # Turning the requirement off while a PASS is still waiting for
+            # its label is that scan's answer, so close the part out the way
+            # a scan would. Dropping the gate alone left the page showing the
+            # finished part's PASS and the input poll still stopped -- the
+            # physical START button stays dead until something restarts it,
+            # and nothing else on this path does.
+            was_awaiting = state.get("awaiting_scan")
+            _lock_scan_entry(); _set_awaiting_scan(False)
+            if was_awaiting:
+                _reset_for_next_part(); _input_poll_start()
         _set_scan_box("")
         _log(f"Label scan {'ENABLED' if want else 'DISABLED'} — "
              f"{'required' if want else 'not required'} after a PASS.")
