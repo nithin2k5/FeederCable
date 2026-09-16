@@ -641,6 +641,33 @@ _MEAS_RUNNING = re.compile(r"(?<![A-Z])(TEST|RAMP)(?![A-Z])", re.I)
 # back mid-test. TestConsole.cs pinned it at 0.1 s for exactly this reason
 # (MANU:RTIMe 0.1), and that is the number the dwell is built around.
 _RAMP_TIME_S = 0.1
+# How long past the expected end to keep asking before giving up on the
+# instrument ever reporting itself idle.
+_TEST_END_MARGIN_S = 2.0
+# Nothing is asked until this has passed, so that a reply of OFF is the test
+# having finished rather than it not having started. FUNC:TEST ON returns
+# before the instrument is under way, and asking straight after it would read
+# the state it was in beforehand.
+_TEST_START_GRACE_S = _RAMP_TIME_S + 0.2
+
+_TEST_STATE_OFF = re.compile(r"(?<![A-Z])OFF(?![A-Z])", re.I)
+_TEST_STATE_ON = re.compile(r"(?<![A-Z])ON(?![A-Z])", re.I)
+
+
+def _parse_test_state(reply: str):
+    """True while a test is running, False once it is over, None if unreadable.
+
+    None is not False. A reply that cannot be read is not the instrument
+    saying it has finished, and treating it as one would take the
+    measurement mid-test -- which is the thing this is here to stop.
+    """
+    text = (reply or "").strip()
+    if not text: return None
+    if _TEST_STATE_OFF.search(text): return False
+    if _TEST_STATE_ON.search(text): return True
+    if text == "0": return False
+    if text == "1": return True
+    return None
 
 
 def _meas_running(response: str) -> bool:
@@ -940,6 +967,48 @@ class HiPotSerial:
               f"-- looser than asked, REFUSED")
         return False
 
+    def wait_for_test_end(self, dwell_s: float, label: str) -> bool:
+        """Ask the instrument when its test is over, rather than timing it here.
+
+        FUNC:TEST? is the instrument answering for its own state, which beats
+        any arithmetic on this side about ramp times and programmed durations
+        -- those were guesses about a machine that can simply be asked.
+
+        The buffer is cleared before each question because TEST:RET ON has the
+        instrument volunteering status lines throughout, and the answer wanted
+        here is to the question just asked.
+
+        False means it never said so: the timeout ran out, or FUNC:TEST? is not
+        answering in a way this can read. Either way the caller goes on to
+        measure, because a reading that has to be questioned is worth more than
+        no reading at all -- and the reply it gets will say TEST on it.
+        """
+        time.sleep(_TEST_START_GRACE_S)
+        deadline = time.time() + dwell_s + _TEST_END_MARGIN_S
+        unreadable = 0
+        while time.time() < deadline:
+            self.flush()
+            if not self.write_line("FUNC:TEST?"):
+                return False
+            time.sleep(0.05)
+            reply = self.read_line()
+            state = _parse_test_state(reply)
+            if state is False:
+                return True
+            if state is None:
+                unreadable += 1
+                if unreadable >= 3:
+                    print(f"[HIPOT DEBUG] {label}: FUNC:TEST? not readable "
+                          f"({reply!r}) -- waiting {dwell_s:.1f}s instead")
+                    time.sleep(dwell_s)
+                    return False
+            else:
+                unreadable = 0
+            time.sleep(0.1)
+        print(f"[HIPOT DEBUG] {label}: still testing after "
+              f"{dwell_s + _TEST_END_MARGIN_S:.1f}s")
+        return False
+
     def _measure(self, instr: list, dwell_s: float, label: str):
         """Run one configured test and read it back. None means no reading.
 
@@ -963,7 +1032,10 @@ class HiPotSerial:
             print(f"[HIPOT DEBUG] {label}: setup did not reach the instrument")
             self.stop_test()
             return _Reading(raw="<setup did not reach the instrument>")
-        time.sleep(dwell_s)
+        # Wait for the instrument to report itself idle rather than sleeping a
+        # computed dwell and hoping. The dwell is still worked out, but only as
+        # the basis for how long to keep asking.
+        self.wait_for_test_end(dwell_s, label)
         # TEST:RET ON makes the instrument send lines of its own while the test
         # runs, and they queue in front of the answer to MEAS?. Clearing them
         # first is what makes the next line read the answer to this question
