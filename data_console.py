@@ -213,11 +213,29 @@ def render(parent):
     btn_frame.grid(row=0, column=4, rowspan=3, padx=(24, 0))
 
     def mk_button(text, cmd, accent=TEAL):
-        b = tk.Button(btn_frame, text=text, bg=PANEL, fg=TXT, font=("Arial", 11, "bold"),
-                      bd=1, relief="solid", highlightbackground=accent, highlightthickness=1,
+        """A button with a border that actually draws on Windows.
+
+        highlightbackground was doing nothing here. tk.Entry and tk.Frame paint
+        that ring whether or not they hold focus -- which is where every other
+        outline on this page comes from -- but tk.Button only paints it while
+        focused, so the accent never appeared. relief="solid" did not save it
+        either: that border is derived from the widget's own background, and
+        against PANEL on BG it is near-black on near-black.
+
+        So the outline is a frame behind the button, one pixel proud on every
+        side, the same padded-wrapper trick the Test Console's tables use. The
+        button's own borders are switched off to leave it the only line there.
+
+        The caller reaches the frame as the button's master -- which is how a
+        disabled button dims its outline along with its text.
+        """
+        wrap = tk.Frame(btn_frame, bg=accent)
+        wrap.pack(fill="x", pady=4)
+        b = tk.Button(wrap, text=text, bg=PANEL, fg=TXT, font=("Arial", 11, "bold"),
+                      bd=0, relief="flat", highlightthickness=0,
                       padx=16, pady=6, cursor="hand2", activebackground="#122a33",
                       activeforeground=accent, command=cmd)
-        b.pack(fill="x", pady=4)
+        b.pack(fill="both", expand=True, padx=1, pady=1)
         return b
 
     # Vision image preview -- the frame that was judged, match box already drawn
@@ -481,6 +499,10 @@ def render(parent):
         ready = _batch_ready() is not None
         btn_batch.config(state="normal" if ready else "disabled",
                          cursor="hand2" if ready else "arrow")
+        # The outline dims with the text. An amber border around greyed-out
+        # wording reads as a button that is ready, which is the opposite of
+        # what the greying is there to say.
+        btn_batch.master.config(bg=WARN if ready else SEL)
         batch_hint.config(
             text="" if ready else "select one part number and a quantity",
             fg=TXT_DIM)
