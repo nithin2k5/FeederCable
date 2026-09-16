@@ -1354,19 +1354,23 @@ def _marker_line(y: int, font: str, mul: int, content: str, label_w: int) -> str
     but these internal fonts are fixed width, so a line's rendered width is
     exact and the position can just be computed.
 
-    Every line is placed against the same left edge. Under rotation 180 the
-    anchor is the reading-left edge of the text, so one x for all of them is
-    one left margin whatever each line's own length -- the title included,
-    which used to centre on itself and sat out of line with the block under
-    it.
+    Every line is placed against the same left edge, and x is worked out from
+    each line's own width to put it there.
 
-    A line too long for the stock anchors at its own width instead, so it
-    runs off the far edge rather than off the near one: losing the end of a
-    value is recoverable by eye, losing the caption that says which field it
-    is is not.
+    A single x for every line was the first attempt at this and it aligned
+    the wrong edge. Under rotation 180 a line occupies the span ending at its
+    anchor, so a shared anchor is a shared *trailing* edge -- right aligned,
+    however the label is then read. Which of the two physical edges that
+    corresponds to does not actually matter here: a shared anchor lines up
+    one of them, it was not the wanted one, so the other is the one to line
+    up, and that is the end of the span the anchor does not sit on.
+
+    A line too long for the stock is pushed back to the label edge rather
+    than hanging off it, which breaks it out of alignment with the rest --
+    visibly, which is the point. Nothing is silently cropped.
     """
     width = len(content) * _MARKER_FONT_W[font] * mul
-    x = max(width, label_w - _MARKER_LEFT_MARGIN)
+    x = min(_MARKER_LEFT_MARGIN + width, label_w)
     return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
 
 def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
