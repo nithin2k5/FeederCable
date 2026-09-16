@@ -606,6 +606,74 @@ _MEAS_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 # when a channel was never actually measured.
 _NO_READING_TEXT = "NO RD"
 _NO_READING_RESULT = "COMM"
+# Stored against a channel the part has no usable limit for. It is not a PASS
+# and it is not a measurement failure -- it says the part was never specified,
+# which is a different thing to fix.
+_NO_LIMIT_RESULT = "NOSPEC"
+
+# The instrument judges every test itself, against the limits in its own setup,
+# and returns that judgement in the same reply as the number. It was read for
+# the number alone, so a part the GPT-9803 had already failed was re-judged in
+# Python against the database and labelled PASS. These match its verdict
+# wherever it sits in the reply, because the field order differs between the
+# MEAS? response and the result line TEST:RET ON volunteers when a test ends.
+_VERDICT_FAIL = re.compile(r"(?<![A-Z])(FAIL|F_AIL|NG|HIGH|LOW|OVER)(?![A-Z])", re.I)
+_VERDICT_PASS = re.compile(r"(?<![A-Z])(PASS|GOOD)(?![A-Z])", re.I)
+
+
+def _parse_verdict(response: str):
+    """The instrument's own PASS/FAIL, or None if the reply does not carry one.
+
+    None means "it did not say", never "it said PASS". A reply with no verdict
+    in it leaves the channel resting on the spec comparison alone, and that is
+    logged, because it is the condition this whole check exists to catch.
+    """
+    text = response or ""
+    if _VERDICT_FAIL.search(text): return "FAIL"
+    if _VERDICT_PASS.search(text): return "PASS"
+    return None
+
+
+class _Reading(object):
+    """One measurement: the number, what the instrument made of it, and whether
+    the limits it judged against are the ones the part is specified to."""
+
+    __slots__ = ("value", "verdict", "limits_set")
+
+    def __init__(self, value=None, verdict=None, limits_set=False):
+        self.value = value
+        self.verdict = verdict
+        self.limits_set = limits_set
+
+
+def _spec_limit(raw):
+    """One limit as the part specifies it, or None when it does not specify one.
+
+    `float(raw or default)` read a NULL *and a stored 0* as the default, so a
+    blank withstand limit became 9999 mA -- a window no part can fail, which is
+    how channels with no limit on them passed everything. A zero is now a zero
+    and a blank is None, and None is refused rather than filled in.
+    """
+    if raw is None: return None
+    try: return float(raw)
+    except (TypeError, ValueError): return None
+
+
+def _channel_passed(reading, lo, hi) -> bool:
+    """Whether one channel passed -- and both judges have to agree that it did.
+
+    The instrument's verdict comes first: it is the one measuring, its limits
+    are the ones the current was actually compared against as it flowed, and if
+    it says FAIL then the part failed whatever the database thinks. The spec
+    window is then applied on top, so a limit tightened in Model Settings still
+    bites even on an instrument set looser.
+
+    No reading, no limits, or a limit the part does not carry is not a pass.
+    """
+    if reading is None or reading.value is None: return False
+    if reading.verdict == "FAIL": return False
+    if lo is None or hi is None: return False
+    return lo <= reading.value <= hi
 
 
 def _meas_dwell(test_time_s: float) -> float:
@@ -643,9 +711,16 @@ def _meas_text(value, fmt: str) -> str:
     except (TypeError, ValueError): return _NO_READING_TEXT
 
 
-def _meas_result(value, passed: bool) -> str:
-    """Per-channel verdict, with COMM for a channel that was never measured."""
-    if value is None: return _NO_READING_RESULT
+def _chan_result(reading, spec: dict, passed: bool) -> str:
+    """The per-channel verdict stored against the run.
+
+    A channel that was never measured stores COMM, and one the part has no
+    limits for stores NOSPEC. Neither is a FAIL -- the part is not at fault
+    for a comms drop or a blank row in Model Settings, and filing them as
+    failures hides both. Neither is a PASS either.
+    """
+    if reading is None or reading.value is None: return _NO_READING_RESULT
+    if spec.get("min") is None or spec.get("max") is None: return _NO_LIMIT_RESULT
     return "PASS" if passed else "FAIL"
 
 
@@ -735,6 +810,44 @@ class HiPotSerial:
         self.write_line("*CLS")
         time.sleep(0.3)
         self.flush()
+    def set_limit(self, key: str, value: float, label: str) -> bool:
+        """Program one judgement limit and read it back. False if it did not take.
+
+        The limits were never sent. Only MANU:ACW:CLOS went out, which is the
+        current *low* limit; the high limit that decides PASS/FAIL on the
+        instrument was left holding whatever the front panel had, so it judged
+        against one number while the console judged against another.
+
+        Every write is read back because an instrument accepts a command it
+        does not recognise in silence -- a mistyped keyword, or a limit outside
+        the range of this model, leaves no error to see and the old setting
+        still in force. Reading it back is the only way to know the limit being
+        judged against is the one asked for.
+        """
+        text = f"{value:.4f}"
+        if not self.write_line(f"{key} {text}"):
+            print(f"[HIPOT DEBUG] {label}: could not send {key}")
+            return False
+        if not self.write_line(f"{key}?"):
+            print(f"[HIPOT DEBUG] {label}: could not query {key} back")
+            return False
+        time.sleep(0.05)
+        reply = self.read_line()
+        got = _MEAS_NUMBER.search(reply or "")
+        if not got:
+            print(f"[HIPOT DEBUG] {label}: {key} read back as {reply!r} -- no number in it")
+            return False
+        try: back = float(got.group())
+        except ValueError:
+            print(f"[HIPOT DEBUG] {label}: {key} read back as {reply!r} -- unparseable")
+            return False
+        # The instrument rounds to its own resolution, so this is "close
+        # enough to be the value asked for", not equality.
+        if abs(back - float(value)) > max(abs(float(value)) * 0.001, 1e-4):
+            print(f"[HIPOT DEBUG] {label}: {key} set to {text} but reads back {back} -- REFUSED")
+            return False
+        return True
+
     def _measure(self, instr: list, dwell_s: float, label: str):
         """Run one configured test and read it back. None means no reading.
 
@@ -745,43 +858,92 @@ class HiPotSerial:
         to read -- so the next channel parsed the previous one's leftovers.
 
         Nothing here falls back to 0.0. A failed write, a timed-out read and a
-        reply with no number in it all return None, so the caller can tell a
-        comms fault from a part that really does measure zero.
+        reply with no number in it all return a reading of None, so the caller
+        can tell a comms fault from a part that really does measure zero.
+
+        The instrument's own verdict comes back with the number. The reply was
+        being read for the number alone and the judgement thrown away, which
+        left the console free to pass a part the instrument had just failed.
         """
         self.stop_test()
         sent = all([self.write_line(cmd) for cmd in instr])
         if not sent:
             print(f"[HIPOT DEBUG] {label}: setup did not reach the instrument")
             self.stop_test()
-            return None
+            return _Reading()
         time.sleep(dwell_s)
         if not self.write_line("MEAS?"):
             self.stop_test()
-            return None
+            return _Reading()
         time.sleep(0.02)
         response = self.read_line()
         self.stop_test()
         value = _parse_meas(response)
-        print(f"[HIPOT DEBUG] {label}: MEAS? -> {response!r}, parsed value={value}")
-        return value
-    def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min: float, ir_max: float) -> tuple:
+        verdict = _parse_verdict(response)
+        print(f"[HIPOT DEBUG] {label}: MEAS? -> {response!r}, parsed value={value}, verdict={verdict}")
+        if verdict is None:
+            print(f"[HIPOT DEBUG] {label}: no PASS/FAIL in the reply -- "
+                  f"this channel rests on the spec comparison alone")
+        return _Reading(value, verdict)
+    def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min, ir_max) -> _Reading:
+        """One IR test at the part's own limits. Returns what was read and judged.
+
+        RHIS/RLOS were hardcoded to 9999 and 1 -- a window nothing can fall
+        outside -- so the instrument passed every insulation test it ever ran
+        and only the console's own comparison decided anything. They now carry
+        the part's limits, which is what makes the instrument's verdict worth
+        reading back.
+        """
+        label = f"IR @ {ir_volt_kv:.4f} kV"
+        self.stop_test()
+        if not self.write_line("MANU:EDIT:MODE IR"):
+            return _Reading()
+        limits_set = (ir_min is not None and ir_max is not None
+                      and self.set_limit("MANU:IR:RHIS", ir_max, label)
+                      and self.set_limit("MANU:IR:RLOS", ir_min, label))
+        # The limits go out twice on purpose. The pass above proves the
+        # instrument understood the keyword and took the value -- it is the
+        # readback that proves it, and it has to happen before the test
+        # starts. These then go out again after _measure has re-selected the
+        # mode, so whatever a mode switch does to the setup, the limits in
+        # force when the voltage is applied are the ones asked for.
+        limits = ([f"MANU:IR:RHIS {ir_max:.4f}", f"MANU:IR:RLOS {ir_min:.4f}"]
+                  if limits_set else [])
         instr = [
             "MANU:EDIT:MODE IR", "TEST:RET ON", f"MANU:IR:VOLT {ir_volt_kv:.4f}",
-            "MANU:IR:RHIS 9999", "MANU:IR:RLOS 1", f"MANU:IR:TTIM {ir_time_s:.1f}",
-            "MANU:IR:REF 0", "FUNC:TEST ON"
+        ] + limits + [
+            f"MANU:IR:TTIM {ir_time_s:.1f}", "MANU:IR:REF 0", "FUNC:TEST ON"
         ]
-        ir_val = self._measure(instr, _meas_dwell(ir_time_s), f"IR @ {ir_volt_kv:.4f} kV")
-        if ir_val is None: return False, None
-        return ir_min <= ir_val <= ir_max, ir_val
-    def run_acw_test(self, acw_volt_kv: float, acw_time_s: float, acw_min: float, acw_max: float) -> tuple:
+        reading = self._measure(instr, _meas_dwell(ir_time_s), label)
+        reading.limits_set = limits_set
+        return reading
+    def run_acw_test(self, acw_volt_kv: float, acw_time_s: float, acw_min, acw_max) -> _Reading:
+        """One ACW test at the part's own limits. Returns what was read and judged.
+
+        CHIS -- the current high limit, the number that decides PASS or FAIL on
+        this instrument -- was never sent at all. Only CLOS, the low limit,
+        went out. The GPT-9803 judged against whatever the front panel was left
+        on, which is why it failed channels the console passed.
+        """
+        label = f"ACW @ {acw_volt_kv:.4f} kV"
+        self.stop_test()
+        if not self.write_line("MANU:EDIT:MODE ACW"):
+            return _Reading()
+        limits_set = (acw_min is not None and acw_max is not None
+                      and self.set_limit("MANU:ACW:CHIS", acw_max, label)
+                      and self.set_limit("MANU:ACW:CLOS", acw_min, label))
+        # Sent twice on purpose -- see run_ir_test.
+        limits = ([f"MANU:ACW:CHIS {acw_max:.4f}", f"MANU:ACW:CLOS {acw_min:.4f}"]
+                  if limits_set else [])
         instr = [
             "MANU:EDIT:MODE ACW", "TEST:RET ON", f"MANU:ACW:VOLT {acw_volt_kv:.4f}",
-            "MANU:ACW:FREQ 60", "MANU:ACW:CLOS 0.00", f"MANU:ACW:TTIM {acw_time_s:.1f}",
-            "MANU:ACW:REF 0.00", "FUNC:TEST ON"
+            "MANU:ACW:FREQ 60",
+        ] + limits + [
+            f"MANU:ACW:TTIM {acw_time_s:.1f}", "MANU:ACW:REF 0.00", "FUNC:TEST ON"
         ]
-        acw_val = self._measure(instr, _meas_dwell(acw_time_s), f"ACW @ {acw_volt_kv:.4f} kV")
-        if acw_val is None: return False, None
-        return acw_min <= acw_val <= acw_max, acw_val
+        reading = self._measure(instr, _meas_dwell(acw_time_s), label)
+        reading.limits_set = limits_set
+        return reading
 
 def _generate_lot_number(pno: str, machine_id: str) -> str:
     """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<nnnnnnn>.
@@ -2491,7 +2653,7 @@ def render(parent):
             for r in rows:
                 tn = str(r.get("testname", "")).strip()
                 ch = int(r.get("chsel", r.get("channel", 1)) or 1)
-                d = {"appvol": float(r.get("appvol", 0) or 0), "testtime": float(r.get("testtime", 1) or 1), "min": float(r.get("min", 0) or 0), "max": float(r.get("max", 9999) or 9999)}
+                d = {"appvol": float(r.get("appvol", 0) or 0), "testtime": float(r.get("testtime", 1) or 1), "min": _spec_limit(r.get("min")), "max": _spec_limit(r.get("max"))}
                 if "Insulation" in tn or tn.upper() == "IR": spec_ir[ch] = d
                 elif "Withstand" in tn or tn.upper() == "ACW": spec_acw[ch] = d
             state["spec_ir"] = spec_ir; state["spec_acw"] = spec_acw
@@ -2852,6 +3014,24 @@ def render(parent):
 
 
 
+    def _log_reading(label: str, rd, lo, hi, unit: str):
+        """Say what was measured, who judged it, and what it was judged against.
+
+        The console used to log the number alone. The instrument was
+        failing channels this log called a pass and there was nothing in it
+        to show the two had ever disagreed, so the line now carries both
+        verdicts and the window each was applied to.
+        """
+        if rd.value is None:
+            _log(f"{label}: NO READING from HiPot -- comms fault, not a measurement")
+            return
+        shown = _meas_text(rd.value, ".3f" if unit == "mA" else ".0f")
+        window = "NO LIMITS SET for this part" if lo is None or hi is None else f"{lo:g}..{hi:g} {unit}"
+        said = rd.verdict if rd.verdict else "no verdict in its reply"
+        _log(f"{label}: {shown} {unit} | instrument says {said} | spec {window}")
+        if not rd.limits_set:
+            _log(f"{label}: WARNING -- instrument is NOT judging against this part's limits")
+
     def _run_ir_test(n_ch: int) -> tuple:
         _log("IR Test → MANU:EDIT:MODE IR | FUNC:TEST ON | MEAS?")
         if not _serial_ok or not hipot.open():
@@ -2885,14 +3065,15 @@ def render(parent):
                     if not ack:
                         _log(f"IR (Combined): Channel {ch} ACK failed!")
                         all_pass = False
-            s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = float(s0.get("min", 100)); v_max = float(s0.get("max", 9999))
+            s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = s0.get("min"); v_max = s0.get("max")
             _log(f"IR: commanding {s0.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
-            _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
-            if ir_val is None: _log("IR (Combined): NO READING from HiPot -- comms fault, not a measurement")
+            rd = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
+            ir_val = rd.value
+            _log_reading("IR (Combined)", rd, v_min, v_max, "MOhm")
             for ch in range(1, n_ch + 1):
-                s = state["spec_ir"].get(ch, {}); passed = ir_val is not None and float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                s = state["spec_ir"].get(ch, {}); passed = _channel_passed(rd, s.get("min"), s.get("max"))
                 if not passed: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _meas_result(ir_val, passed)}
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _chan_result(rd, s, passed)}
                 _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
@@ -2913,13 +3094,14 @@ def render(parent):
                     if not ack_ok:
                         _log(f"IR (Individual): Channel {ch} ACK failed!")
                         all_pass = False
-                s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = float(s.get("min", 100)); v_max = float(s.get("max", 9999))
+                s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = s.get("min"); v_max = s.get("max")
                 _log(f"IR CH{ch}: commanding {s.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
-                _, ir_val = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
-                if ir_val is None: _log(f"IR CH{ch}: NO READING from HiPot -- comms fault, not a measurement")
-                passed = ir_val is not None and float(s.get("min", 100)) <= ir_val <= float(s.get("max", 9999))
+                rd = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
+                ir_val = rd.value
+                _log_reading(f"IR CH{ch}", rd, v_min, v_max, "MOhm")
+                passed = _channel_passed(rd, v_min, v_max)
                 if not passed or not ack_ok: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _meas_result(ir_val, passed and ack_ok)}
+                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _chan_result(rd, s, passed and ack_ok)}
                 _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
@@ -2966,14 +3148,15 @@ def render(parent):
                     if not ack:
                         _log(f"ACW (Combined): Channel {ch} ACK failed!")
                         all_pass = False
-            s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = float(s0.get("min", 0.0)); v_max = float(s0.get("max", 10.0))
+            s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = s0.get("min"); v_max = s0.get("max")
             _log(f"ACW: commanding {s0.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
-            _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
-            if acw_val is None: _log("ACW (Combined): NO READING from HiPot -- comms fault, not a measurement")
+            rd = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
+            acw_val = rd.value
+            _log_reading("ACW (Combined)", rd, v_min, v_max, "mA")
             for ch in range(1, n_ch + 1):
-                s = state["spec_acw"].get(ch, {}); passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                s = state["spec_acw"].get(ch, {}); passed = _channel_passed(rd, s.get("min"), s.get("max"))
                 if not passed: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed)}
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _chan_result(rd, s, passed)}
                 _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
@@ -2994,13 +3177,14 @@ def render(parent):
                     if not ack_ok:
                         _log(f"ACW (Individual): Channel {ch} ACK failed!")
                         all_pass = False
-                s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = float(s.get("min", 0.0)); v_max = float(s.get("max", 10.0))
+                s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = s.get("min"); v_max = s.get("max")
                 _log(f"ACW CH{ch}: commanding {s.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
-                _, acw_val = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
-                if acw_val is None: _log(f"ACW CH{ch}: NO READING from HiPot -- comms fault, not a measurement")
-                passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
+                rd = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
+                acw_val = rd.value
+                _log_reading(f"ACW CH{ch}", rd, v_min, v_max, "mA")
+                passed = _channel_passed(rd, v_min, v_max)
                 if not passed or not ack_ok: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed and ack_ok)}
+                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _chan_result(rd, s, passed and ack_ok)}
                 _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
