@@ -1675,7 +1675,7 @@ def render(parent):
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "dev_polling": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
-        "ct_last": None, "lot_alert_at": None,
+        "ct_last": None, "batch_no": 0, "batch_ok": 0, "batch_reason": "", "batch_shown": None,
         "cam_results": {1: None, 2: None},
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
@@ -2133,10 +2133,16 @@ def render(parent):
     _lbl(ci, "PPM").grid(row=2, column=0, sticky="w", pady=5); cnt_ppm = _ent(ci, w=5, editable=False, fg="#ff9800"); cnt_ppm.grid(row=2, column=1, sticky="ew", padx=5)
     _lbl(ci, "CT (s)").grid(row=2, column=2, sticky="w", padx=5); cnt_ct = _ent(ci, w=5, editable=False, fg="#4fc3f7"); cnt_ct.grid(row=2, column=3, sticky="ew", padx=5)
     # Typed by the operator, not measured: how many good parts make one lot.
-    # Every time the OK count reaches a multiple of it the page says so, which
-    # is what the running mean cycle time used to occupy this row doing --
-    # a number nobody acted on, next to the live CT that they do.
-    _lbl(ci, "Lot Qty").grid(row=3, column=0, sticky="w", pady=5); ent_lot_qty = _ent(ci, w=5, editable=True); ent_lot_qty.grid(row=3, column=1, columnspan=3, sticky="ew", padx=5)
+    # Asked for once per part load, and counted towards from zero each time,
+    # so the page says so when the box in front of them is full -- which is
+    # what the running mean cycle time used to occupy this row doing: a number
+    # nobody acted on, next to the live CT that they do.
+    _lbl(ci, "Lot Qty").grid(row=3, column=0, sticky="w", pady=5); ent_lot_qty = _ent(ci, w=5, editable=True); ent_lot_qty.grid(row=3, column=1, sticky="ew", padx=5)
+    # How full the box in front of the operator is, which none of the counts
+    # above answer: those are the day's totals for the part, and a box starts
+    # over on every part load. Shares the Lot Qty row deliberately -- the
+    # figure it counts towards is the one sitting next to it.
+    _lbl(ci, "In Box").grid(row=3, column=2, sticky="w", padx=5); cnt_batch = _ent(ci, w=5, editable=False, fg="#76ff03"); cnt_batch.grid(row=3, column=3, sticky="ew", padx=5)
 
     # No login on this one, unlike Scan required: it decides whether a box
     # gets its own label, not whether a part ships unverified, and the person
@@ -2158,7 +2164,17 @@ def render(parent):
         # from today's rows) it only covers the tests run since the current
         # part was loaded. "—" until the first one finishes.
         ct = f"{state['ct_last']:.1f}" if state["ct_last"] is not None else "—"
-        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm), (cnt_ct, ct)]:
+        # "6/10" once a lot quantity is typed, plain "6" before then: the
+        # target is the operator's to set, and a denominator invented here
+        # would be a box size nobody chose.
+        bq = _lot_qty()
+        # batch_shown holds a finished box at its full count until the next
+        # part goes into the new one. Without it the panel drops to 0 the
+        # instant the lot dialog opens, so the operator reads "0/10" behind a
+        # dialog telling them they have ten.
+        in_box = state["batch_ok"] if state["batch_shown"] is None else state["batch_shown"]
+        box = f"{in_box}/{bq}" if bq > 0 else str(in_box)
+        for entry, val in [(cnt_total, str(t)), (cnt_ok, str(o)), (cnt_ng, str(n)), (cnt_ng_pct, pct), (cnt_ppm, ppm), (cnt_ct, ct), (cnt_batch, box)]:
             entry.config(state="normal"); entry.delete(0, "end"); entry.insert(0, val); entry.config(state="readonly")
 
     def _lot_qty() -> int:
@@ -2181,25 +2197,55 @@ def render(parent):
             _log(f"Could not save the lot label setting: {ex}")
         _log(f"Lot label printing {'ENABLED' if want else 'DISABLED'}.")
 
-    def _check_lot_target():
-        """Announce each time the day's OK count reaches a multiple of the
-        lot quantity, so the operator packs a full box instead of counting
-        rows by eye.
+    def _start_batch(reason: str):
+        """Open a new batch -- one box being filled -- counting from zero.
 
-        Keyed on the count that triggered it rather than a flag: the counts
-        are reloaded from today's rows on every part load, so a plain "already
-        warned" flag would either fire again on the same lot or go quiet for
-        the rest of the shift.
+        A batch is not the day's output for a part. Loading a part opens one,
+        including reloading a part that already ran earlier in the shift: that
+        is a fresh box, not a continuation of the one packed before the
+        operator switched away. Closing off a full box opens the next.
         """
-        qty = _lot_qty()
-        ok = state["ok"]
-        if qty <= 0 or ok <= 0 or ok % qty: return
-        if state.get("lot_alert_at") == ok: return
-        state["lot_alert_at"] = ok
-        _log(f"Lot quantity reached ({ok} OK).")
-        _show_lot_dialog()
+        state["batch_ok"] = 0
+        state["batch_shown"] = None
+        state["batch_reason"] = reason
+        _update_counts()
 
-    def _show_lot_dialog():
+    def _count_pass_into_lot():
+        """Count one good part into the open batch, and announce a full box.
+
+        Counted here rather than off state["ok"], which is the whole day's OK
+        total for the part read back from testmaster on every load. A day
+        total cannot start a second batch of the same part: switching away and
+        back would carry the first box's parts into the second, and any lot
+        quantity that did not divide the running total evenly would then trip
+        the announcement partway through a box.
+        """
+        state["batch_ok"] += 1
+        state["batch_shown"] = None
+        _update_counts()
+        if state["batch_ok"] == 1:
+            # Numbered on the first part into it rather than when it opened.
+            # Opening one costs nothing and happens on every part load and
+            # every full box, so numbering there burnt a number on batches
+            # nothing was ever packed under -- a part loaded and swapped again
+            # untested, or the empty batch a full box leaves behind when the
+            # operator changes part instead of carrying on.
+            state["batch_no"] += 1
+            _log(f"Batch {state['batch_no']} started "
+                 f"({state.get('batch_reason') or 'new lot'}).")
+        qty = _lot_qty()
+        if qty <= 0 or state["batch_ok"] < qty: return
+        count = state["batch_ok"]
+        _log(f"Lot quantity reached -- batch {state['batch_no']} full ({count} OK).")
+        _show_lot_dialog(count)
+        # The box just closed is counted and labelled; whatever is tested next
+        # goes into the following one. The panel keeps showing the full box
+        # until that next part arrives -- see batch_shown in _update_counts.
+        _start_batch(f"previous batch of {count} complete")
+        state["batch_shown"] = count
+        _update_counts()
+
+    def _show_lot_dialog(count: int):
         """The lot announcement, as a dialog that matches the console rather
         than a stock grey messagebox -- it lands on a dark screen the operator
         is watching from a step back, so it is built the size and contrast of
@@ -2232,7 +2278,7 @@ def render(parent):
         lot_info = dict(
             pno=state["pno"], model=state["model"], alc=state["alc"],
             vendor_code=state["vendor_code"], eo_number=state["eo_number"],
-            lot_no=state.get("lot_no") or "", qty=_lot_qty(), count=state["ok"],
+            lot_no=state.get("lot_no") or "", qty=_lot_qty(), count=count,
             emp=ent_emp.get().strip(), machine_id=cfg["machine_id"],
         )
 
@@ -3687,7 +3733,7 @@ def render(parent):
         _after(0, _update_counts)
         # Queued, not called here: this runs on the test thread and the
         # announcement is a modal dialog.
-        if overall == "PASS": _after(0, _check_lot_target)
+        if overall == "PASS": _after(0, _count_pass_into_lot)
         _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda c=_lot_3_letters(): _fill_ro(ent_lot, c))
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
@@ -3974,6 +4020,10 @@ def render(parent):
     # deliberate act -- clicking START, or the physical button pulling X0 high
     # -- so that typing the last digit of a quantity can never set the machine
     # running on a part the operator has not finished loading.
+    # The "In Box" target follows the box as it is typed: an operator who
+    # mistypes 100 for 10 should see it next to the count, not discover it a
+    # box later.
+    ent_lot_qty.bind("<KeyRelease>", lambda e: _update_counts())
     ent_lot_qty.bind("<Return>", lambda e: btn_start.focus_set())
 
     def _print_marker(marker: str, pno: str):
@@ -4003,8 +4053,14 @@ def render(parent):
         for e in [ent_pname, ent_cust, ent_model, ent_alc, ent_vendor, ent_eo, ent_lot, ent_testtype]: e.config(state="normal"); e.delete(0, "end"); e.config(state="readonly")
         tree_spec.delete(*tree_spec.get_children()); _reset_test_display()
         spec_status_lbl.config(text="[ No part loaded ]", fg="#444"); _lock_scan_entry(); _set_awaiting_scan(False); _set_scan_box("")
+        # The lot quantity goes with the part, not with the station. Leaving
+        # the last one in the box let the next part inherit a box size nobody
+        # chose for it, and the part after that inherit it again -- so it is
+        # emptied here and asked for again on the next load.
+        ent_lot_qty.delete(0, "end")
         state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None,
-                      "ct_last": None, "lot_alert_at": None})
+                      "ct_last": None, "batch_ok": 0, "batch_shown": None})
+        _update_counts()
         btn_start.config(bg="#1a1a1a", fg="#444")
 
     def _next_part():
@@ -4151,6 +4207,11 @@ def render(parent):
         _paint("Ready", "#4caf50")
 
     def _on_jig_enter(event=None):
+        # A validated JIG entry is readonly, but readonly is not unfocusable --
+        # ENTER pressed in it again would reload the part underneath the
+        # operator, putting a second START on the marker roll and, worse now,
+        # restarting the batch halfway through the box they are packing.
+        if state["pno"]: return
         jig = ent_jig.get().strip().upper()
         if not jig: return
         pno = ent_pno.get().strip().upper()
@@ -4169,15 +4230,19 @@ def render(parent):
         _input_poll_stop(); spec_status_lbl.config(text="[ Loading… ]", fg="#e8a000"); tree_spec.delete(*tree_spec.get_children()); _fill_ro(ent_lot, ""); _reset_test_display()
         if _load_specs(pno):
             _load_today_pass(pno); btn_start.config(bg="#1b5e20", fg="white")
+            # A loaded part is a new box to fill, even one that ran earlier in
+            # the shift -- the operator packed and closed that one before they
+            # switched away.
+            _start_batch(f"part {pno}")
             _print_marker("START", pno)
             _announce_part_loaded(pno)
-            # Focus goes to Lot Qty rather than START: it is the only field the
-            # operator still has to fill, and _trigger_test refuses to run
-            # without it. Pre-selected so typing a new quantity replaces the
-            # last one instead of appending digits to it. ENTER moves on to
-            # START without pressing it -- starting the test stays a separate,
-            # deliberate act.
-            ent_lot_qty.focus_set(); ent_lot_qty.select_range(0, "end"); ent_lot_qty.icursor("end")
+            # Focus goes to Lot Qty rather than START: releasing the last part
+            # emptied it, so it is the only field the operator still has to
+            # fill, and _trigger_test refuses to run without it -- which is
+            # what asks for a box size once per part rather than once a shift.
+            # ENTER moves on to START without pressing it: starting the test
+            # stays a separate, deliberate act.
+            ent_lot_qty.focus_set()
             _after(500, _input_poll_start)
         else:
             # An unknown part number is a typo, not the end of the shift --
