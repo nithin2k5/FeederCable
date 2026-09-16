@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import datetime
 import csv
 import os
+import threading
 
 try:
     from PIL import Image, ImageTk
@@ -11,6 +12,9 @@ except ImportError:
     _pil_ok = False
 
 import db
+# The lot label template, the printer name and the machine id all belong to the
+# Test Console; a second copy of any of them here would be one to keep in step.
+import test_console as _tc
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 # One place for the page's colors instead of the same hex values retyped into
@@ -420,6 +424,9 @@ def render(parent):
         filters = f"part {pno}" + ("" if res == "ALL" else f"  ·  {res} only")
         status_lbl.config(text=f"{rows} rows  ·  {len(parts)} parts  ·  {start} → {end}  ·  {filters}",
                           fg=TXT_DIM)
+        # The part-number dropdown re-runs the search, so this is also where a
+        # change of part reaches the batch button.
+        _sync_batch_btn()
 
     def _do_export():
         rows = [tree.item(c)["values"] for c in tree.get_children()
@@ -442,8 +449,175 @@ def render(parent):
         except Exception as ex:
             messagebox.showerror("Export Error", f"Failed to export: {ex}")
 
+    # ── Batch label for a short box ──────────────────────────────────────────
+    # A box abandoned part-filled -- by a part change or a program close, both
+    # of which now say so on the Test Console -- never got its lot label. This
+    # is where it is printed after the fact, off the records rather than off a
+    # live count, so the box can be closed off without re-running parts.
+    def _batch_ready():
+        """(pno, qty) when a batch label could be printed, else None.
+
+        Both conditions are the operator's: a label carries one part number,
+        so "ALL" has nothing to print, and the quantity is what went in the
+        box -- a number only they can know, since the box is short of whatever
+        the run was aiming at.
+        """
+        pno = cb_pno.get().strip()
+        if not pno or pno == "ALL":
+            return None
+        # Read off the variable, not the widget, so this closure holds the one
+        # reference keeping it alive. A StringVar that nothing refers to once
+        # render() returns is collected, and its __del__ takes the Tcl variable
+        # and every trace on it with it -- leaving the button frozen at
+        # whatever state the last part-number change left behind.
+        try:
+            qty = int(batch_qty_var.get().strip())
+        except ValueError:
+            return None
+        return (pno, qty) if qty > 0 else None
+
+    def _sync_batch_btn(*_):
+        """Grey the button until there is a part and a quantity to print for."""
+        ready = _batch_ready() is not None
+        btn_batch.config(state="normal" if ready else "disabled",
+                         cursor="hand2" if ready else "arrow")
+        batch_hint.config(
+            text="" if ready else "select one part number and a quantity",
+            fg=TXT_DIM)
+
+    def _do_batch_label():
+        ready = _batch_ready()
+        if ready is None:
+            return                      # the button is disabled; belt and braces
+        pno, qty = ready
+        start, end = ent_start.get().strip(), ent_end.get().strip()
+        if not (_valid_date(start) and _valid_date(end)):
+            messagebox.showwarning("Date", "Dates must be written as YYYY-MM-DD.")
+            return
+
+        # The label needs the part's master data and a lot number. The lot is
+        # taken from the most recent PASS in the filtered range: the box being
+        # labelled is the one those parts came out of, and the date filter is
+        # already how this page says which run it is looking at.
+        try:
+            with db.get_dict_cursor() as cur:
+                cur.execute("SELECT mname, alc, vendorcode, eocode "
+                            "FROM settingmaster WHERE pno=%s", (pno,))
+                master = cur.fetchone()
+                cur.execute("SELECT lotno, alc, empcode FROM testmaster "
+                            "WHERE pno=%s AND result='PASS' AND date >= %s AND date <= %s "
+                            "ORDER BY date DESC, time DESC LIMIT 1", (pno, start, end))
+                last = cur.fetchone()
+                cur.execute("SELECT COUNT(*) AS n FROM testmaster "
+                            "WHERE pno=%s AND result='PASS' AND date >= %s AND date <= %s",
+                            (pno, start, end))
+                passed = (cur.fetchone() or {}).get("n", 0) or 0
+        except Exception as ex:
+            messagebox.showerror("DB Error", f"Could not read the part's details: {ex}")
+            return
+
+        if not master:
+            messagebox.showwarning(
+                "Batch Label",
+                f"Part number '{pno}' is not in settingmaster, so there is no "
+                f"model, ALC or vendor code to put on the label.")
+            return
+        if not last:
+            messagebox.showwarning(
+                "Batch Label",
+                f"No PASS records for '{pno}' between {start} and {end}.\n\n"
+                f"A lot label carries the lot number of the parts in the box, "
+                f"and there is none in this range to take.")
+            return
+
+        # Said out loud rather than refused: the operator is looking at the box
+        # and this page is not. A short box is the whole point of the button,
+        # but more in the box than the range ever passed means the quantity or
+        # the dates are wrong.
+        if qty > passed:
+            if not messagebox.askyesno(
+                    "Batch Label",
+                    f"You entered {qty}, but only {passed} part(s) passed for "
+                    f"'{pno}' between {start} and {end}.\n\n"
+                    f"Print the label anyway?"):
+                return
+
+        lot_no = last.get("lotno") or ""
+        info = dict(
+            pno=pno,
+            model=master.get("mname") or "",
+            alc=master.get("alc") or last.get("alc") or "",
+            vendor_code=master.get("vendorcode") or "",
+            eo_number=master.get("eocode") or "",
+            lot_no=lot_no,
+            # One typed number fills both: a short box holds what it holds, so
+            # the quantity on the label and the count in it are the same
+            # figure. The full-box label from the Test Console is the one where
+            # they can differ.
+            qty=qty, count=qty,
+            emp=last.get("empcode") or "",
+            machine_id=_tc._load_cfg().get("machine_id", ""),
+        )
+
+        if not messagebox.askyesno(
+                "Batch Label",
+                f"Print a batch label for a part-filled box?\n\n"
+                f"Part       {pno}\n"
+                f"Lot        {lot_no}\n"
+                f"Quantity   {qty}\n"
+                f"Printer    {_tc._LOT_PRINTER_NAME}\n\n"
+                f"{passed} part(s) passed in {start} → {end}."):
+            return
+
+        # Off the UI thread: the availability probe and the spooler write both
+        # touch Windows, and this page should not sit frozen while they do.
+        status_lbl.config(text=f"printing batch label for {pno}…", fg=WARN)
+
+        def _work():
+            if not _tc._printer_online(_tc._LOT_PRINTER_NAME):
+                _say(f"'{_tc._LOT_PRINTER_NAME}' is not available — no label printed.", NG)
+                return
+            sent = _tc._print_lot_label(**info)
+            _say(f"batch label sent to {_tc._LOT_PRINTER_NAME}  ·  {pno}  ·  lot {lot_no}  ·  qty {qty}"
+                 if sent else
+                 "batch label FAILED to print — check LOTPRN.prn and the printer.",
+                 OK if sent else NG)
+
+        def _say(msg, color):
+            try:
+                parent.after(0, lambda: status_lbl.winfo_exists()
+                             and status_lbl.config(text=msg, fg=color))
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
     mk_button("🔍  SEARCH", _do_search)
     mk_button("📄  EXPORT CSV", _do_export)
+
+    # The batch label is an action on one part, not a filter, so it sits below
+    # the two buttons behind its own rule rather than among the dropdowns.
+    tk.Frame(btn_frame, bg=BORDER, height=1).pack(fill="x", pady=(10, 7))
+    tk.Label(btn_frame, text="BATCH QTY", bg=BG, fg=TXT_DIM,
+             font=("Arial", 8, "bold")).pack(anchor="w")
+    ent_batch_qty = mk_entry(btn_frame, 8)
+    ent_batch_qty.pack(fill="x", pady=(1, 4))
+    # Traced rather than bound to <KeyRelease>: a trace catches every way the
+    # box changes, including a paste from the right-click menu, which never
+    # sends a key event at all. _batch_ready reads it, which is also what keeps
+    # it alive -- see there.
+    batch_qty_var = tk.StringVar()
+    ent_batch_qty.config(textvariable=batch_qty_var)
+    btn_batch = mk_button("🏷  PRINT BATCH LABEL", _do_batch_label, WARN)
+    # tk.Button ignores fg while disabled, so the greyed-out state is its own
+    # colour rather than the one set at construction.
+    btn_batch.config(disabledforeground="#3f5662")
+    batch_hint = tk.Label(btn_frame, text="", bg=BG, fg=TXT_DIM,
+                          font=("Arial", 8), wraplength=150, justify="left")
+    batch_hint.pack(anchor="w")
+
+    batch_qty_var.trace_add("write", _sync_batch_btn)
+    _sync_batch_btn()
 
     # ENTER anywhere in the filter bar runs the search, and changing either
     # dropdown re-runs it -- the page is read by picking a filter, so making
