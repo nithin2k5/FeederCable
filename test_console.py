@@ -1316,26 +1316,53 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
 # 35 mm at 203 dpi (8 dots/mm), and the TSPL internal fonts that are fixed
 # width -- cell width in dots, so a rendered line's width is exactly
 # len(text) * cell * multiplier.
-_MARKER_LABEL_W = 280
+# TSPL's internal fonts are sized in dots, so a label's width in mm only
+# becomes a usable number with this. 8 dots/mm is 203 dpi, which is what the
+# font widths below are measured at.
+_MARKER_DPMM = 8
+# 35 mm, the stock MARKER.prn is written for. Only used if its SIZE line
+# cannot be read.
+_MARKER_LABEL_W_DEFAULT = 280
+# How far in from the reading-left edge the text starts. 1 mm, enough to
+# clear the die cut without looking indented.
+_MARKER_LEFT_MARGIN = 8
 _MARKER_FONT_W = {"2": 12, "3": 16}
+_MARKER_SIZE_LINE = re.compile(r"^\s*SIZE\s+([\d.]+)\s*mm", re.I | re.M)
 
-def _marker_line(y: int, font: str, mul: int, content: str, align_w: int = 0) -> str:
+
+def _marker_label_width(template: str) -> int:
+    """The label's width in dots, taken from the template's own SIZE line.
+
+    The stock is declared once, at the top of MARKER.prn, and every line
+    position here is worked out from it. Reading it back from the template
+    means changing the stock there moves the text with it, instead of leaving
+    it positioned for a label that is no longer being printed on.
+    """
+    m = _MARKER_SIZE_LINE.search(template or "")
+    if not m: return _MARKER_LABEL_W_DEFAULT
+    try: return int(round(float(m.group(1)) * _MARKER_DPMM))
+    except ValueError: return _MARKER_LABEL_W_DEFAULT
+
+def _marker_line(y: int, font: str, mul: int, content: str, label_w: int) -> str:
     """One TSPL TEXT line, rotation 180, positioned without the printer's help.
 
     TSPL's own alignment argument is not supported across all TSC firmware,
     but these internal fonts are fixed width, so a line's rendered width is
     exact and the position can just be computed.
 
-    align_w is the width the line is placed *as if* it had. Left at 0 the line
-    centres on itself; pass a block's widest line and every line of that block
-    shares one edge instead of floating independently. That works because
-    under rotation 180 the anchor is the reading-left edge, so a shared anchor
-    is a shared left margin whatever each line's own length -- and for the
-    centred case the arithmetic comes out the same either way.
+    Every line is placed against the same left edge. Under rotation 180 the
+    anchor is the reading-left edge of the text, so one x for all of them is
+    one left margin whatever each line's own length -- the title included,
+    which used to centre on itself and sat out of line with the block under
+    it.
+
+    A line too long for the stock anchors at its own width instead, so it
+    runs off the far edge rather than off the near one: losing the end of a
+    value is recoverable by eye, losing the caption that says which field it
+    is is not.
     """
     width = len(content) * _MARKER_FONT_W[font] * mul
-    box = max(width, align_w)
-    x = max(width, min(_MARKER_LABEL_W, (_MARKER_LABEL_W + box) // 2))
+    x = max(width, label_w - _MARKER_LEFT_MARGIN)
     return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
 
 def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
@@ -1354,6 +1381,14 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     if not os.path.exists(prn_file):
         print(f"[PRINT DEBUG] marker template not found ({prn_file}) -- aborting print")
         return
+    try:
+        with open(prn_file, "r", encoding="latin-1") as f: template = f.read()
+    except Exception as ex:
+        print(f"[PRINT DEBUG] could not read marker template: {ex}")
+        return
+    # Read before the body is built, not after: the stock size in it is what
+    # the line positions are measured against.
+    label_w = _marker_label_width(template)
     now = datetime.datetime.now()
     # Captions padded to the longest one so the colons line up down the block.
     #
@@ -1369,20 +1404,16 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         ("D&T",   now.strftime("%d/%m/%y %H:%M")),
         ("MC ID", machine_id),
     )]
-    # The title centres on itself; the fields share one left edge, with the
-    # block as a whole centred via its widest line.
-    block_w = max(len(f) for f in fields) * _MARKER_FONT_W["2"]
     # Read top to bottom on the label; with rotation 180 that is y descending.
     # Three rows at the old 28 dot pitch, centred in the band the four used to
     # fill, so dropping a row moves the block down instead of leaving it hung
     # under the title with the gap at the bottom.
     body = "\r\n".join(
-        [_marker_line(170, "3", 1, f"{marker} LABEL")]
-        + [_marker_line(y, "2", 1, f, block_w) for y, f in zip((118, 90, 62), fields)]
+        [_marker_line(170, "3", 1, f"{marker} LABEL", label_w)]
+        + [_marker_line(y, "2", 1, f, label_w) for y, f in zip((118, 90, 62), fields)]
     )
     try:
-        with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
-        text = text.replace("@body@", body)
+        text = template.replace("@body@", body)
         # A scratch file per marker: _print_barcode_label owns TEMPPRN.prn and
         # both printers run on background threads, so any shared scratch file
         # could be overwritten between write and send.
