@@ -139,6 +139,17 @@ ASSET_FILES=(
     "NG.WAV"
     "FC EOL.ico"
 )
+# Assets that shipped with an earlier version and no longer do. Installing is a
+# copy over the top of what is already there, which adds and replaces but never
+# removes, so a renamed asset would sit on the station forever beside the file
+# that replaced it. The date code tables are the case that matters: an operator
+# told to change the date coding edits whichever name they find, and editing the
+# dead one changes nothing on the label while looking like it should.
+RETIRED_FILES=(
+    "date.txt"
+    "month.txt"
+    "year.txt"
+)
 # Station state. Created by the installer if absent, never overwritten.
 CONFIG_FILES=("comport_cfg.ini" "camera_cfg.ini" "vision_config.json" "emp.txt")
 STATE_DIRS=("vision_models" "vision_captures")
@@ -264,6 +275,13 @@ if [ -n "$KEEP" ]; then
     rm -rf "$KEEP"
     note "Station config restored."
 fi
+
+for f in "${RETIRED_FILES[@]}"; do
+    if [ -e "$PAYLOAD/$f" ]; then
+        rm -f "$PAYLOAD/$f"
+        note "removed   $f (superseded — not part of the app any more)"
+    fi
+done
 
 # ── Provision the runtime files ──────────────────────────────────────────────
 # Everything below is create-if-absent. Nothing here overwrites a file that is
