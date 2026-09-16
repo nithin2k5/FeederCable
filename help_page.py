@@ -160,10 +160,10 @@ CHAPTERS = [
 ("Labels and Scanning", [
     ("h", "The lot number"),
     ("p", "Every passing cable gets a lot number of the form "
-          "yymmdd I m A2A nnnn — the date, the machine, and a four-digit serial. "
-          "The serial belongs to the part: each part starts again at 0001 every "
-          "day, so a test is identified by the part number and lot number "
-          "together."),
+          "yymmdd I m A2A nnnnnnn — the date, the machine, and a seven-digit "
+          "serial. The serial belongs to the part: each part starts again at "
+          "0000001 every day, so a test is identified by the part number and lot "
+          "number together."),
     ("h", "Scanning the label back"),
     ("p", "When Scan required is ticked, a PASS is not finished until its printed "
           "label has been scanned. The START button is held — it reads SCAN LABEL "

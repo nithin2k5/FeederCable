@@ -216,7 +216,7 @@ def _save_cfg_key(key: str, value):
 # ISO/IEC 15434 labels carry non-printable separators, which render as nothing
 # (or as boxes) in a Tk label. Show them as mnemonics so the operator sees the
 # structure of what was scanned:
-#   [)>[RS]06[GS]VT007[GS]P123[GS]S123[GS]T260905I1A2A6[GS][RS][EOT]
+#   [)>[RS]06[GS]VT007[GS]P123[GS]S123[GS]T260905I1A2A0000006[GS][RS][EOT]
 _SCAN_CTRL_NAMES = {
     "\x1e": "[RS]", "\x1d": "[GS]", "\x1f": "[US]",
     "\x04": "[EOT]", "\x05": "[ENQ]", "\r": "[CR]", "\n": "[LF]",
@@ -238,7 +238,7 @@ def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
     so splitting on "not alnum" isolates the same fields regardless of
     exactly which bytes the scanner actually sends. Some label formats wrap
     the lot number in an ISO 15434 field starting with "T" (e.g.
-    T260905I1A2A6); others (most current templates) print the bare lot
+    T260905I1A2A0000006); others (most current templates) print the bare lot
     number with no prefix at all -- either way the lot number is a substring
     of that one field, so checking membership in the field is enough.
     """
@@ -784,10 +784,11 @@ class HiPotSerial:
         return acw_min <= acw_val <= acw_max, acw_val
 
 def _generate_lot_number(pno: str, machine_id: str) -> str:
-    """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<nnnn>.
+    """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<nnnnnnn>.
 
-    The serial is zero-padded to four digits (0001, 0002, ... ) so every label
-    carries a fixed-width code, the way the original C# console padded its own.
+    The serial is zero-padded to seven digits (0000001, 0000002, ... ) so every
+    label carries a fixed-width code, the way the original C# console padded its
+    own.
 
     The sequence belongs to the part number, so every part starts its own run
     at 1 each day rather than continuing the previous part's numbering. Two
@@ -799,8 +800,9 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
 
     Continuing from the highest number this part has already been issued today
     (rather than from a row count) stops a deleted record from re-issuing a
-    number that is already on a printed label. Unpadded lots issued before the
-    padding went in still read back correctly, since int() ignores the width.
+    number that is already on a printed label. Lots issued before this width
+    went in -- unpadded, or padded to four digits -- still read back correctly,
+    since int() ignores the leading zeros and the width alike.
     """
     now = datetime.datetime.now()
     date_str = now.strftime("%y%m%d")
@@ -817,7 +819,7 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
                     highest = max(highest, int(tail))
     except Exception as ex:
         print(f"DB Error generating lot: {ex}")
-    return f"{prefix}{highest + 1:04d}"
+    return f"{prefix}{highest + 1:07d}"
 
 def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
     """One channel's measured value per slot, in channel order, comma separated.
