@@ -4063,6 +4063,105 @@ def render(parent):
         _update_counts()
         btn_start.config(bg="#1a1a1a", fg="#444")
 
+    def _confirm_short_box() -> bool:
+        """Ask before a part change abandons a box that is not full. True to go.
+
+        Nothing already recorded is at stake -- every part counted into the
+        box has its testmaster row and its own barcode label, and still counts
+        in the day's totals. What is lost is the box: its count, and the lot
+        label it never gets. That is worth a deliberate press rather than the
+        silent discard a stray Next Part used to be.
+
+        Silent when there is nothing to be short of: no lot quantity typed, or
+        no part counted into the box yet.
+        """
+        qty = _lot_qty()
+        done = state["batch_ok"]
+        if qty <= 0 or done <= 0 or done >= qty: return True
+
+        top = parent.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.withdraw()
+        dlg.title("Box Not Full")
+        dlg.configure(bg="#111")
+        dlg.resizable(False, False)
+        dlg.transient(top)
+
+        # Amber, where the lot dialog is green: the same box, stopped early.
+        tk.Frame(dlg, bg="#e8a000", height=6).pack(fill="x")
+        body = tk.Frame(dlg, bg="#111", padx=44, pady=26)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="⚠", bg="#111", fg="#e8a000",
+                 font=("Arial", _fs(40))).pack()
+        tk.Label(body, text="Box not full", bg="#111", fg="white",
+                 font=("Arial", _fs(20), "bold")).pack(pady=(8, 0))
+        tk.Label(body, text=f"Batch {state['batch_no']} — part {state['pno'] or '?'}\n"
+                            f"{done} of {qty} tested.",
+                 bg="#111", fg="#ccc", font=("Arial", _fs(12)),
+                 justify="center").pack(pady=(10, 0))
+        tk.Label(body, text="Changing part closes this box without a lot label.",
+                 bg="#111", fg="#888", font=("Arial", _fs(9))).pack(pady=(10, 0))
+
+        # Guarded like the lot dialog's: every way out lands here, and
+        # destroying an already destroyed window raises.
+        answer = {"go": False, "done": False}
+
+        def _finish(go):
+            if answer["done"]: return
+            answer["done"] = True
+            answer["go"] = go
+            try: dlg.grab_release()
+            except Exception: pass
+            dlg.destroy()
+
+        btns = tk.Frame(body, bg="#111")
+        btns.pack(pady=(22, 0))
+        btn_cancel = tk.Button(btns, text="Cancel", bg="#1a1a1a", fg="#ccc",
+                               font=("Arial", _fs(13), "bold"), bd=0, padx=30, pady=9,
+                               cursor="hand2", activebackground="#2a2a2a",
+                               activeforeground="white", command=lambda: _finish(False))
+        btn_cancel.pack(side="left", padx=6)
+        tk.Button(btns, text="Change part", bg="#b71c1c", fg="white",
+                  font=("Arial", _fs(13), "bold"), bd=0, padx=30, pady=9,
+                  cursor="hand2", activebackground="#d32f2f",
+                  activeforeground="white", command=lambda: _finish(True)).pack(side="left", padx=6)
+
+        # Escape and the window X mean Cancel, and so does ENTER: keeping the
+        # box open is the recoverable answer, and this dialog appears when the
+        # operator may not have meant to be here at all. <space> is left to
+        # Tk's own button binding so a focused button is not fired twice.
+        dlg.protocol("WM_DELETE_WINDOW", lambda: _finish(False))
+        dlg.bind("<Escape>", lambda e: _finish(False))
+        for key in ("<Return>", "<KP_Enter>"):
+            dlg.bind(key, lambda e: _finish(False))
+
+        # Measured twice, as the lot dialog is: Windows places the frame at
+        # the requested point while these sizes are of the client area inside.
+        dlg.update_idletasks()
+        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+
+        def _place(fw, fh):
+            x = top.winfo_rootx() + (top.winfo_width() - fw) // 2
+            y = top.winfo_rooty() + (top.winfo_height() - fh) // 3
+            x = max(0, min(x, dlg.winfo_screenwidth() - fw))
+            y = max(0, min(y, dlg.winfo_screenheight() - fh))
+            dlg.geometry(f"{w}x{h}+{x}+{y}")
+            return x, y
+        x, y = _place(w, h)
+        dlg.deiconify()
+        dlg.update_idletasks()
+        bx = max(0, dlg.winfo_rootx() - x)
+        by = max(0, dlg.winfo_rooty() - y)
+        _place(w + 2 * bx, h + by + bx)
+
+        btn_cancel.focus_set()
+        try: dlg.grab_set()
+        except Exception: pass
+        # Blocks, unlike the lot dialog: the caller is mid part change and
+        # needs the answer before it releases anything.
+        top.wait_window(dlg)
+        return answer["go"]
+
     def _next_part():
         """Switch to a different part without ending the operator's session.
 
@@ -4073,12 +4172,22 @@ def render(parent):
         """
         if state["test_running"]:
             _log("Test in progress — finish it before changing part."); return
+        # Asked first, while everything is still recoverable: the END marker
+        # below and _clear_part_fields are both one way.
+        if not _confirm_short_box():
+            _log("Part change cancelled — the box is still open."); return
+        # Read before _clear_part_fields() zeroes them, so the log can say what
+        # was in the box that just went unlabelled.
+        short_of = (state["batch_ok"], _lot_qty(), state["batch_no"])
         # Has to happen before _clear_part_fields() wipes state["pno"]. The
         # guard also covers _on_jig_enter's failure path, which calls this with
         # no part ever loaded -- there is nothing to close out there.
         if state["pno"]: _print_marker("END", state["pno"])
         _input_poll_stop()
         _clear_part_fields()
+        done, qty, batch = short_of
+        if qty > 0 and 0 < done < qty:
+            _log(f"Batch {batch} closed short — {done} of {qty}, no lot label.")
         emp = ent_emp.get().strip()
         if not emp:
             ent_emp.config(state="normal", bg="black"); ent_emp.focus_set()
