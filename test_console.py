@@ -860,13 +860,14 @@ _LOT_CODE_TABLES = {"day": "DAY CODE.txt", "month": "MONTH CODE.txt",
 # once rather than worked out from the table's length.
 _LOT_CODE_YEAR_FIRST = 2021
 # Used only when a table is missing, empty or unreadable, so a broken file
-# still prints a label instead of stopping the line. Same values the shipped
-# files hold: days 1-9 as digits then A-V, months A-L, years A-T from 2021
-# (through 2040).
+# still prints a label instead of stopping the line. These have to stay in step
+# with the shipped files by hand: a station whose table went missing would
+# otherwise print a code nobody chose and give no sign of it. As shipped, days
+# A-Z then 1-5, months A-L, years Q-Z from 2021 (through 2030).
 _LOT_CODE_FALLBACK = {
-    "day":   [str(d) for d in range(1, 10)] + [chr(ord("A") + i) for i in range(22)],
+    "day":   [chr(ord("A") + i) for i in range(26)] + [str(d) for d in range(1, 6)],
     "month": [chr(ord("A") + i) for i in range(12)],
-    "year":  [chr(ord("A") + i) for i in range(20)],
+    "year":  [chr(ord("Q") + i) for i in range(10)],
 }
 # What goes on the label when the date falls outside a table -- a year past the
 # end of the year table, say, or one before it starts. Deliberately something an
@@ -879,7 +880,16 @@ def _read_lot_code_table(kind: str) -> list:
     path = os.path.join(os.path.dirname(__file__), _LOT_CODE_TABLES[kind])
     try:
         with open(path, "r", encoding="latin-1") as f:
-            table = [part.strip() for part in f.read().split(",")]
+            raw = f.read().strip()
+        # The tables are maintained by hand, and a hand written list tends to
+        # get a full stop on the end of it: "...,3,4,5." Drop one closing stop
+        # so the last entry is the single character the rest of the table is,
+        # rather than "5." -- a label two characters wide in one slot, printed
+        # only on the 31st, is exactly the kind of fault that reaches the
+        # customer before anyone here sees it.
+        if raw.endswith("."):
+            raw = raw[:-1]
+        table = [part.strip() for part in raw.split(",")]
         table = [part for part in table if part]
         if table:
             return table
