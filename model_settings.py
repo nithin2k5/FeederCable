@@ -551,13 +551,64 @@ def render(parent):
         btn_update.config(state="disabled")
         btn_delete.config(state="disabled")
 
+    # The four spec columns, in the order they sit in spec_data, with what
+    # each one has to be before the part can be tested at all.
+    _SPEC_COLS = (
+        ("APPLIED VOLTS", True),   # must be > 0 -- it is what goes into the part
+        ("TEST TIME",     True),   # must be > 0 -- there is no test at zero seconds
+        ("SPEC MIN",      False),  # a floor of 0 is a real choice
+        ("SPEC MAX",      False),
+    )
+
     def validate_channel_data():
-        num_channels = int(cb_channels.get())
+        """Every field of every channel, for both tests, filled with a number.
+
+        A blank was already rejected, but only a blank. Anything non-empty got
+        through, so a mistyped voltage saved as text and the console read it
+        back as no value at all -- and the console used to substitute 1500 V
+        for a withstand test that had none. It refuses to test now instead, so
+        a row that cannot be tested is worth stopping here, where whoever is
+        typing it can still see which cell is wrong.
+
+        Channels above the selected count are not checked. They are not going
+        to be tested and are not written to settingspec.
+        """
+        try:
+            num_channels = int(cb_channels.get())
+        except (TypeError, ValueError):
+            messagebox.showwarning("Validation", "Select the number of channels first.")
+            return False
         for ch in range(1, num_channels + 1):
             for test_name in ("IR", "ACW"):
                 vals = spec_data[ch][test_name]
-                if any(str(v).strip() == "" for v in vals):
-                    messagebox.showwarning("Validation", f"Please fill all {test_name} values for CH#{ch}.")
+                for (col, positive), raw in zip(_SPEC_COLS, vals):
+                    text = str(raw).strip()
+                    if text == "":
+                        messagebox.showwarning(
+                            "Validation",
+                            f"{test_name} CH#{ch}: {col} is empty.\n\n"
+                            f"Every field of every channel has to be filled in "
+                            f"before the part can be tested.")
+                        return False
+                    try:
+                        value = float(text)
+                    except ValueError:
+                        messagebox.showwarning(
+                            "Validation",
+                            f"{test_name} CH#{ch}: {col} is '{text}', which is not a number.")
+                        return False
+                    if positive and value <= 0:
+                        messagebox.showwarning(
+                            "Validation",
+                            f"{test_name} CH#{ch}: {col} is {text}.\n\n"
+                            f"It has to be greater than zero -- there is no test to run at zero.")
+                        return False
+                lo, hi = float(str(vals[2]).strip()), float(str(vals[3]).strip())
+                if hi <= lo:
+                    messagebox.showwarning(
+                        "Validation",
+                        f"{test_name} CH#{ch}: SPEC MAX ({hi:g}) is not above SPEC MIN ({lo:g}).\n\n"
+                        f"Nothing can pass a window that way round.")
                     return False
         return True
 

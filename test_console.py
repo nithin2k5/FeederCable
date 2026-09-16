@@ -610,6 +610,11 @@ _NO_READING_RESULT = "COMM"
 # and it is not a measurement failure -- it says the part was never specified,
 # which is a different thing to fix.
 _NO_LIMIT_RESULT = "NOSPEC"
+_NO_SPEC_TEXT = "NO SPEC"
+# Every field a channel needs before it can be tested at all. Two of them
+# say what to do to the part and two say how to judge it, and a channel is
+# not testable without all four.
+_SPEC_FIELDS = ("appvol", "testtime", "min", "max")
 
 # The instrument judges every test itself, against the limits in its own setup,
 # and returns that judgement in the same reply as the number. It was read for
@@ -682,6 +687,35 @@ def _limit_plausible(value, kind: str) -> bool:
     return lo <= float(value) <= hi
 
 
+def _spec_number(raw):
+    """One spec field as it was typed, or None when the row does not carry it."""
+    if raw is None: return None
+    try: return float(raw)
+    except (TypeError, ValueError): return None
+
+
+def _spec_missing(spec: dict) -> list:
+    """Which of a channel's spec fields are not filled in. Empty means testable.
+
+    Nothing here is defaulted. The applied voltage used to fall back to 1500 V
+    for a withstand test and 500 V for insulation when the row did not carry
+    one, which put a voltage nobody had chosen across a part -- a blank in the
+    database deciding what goes into the cable. A channel that is not fully
+    specified is not tested.
+
+    A zero voltage or a zero duration counts as missing rather than as a
+    value: there is no test to run at either, and both are what an empty
+    column reads as once it has been through float().
+    """
+    spec = spec or {}
+    missing = []
+    for f in _SPEC_FIELDS:
+        v = spec.get(f)
+        if v is None or (f in ("appvol", "testtime") and float(v) <= 0):
+            missing.append(f)
+    return missing
+
+
 def _spec_limit(raw, kind: str):
     """One limit as the part specifies it, or None when it does not specify one.
 
@@ -695,9 +729,8 @@ def _spec_limit(raw, kind: str):
     passes a channel here -- the channel stores NOSPEC and says so, which is
     what a part with no usable limit on it should do.
     """
-    if raw is None: return None
-    try: value = float(raw)
-    except (TypeError, ValueError): return None
+    value = _spec_number(raw)
+    if value is None: return None
     if not _limit_plausible(value, kind):
         print(f"[HIPOT DEBUG] {kind.upper()} limit {value} is outside "
               f"{_LIMIT_PLAUSIBLE.get(kind)} -- not a limit, ignoring it")
@@ -2716,7 +2749,7 @@ def render(parent):
                 if "Insulation" in tn or tn.upper() == "IR": kind, into = "ir", spec_ir
                 elif "Withstand" in tn or tn.upper() == "ACW": kind, into = "acw", spec_acw
                 else: continue
-                into[ch] = {"appvol": float(r.get("appvol", 0) or 0), "testtime": float(r.get("testtime", 1) or 1), "min": _spec_limit(r.get("min"), kind), "max": _spec_limit(r.get("max"), kind)}
+                into[ch] = {"appvol": _spec_number(r.get("appvol")), "testtime": _spec_number(r.get("testtime")), "min": _spec_limit(r.get("min"), kind), "max": _spec_limit(r.get("max"), kind)}
             state["spec_ir"] = spec_ir; state["spec_acw"] = spec_acw
             tree_spec.delete(*tree_spec.get_children())
             for ch in range(1, channel + 1):
@@ -2724,8 +2757,10 @@ def render(parent):
                     # Applied volts is a whole number on the spec sheet, but the
                     # column is read out of the DB as a float, which put it in
                     # the grid as "500.0".
-                    appvol = f"{sp['appvol']:.0f}" if "appvol" in sp else "—"
-                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), appvol, sp.get("testtime", "—"), sp.get("min", "—"), sp.get("max", "—")))
+                    appvol = f"{sp['appvol']:.0f}" if sp.get("appvol") is not None else "—"
+                    cells = [sp.get(f) for f in ("testtime", "min", "max")]
+                    cells = ["—" if c is None else c for c in cells]
+                    tree_spec.insert("", "end", tags=(tag,), values=(test_key, str(ch), appvol, *cells))
                 tree_spec.insert("", "end", tags=("contact",), values=("Contact Test", str(ch), "—", "—", "—", "—"))
             _spec_focus(1)
             spec_status_lbl.config(text=f"[ {channel} channel(s) loaded ]", fg="#4caf50")
@@ -3075,6 +3110,23 @@ def render(parent):
 
 
 
+    def _refuse_unspecified(test: str, ch: int, missing: list, upto: int,
+                            into: dict, row: str, one_channel: bool = False):
+        """Say which fields are blank, and mark the channels not tested.
+
+        No voltage has been applied at the point this is called and none will
+        be. The channels are recorded NOSPEC rather than FAIL: a part is not
+        faulty because nobody filled in its spec, and calling it a failure
+        would hide the thing that actually needs doing.
+        """
+        _log(f"{test}: CH{ch} spec is incomplete -- {', '.join(missing)} not filled in")
+        _log(f"{test}: REFUSING to test. Fill every field for every channel "
+             f"in Model Settings, then reload the part.")
+        first = ch if one_channel else 1
+        for c in range(first, upto + 1):
+            into[c] = {"appvol": None, "value": None, "result": _NO_LIMIT_RESULT}
+            _after(0, lambda i=c-1: _set_cell(row, i, _NO_SPEC_TEXT, False))
+
     def _log_reading(label: str, rd, lo, hi, unit: str):
         """Say what was measured, who judged it, and what it was judged against.
 
@@ -3126,15 +3178,29 @@ def render(parent):
                     if not ack:
                         _log(f"IR (Combined): Channel {ch} ACK failed!")
                         all_pass = False
-            s0 = state["spec_ir"].get(1, {}); v_kv = float(s0.get("appvol", 500)) / 1000.0; t_s = float(s0.get("testtime", 1.0)); v_min = s0.get("min"); v_max = s0.get("max")
-            _log(f"IR: commanding {s0.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
+            s0 = state["spec_ir"].get(1, {})
+            # Combined mode drives the instrument from CH1, so CH1 is the row
+            # that has to be complete before any voltage is applied at all.
+            missing = _spec_missing(s0)
+            if missing:
+                _refuse_unspecified("IR", 1, missing, n_ch, ir_res, "IR")
+                all_pass = False
+                if plc.is_open:
+                    plc.set_all_channels(n_ch, False)
+                    for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
+                hipot.close()
+                if plc.is_open: plc.close()
+                _after(0, lambda: _set_row_result("IR", False))
+                return False, ir_res
+            v_kv = float(s0["appvol"]) / 1000.0; t_s = float(s0["testtime"]); v_min = s0["min"]; v_max = s0["max"]
+            _log(f"IR: commanding {s0['appvol']:.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             rd = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
             ir_val = rd.value
             _log_reading("IR (Combined)", rd, v_min, v_max, "MOhm")
             for ch in range(1, n_ch + 1):
                 s = state["spec_ir"].get(ch, {}); passed = _channel_passed(rd, s.get("min"), s.get("max"))
                 if not passed: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _chan_result(rd, s, passed)}
+                ir_res[ch] = {"appvol": s0["appvol"], "value": ir_val, "result": _chan_result(rd, s, passed)}
                 _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=passed: _set_cell("IR", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
@@ -3155,14 +3221,23 @@ def render(parent):
                     if not ack_ok:
                         _log(f"IR (Individual): Channel {ch} ACK failed!")
                         all_pass = False
-                s = state["spec_ir"].get(ch, {}); v_kv = float(s.get("appvol", 500)) / 1000.0; t_s = float(s.get("testtime", 1.0)); v_min = s.get("min"); v_max = s.get("max")
-                _log(f"IR CH{ch}: commanding {s.get('appvol', 500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
+                s = state["spec_ir"].get(ch, {})
+                missing = _spec_missing(s)
+                if missing:
+                    _refuse_unspecified("IR", ch, missing, ch, ir_res, "IR", one_channel=True)
+                    all_pass = False
+                    if plc.is_open:
+                        plc.set_channel(ch, False)
+                        _after(0, lambda idx=ch-1: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
+                    continue
+                v_kv = float(s["appvol"]) / 1000.0; t_s = float(s["testtime"]); v_min = s["min"]; v_max = s["max"]
+                _log(f"IR CH{ch}: commanding {s['appvol']:.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 rd = hipot.run_ir_test(v_kv, t_s, v_min, v_max)
                 ir_val = rd.value
                 _log_reading(f"IR CH{ch}", rd, v_min, v_max, "MOhm")
                 passed = _channel_passed(rd, v_min, v_max)
                 if not passed or not ack_ok: all_pass = False
-                ir_res[ch] = {"appvol": s.get("appvol", 500), "value": ir_val, "result": _chan_result(rd, s, passed and ack_ok)}
+                ir_res[ch] = {"appvol": s["appvol"], "value": ir_val, "result": _chan_result(rd, s, passed and ack_ok)}
                 _after(0, lambda c=ch-1, v=_meas_text(ir_val, ".0f"), p=(passed and ack_ok): _set_cell("IR", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
@@ -3209,15 +3284,28 @@ def render(parent):
                     if not ack:
                         _log(f"ACW (Combined): Channel {ch} ACK failed!")
                         all_pass = False
-            s0 = state["spec_acw"].get(1, {}); v_kv = float(s0.get("appvol", 1500)) / 1000.0; t_s = float(s0.get("testtime", 3.0)); v_min = s0.get("min"); v_max = s0.get("max")
-            _log(f"ACW: commanding {s0.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
+            s0 = state["spec_acw"].get(1, {})
+            # See _run_ir_test: CH1 drives the instrument in combined mode.
+            missing = _spec_missing(s0)
+            if missing:
+                _refuse_unspecified("ACW", 1, missing, n_ch, acw_res, "ACW")
+                all_pass = False
+                if plc.is_open:
+                    plc.set_all_channels(n_ch, False)
+                    for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
+                hipot.close()
+                if plc.is_open: plc.close()
+                _after(0, lambda: _set_row_result("ACW", False))
+                return False, acw_res
+            v_kv = float(s0["appvol"]) / 1000.0; t_s = float(s0["testtime"]); v_min = s0["min"]; v_max = s0["max"]
+            _log(f"ACW: commanding {s0['appvol']:.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
             rd = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
             acw_val = rd.value
             _log_reading("ACW (Combined)", rd, v_min, v_max, "mA")
             for ch in range(1, n_ch + 1):
                 s = state["spec_acw"].get(ch, {}); passed = _channel_passed(rd, s.get("min"), s.get("max"))
                 if not passed: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _chan_result(rd, s, passed)}
+                acw_res[ch] = {"appvol": s0["appvol"], "value": acw_val, "result": _chan_result(rd, s, passed)}
                 _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
@@ -3238,14 +3326,23 @@ def render(parent):
                     if not ack_ok:
                         _log(f"ACW (Individual): Channel {ch} ACK failed!")
                         all_pass = False
-                s = state["spec_acw"].get(ch, {}); v_kv = float(s.get("appvol", 1500)) / 1000.0; t_s = float(s.get("testtime", 3.0)); v_min = s.get("min"); v_max = s.get("max")
-                _log(f"ACW CH{ch}: commanding {s.get('appvol', 1500):.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
+                s = state["spec_acw"].get(ch, {})
+                missing = _spec_missing(s)
+                if missing:
+                    _refuse_unspecified("ACW", ch, missing, ch, acw_res, "ACW", one_channel=True)
+                    all_pass = False
+                    if plc.is_open:
+                        plc.set_channel(ch, False)
+                        _after(0, lambda idx=ch-1: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
+                    continue
+                v_kv = float(s["appvol"]) / 1000.0; t_s = float(s["testtime"]); v_min = s["min"]; v_max = s["max"]
+                _log(f"ACW CH{ch}: commanding {s['appvol']:.0f} V ({v_kv:.4f} kV) for {t_s:.1f}s")
                 rd = hipot.run_acw_test(v_kv, t_s, v_min, v_max)
                 acw_val = rd.value
                 _log_reading(f"ACW CH{ch}", rd, v_min, v_max, "mA")
                 passed = _channel_passed(rd, v_min, v_max)
                 if not passed or not ack_ok: all_pass = False
-                acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _chan_result(rd, s, passed and ack_ok)}
+                acw_res[ch] = {"appvol": s["appvol"], "value": acw_val, "result": _chan_result(rd, s, passed and ack_ok)}
                 _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
