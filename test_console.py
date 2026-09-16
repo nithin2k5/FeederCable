@@ -640,15 +640,22 @@ def _parse_verdict(response: str):
 
 
 class _Reading(object):
-    """One measurement: the number, what the instrument made of it, and whether
-    the limits it judged against are the ones the part is specified to."""
+    """One measurement: the number, what the instrument made of it, whether the
+    limits it judged against are the ones the part is specified to, and the
+    reply all of that was read out of.
 
-    __slots__ = ("value", "verdict", "limits_set")
+    The raw reply is kept so it can go on the operator's log rather than only
+    to stdout, which the windowed build throws away. A reading that looks
+    wrong is answerable from the line, without rebuilding with --console.
+    """
 
-    def __init__(self, value=None, verdict=None, limits_set=False):
+    __slots__ = ("value", "verdict", "limits_set", "raw")
+
+    def __init__(self, value=None, verdict=None, limits_set=False, raw=""):
         self.value = value
         self.verdict = verdict
         self.limits_set = limits_set
+        self.raw = raw
 
 
 # What a number has to look like to be a limit at all.
@@ -714,6 +721,22 @@ def _spec_missing(spec: dict) -> list:
         if v is None or (f in ("appvol", "testtime") and float(v) <= 0):
             missing.append(f)
     return missing
+
+
+def _spec_field_detail(spec: dict, field: str) -> str:
+    """One unusable spec field, described by what is actually in it.
+
+    "max is not filled in" sends an operator to a Model Settings box with
+    9999 sitting in it, and there is nothing there to act on. A withstand
+    limit of 9999 mA is dropped because it cannot be a limit, not because it
+    is empty, and those are different things to fix -- so the message says
+    which one it is and quotes the cell.
+    """
+    value = (spec or {}).get("raw", {}).get(field)
+    text = "" if value is None else str(value).strip()
+    if text == "":
+        return f"{field} is blank"
+    return f"{field} is '{text}', which is not a usable value"
 
 
 def _spec_limit(raw, kind: str):
@@ -960,11 +983,11 @@ class HiPotSerial:
         if not sent:
             print(f"[HIPOT DEBUG] {label}: setup did not reach the instrument")
             self.stop_test()
-            return _Reading()
+            return _Reading(raw="<setup did not reach the instrument>")
         time.sleep(dwell_s)
         if not self.write_line("MEAS?"):
             self.stop_test()
-            return _Reading()
+            return _Reading(raw="<MEAS? could not be sent>")
         time.sleep(0.02)
         response = self.read_line()
         self.stop_test()
@@ -974,7 +997,7 @@ class HiPotSerial:
         if verdict is None:
             print(f"[HIPOT DEBUG] {label}: no PASS/FAIL in the reply -- "
                   f"this channel rests on the spec comparison alone")
-        return _Reading(value, verdict)
+        return _Reading(value, verdict, raw=response)
     def run_ir_test(self, ir_volt_kv: float, ir_time_s: float, ir_min, ir_max) -> _Reading:
         """One IR test at the part's own limits. Returns what was read and judged.
 
@@ -2749,7 +2772,7 @@ def render(parent):
                 if "Insulation" in tn or tn.upper() == "IR": kind, into = "ir", spec_ir
                 elif "Withstand" in tn or tn.upper() == "ACW": kind, into = "acw", spec_acw
                 else: continue
-                into[ch] = {"appvol": _spec_number(r.get("appvol")), "testtime": _spec_number(r.get("testtime")), "min": _spec_limit(r.get("min"), kind), "max": _spec_limit(r.get("max"), kind)}
+                into[ch] = {"appvol": _spec_number(r.get("appvol")), "testtime": _spec_number(r.get("testtime")), "min": _spec_limit(r.get("min"), kind), "max": _spec_limit(r.get("max"), kind), "raw": {f: r.get(f) for f in _SPEC_FIELDS}}
             state["spec_ir"] = spec_ir; state["spec_acw"] = spec_acw
             tree_spec.delete(*tree_spec.get_children())
             for ch in range(1, channel + 1):
@@ -3111,7 +3134,8 @@ def render(parent):
 
 
     def _refuse_unspecified(test: str, ch: int, missing: list, upto: int,
-                            into: dict, row: str, one_channel: bool = False):
+                            into: dict, row: str, spec: dict = None,
+                            one_channel: bool = False):
         """Say which fields are blank, and mark the channels not tested.
 
         No voltage has been applied at the point this is called and none will
@@ -3119,9 +3143,11 @@ def render(parent):
         faulty because nobody filled in its spec, and calling it a failure
         would hide the thing that actually needs doing.
         """
-        _log(f"{test}: CH{ch} spec is incomplete -- {', '.join(missing)} not filled in")
-        _log(f"{test}: REFUSING to test. Fill every field for every channel "
-             f"in Model Settings, then reload the part.")
+        _log(f"{test}: CH{ch} cannot be tested --")
+        for f in missing:
+            _log(f"    {_spec_field_detail(spec, f)}")
+        _log(f"{test}: REFUSING to test. Correct it in Model Settings for every "
+             f"channel, then reload the part.")
         first = ch if one_channel else 1
         for c in range(first, upto + 1):
             into[c] = {"appvol": None, "value": None, "result": _NO_LIMIT_RESULT}
@@ -3134,7 +3160,16 @@ def render(parent):
         failing channels this log called a pass and there was nothing in it
         to show the two had ever disagreed, so the line now carries both
         verdicts and the window each was applied to.
+
+        The instrument's reply is logged verbatim under it. Everything above
+        is this console's reading of that one line -- which field it took the
+        number from, which word it read as a verdict -- and when any of that
+        looks wrong, the reply is the only thing that settles it. It used to
+        go to stdout alone, which the windowed build discards, so answering
+        the question meant rebuilding with --console first.
         """
+        if rd.raw:
+            _log(f"{label}: MEAS? -> {rd.raw}")
         if rd.value is None:
             _log(f"{label}: NO READING from HiPot -- comms fault, not a measurement")
             return
@@ -3183,7 +3218,7 @@ def render(parent):
             # that has to be complete before any voltage is applied at all.
             missing = _spec_missing(s0)
             if missing:
-                _refuse_unspecified("IR", 1, missing, n_ch, ir_res, "IR")
+                _refuse_unspecified("IR", 1, missing, n_ch, ir_res, "IR", s0)
                 all_pass = False
                 if plc.is_open:
                     plc.set_all_channels(n_ch, False)
@@ -3224,7 +3259,7 @@ def render(parent):
                 s = state["spec_ir"].get(ch, {})
                 missing = _spec_missing(s)
                 if missing:
-                    _refuse_unspecified("IR", ch, missing, ch, ir_res, "IR", one_channel=True)
+                    _refuse_unspecified("IR", ch, missing, ch, ir_res, "IR", s, one_channel=True)
                     all_pass = False
                     if plc.is_open:
                         plc.set_channel(ch, False)
@@ -3288,7 +3323,7 @@ def render(parent):
             # See _run_ir_test: CH1 drives the instrument in combined mode.
             missing = _spec_missing(s0)
             if missing:
-                _refuse_unspecified("ACW", 1, missing, n_ch, acw_res, "ACW")
+                _refuse_unspecified("ACW", 1, missing, n_ch, acw_res, "ACW", s0)
                 all_pass = False
                 if plc.is_open:
                     plc.set_all_channels(n_ch, False)
@@ -3329,7 +3364,7 @@ def render(parent):
                 s = state["spec_acw"].get(ch, {})
                 missing = _spec_missing(s)
                 if missing:
-                    _refuse_unspecified("ACW", ch, missing, ch, acw_res, "ACW", one_channel=True)
+                    _refuse_unspecified("ACW", ch, missing, ch, acw_res, "ACW", s, one_channel=True)
                     all_pass = False
                     if plc.is_open:
                         plc.set_channel(ch, False)
