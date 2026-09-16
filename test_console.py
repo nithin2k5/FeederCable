@@ -680,33 +680,6 @@ class _Reading(object):
         self.raw = raw
 
 
-# What a number has to look like to be a limit at all.
-#
-# These are not the instrument's measuring ranges and are not taken from its
-# manual. They are deliberately far wider than anything this class of tester
-# can be set to, because their whole job is to catch a number that cannot be a
-# limit rather than to second-guess a real one. The case they exist for is a
-# withstand limit of 9999: it was never typed by anyone, it is what the old
-# `float(max or 9999)` coercion left in settingspec, and sending it to the
-# instrument would widen the instrument to match -- talking it out of failing
-# parts it was failing before.
-#
-# The two tests need different ceilings and the difference is the point. 9999
-# milliamps is nonsense; 9999 megohms is an ordinary way to write "no upper
-# bound" and has to keep working.
-#
-# Narrow these to the GPT-9803's real ranges once they are confirmed from the
-# manual. Wrong in this direction only lets a bad limit through to the
-# readback check behind it; wrong the other way rejects a limit somebody meant.
-_LIMIT_PLAUSIBLE = {
-    "acw": (0.0, 100.0),      # mA
-    "ir":  (0.0, 50000.0),    # MOhm
-}
-# Which set of bounds each instrument keyword is judged against.
-_LIMIT_KIND = {
-    "MANU:ACW:CHIS": "acw", "MANU:ACW:CLOS": "acw",
-    "MANU:IR:RHIS":  "ir",  "MANU:IR:RLOS":  "ir",
-}
 # Whether each keyword is the top of its window or the bottom, which is what
 # decides the direction a limit gets tighter in. An instrument that cannot
 # hold the value asked for clamps it to its own range -- MANU:IR:RLOS 0 comes
@@ -719,13 +692,6 @@ _LIMIT_IS_UPPER = {
     "MANU:ACW:CHIS": True,   "MANU:IR:RHIS":  True,
     "MANU:ACW:CLOS": False,  "MANU:IR:RLOS":  False,
 }
-
-
-def _limit_plausible(value, kind: str) -> bool:
-    """Whether a number could be a limit for this test at all."""
-    lo, hi = _LIMIT_PLAUSIBLE.get(kind, (None, None))
-    if lo is None or value is None: return value is not None
-    return lo <= float(value) <= hi
 
 
 def _spec_number(raw):
@@ -771,28 +737,6 @@ def _spec_field_detail(spec: dict, field: str) -> str:
     if text == "":
         return f"{field} is blank"
     return f"{field} is '{text}', which is not a usable value"
-
-
-def _spec_limit(raw, kind: str):
-    """One limit as the part specifies it, or None when it does not specify one.
-
-    `float(raw or default)` read a NULL *and a stored 0* as the default, so a
-    blank withstand limit became 9999 mA -- a window no part can fail, which is
-    how channels with no limit on them passed everything. A zero is now a zero
-    and a blank is None, and None is refused rather than filled in.
-
-    A number outside _LIMIT_PLAUSIBLE is treated the same as a blank one. It
-    is not a limit somebody chose, so it neither goes to the instrument nor
-    passes a channel here -- the channel stores NOSPEC and says so, which is
-    what a part with no usable limit on it should do.
-    """
-    value = _spec_number(raw)
-    if value is None: return None
-    if not _limit_plausible(value, kind):
-        print(f"[HIPOT DEBUG] {kind.upper()} limit {value} is outside "
-              f"{_LIMIT_PLAUSIBLE.get(kind)} -- not a limit, ignoring it")
-        return None
-    return value
 
 
 def _channel_passed(reading, lo, hi) -> bool:
@@ -964,17 +908,7 @@ class HiPotSerial:
         still in force. Reading it back is the only way to know the limit being
         judged against is the one asked for.
 
-        A limit that could not be a limit is refused before it goes out at all.
-        The readback catches an instrument that rejects a bad value; it cannot
-        catch one that accepts it, and accepting it is the dangerous case --
-        the instrument is then set wider than it was and stops failing parts
-        it used to fail.
         """
-        kind = _LIMIT_KIND.get(key)
-        if kind and not _limit_plausible(value, kind):
-            print(f"[HIPOT DEBUG] {label}: {key} {value} is outside "
-                  f"{_LIMIT_PLAUSIBLE[kind]} -- NOT SENT, instrument keeps its own")
-            return False
         text = f"{value:.4f}"
         if not self.write_line(f"{key} {text}"):
             print(f"[HIPOT DEBUG] {label}: could not send {key}")
@@ -2822,13 +2756,13 @@ def render(parent):
             for r in rows:
                 tn = str(r.get("testname", "")).strip()
                 ch = int(r.get("chsel", r.get("channel", 1)) or 1)
-                # Which test the row is for has to be settled first: the same
-                # number means different things in milliamps and megohms, and
-                # the limit is only sensible against its own test.
-                if "Insulation" in tn or tn.upper() == "IR": kind, into = "ir", spec_ir
-                elif "Withstand" in tn or tn.upper() == "ACW": kind, into = "acw", spec_acw
+                # A row that names neither test is not one of these two and is
+                # skipped, rather than being filed under whichever came last.
+                if "Insulation" in tn or tn.upper() == "IR": into = spec_ir
+                elif "Withstand" in tn or tn.upper() == "ACW": into = spec_acw
                 else: continue
-                into[ch] = {"appvol": _spec_number(r.get("appvol")), "testtime": _spec_number(r.get("testtime")), "min": _spec_limit(r.get("min"), kind), "max": _spec_limit(r.get("max"), kind), "raw": {f: r.get(f) for f in _SPEC_FIELDS}}
+                into[ch] = {f: _spec_number(r.get(f)) for f in _SPEC_FIELDS}
+                into[ch]["raw"] = {f: r.get(f) for f in _SPEC_FIELDS}
             state["spec_ir"] = spec_ir; state["spec_acw"] = spec_acw
             tree_spec.delete(*tree_spec.get_children())
             for ch in range(1, channel + 1):
