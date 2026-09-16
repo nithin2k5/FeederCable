@@ -1,5 +1,6 @@
 import datetime
 import tkinter as tk
+from tkinter import font as tkfont
 import mysql.connector
 
 import db
@@ -43,58 +44,151 @@ def _record_login(page: str, eno: str, ok: bool, reason: str = ""):
     except Exception as ex:
         print(f"[AUTH] login history write failed: {ex}")
 
+# Arial has no Tamil glyphs, so a Tamil string set in it renders as boxes.
+# Nirmala UI is the Windows 11 Indic UI face and Latha the older one; fall
+# back to what Tk picks rather than pinning a font that may not be installed.
+_TAMIL_FALLBACKS = ("Nirmala UI", "Latha", "Vijaya", "Segoe UI")
+
+
+def _tamil_family():
+    try:
+        families = set(tkfont.families())
+    except Exception:
+        return "Nirmala UI"
+    for fam in _TAMIL_FALLBACKS:
+        if fam in families:
+            return fam
+    return "Nirmala UI"
+
+
+# The notice in both languages. Both are shown at once rather than behind a
+# language toggle: this is the one screen an operator has to have actually
+# read, and a toggle is a thing you have to know to go looking for.
+_SAFETY_INTRO = (
+    "This is an industrial End-Of-Line (EOL) tester.\n"
+    "It involves High Voltage (HiPot) and automated IO control.",
+    "இது ஒரு தொழிற்சாலை இறுதிநிலை (EOL) சோதனை கருவி.\n"
+    "இதில் உயர் மின்னழுத்தம் (HiPot) மற்றும் தானியங்கி IO கட்டுப்பாடு உள்ளன.",
+)
+_SAFETY_RULES = (
+    ("Ensure the jig and cables are properly secured before testing.",
+     "சோதனைக்கு முன் ஜிக் மற்றும் கேபிள்கள் சரியாகப் பொருத்தப்பட்டுள்ளதா என உறுதிசெய்யவும்."),
+    ("Do NOT touch the exposed leads during testing.",
+     "சோதனை நடைபெறும்போது வெளிப்பட்டுள்ள கம்பிகளைத் தொடக் கூடாது."),
+    ("Only authorized personnel are permitted to operate this machine.",
+     "அங்கீகரிக்கப்பட்ட பணியாளர்கள் மட்டுமே இந்த இயந்திரத்தை இயக்க அனுமதிக்கப்பட்டவர்."),
+)
+_ACK_EN = "I have read and understood the instructions."
+_ACK_TA = "நான் இந்த வழிமுறைகளைப் படித்து புரிந்துக்கொண்டேன்."
+
+
 def show_disclaimer(parent_root):
+    """The startup safety notice: modal, and dismissable only by acknowledging.
+
+    Monochrome like the rest of the app -- black ground, white type -- and it
+    spends color only where the color carries meaning: red for the hazard,
+    amber for the thing being asked of you, green once the button is live.
+    """
+    BG, CARD, RULE = "black", "#0d0d0d", "#262626"
+    DANGER, ACCENT, TEXT, MUTED = "#ff5252", "#e8a000", "#ffffff", "#b0b0b0"
+    ta = _tamil_family()
+
     # Modal dialog that blocks the main window
     dialog = tk.Toplevel(parent_root)
+    dialog.withdraw()
     dialog.title("Disclaimer")
-    
-    w, h = 600, 400
-    sw = dialog.winfo_screenwidth()
-    sh = dialog.winfo_screenheight()
-    x = int((sw/2) - (w/2))
-    y = int((sh/2) - (h/2))
-    dialog.geometry(f"{w}x{h}+{x}+{y}")
-    dialog.configure(bg="black")
+    dialog.configure(bg=BG)
+    dialog.resizable(False, False)
     dialog.transient(parent_root)
-    dialog.grab_set()
-    
+
     # Remove window controls so user is forced to accept
     dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-    
-    lbl_title = tk.Label(dialog, text="IMPORTANT SAFETY INSTRUCTIONS", bg="black", fg="red", font=("Arial", 16, "bold"))
-    lbl_title.pack(pady=(20, 10))
-    
-    msg = (
-        "This is an industrial End-Of-Line (EOL) tester.\n"
-        "It involves High Voltage (HiPot) and automated IO control.\n\n"
-        "1. Ensure the jig and cables are properly secured before testing.\n"
-        "2. Do NOT touch the exposed leads during testing.\n"
-        "3. Only authorized personnel are permitted to operate this machine.\n"
-    )
-    
-    lbl_msg = tk.Label(dialog, text=msg, bg="black", fg="white", font=("Arial", 12), justify="left")
-    lbl_msg.pack(pady=10)
-    
+
+    # A red cap, the red of the hazard itself, so the dialog reads as a
+    # warning before a word of it has been read.
+    tk.Frame(dialog, bg=DANGER, height=6).pack(fill="x")
+
+    card = tk.Frame(dialog, bg=CARD, padx=48, pady=18)
+    card.pack(fill="both", expand=True)
+
+    tk.Label(card, text="⚠", bg=CARD, fg=DANGER, font=("Arial", 34)).pack()
+    tk.Label(card, text="IMPORTANT SAFETY INSTRUCTIONS", bg=CARD, fg=DANGER,
+             font=("Arial", 22, "bold")).pack(pady=(4, 0))
+    tk.Label(card, text="முக்கியப் பாதுகாப்பு வழிமுறைகள்", bg=CARD, fg=ACCENT,
+             font=(ta, 17, "bold")).pack(pady=(2, 0))
+
+    tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=12)
+
+    intro_en, intro_ta = _SAFETY_INTRO
+    tk.Label(card, text=intro_en, bg=CARD, fg=TEXT, font=("Arial", 14),
+             justify="center").pack()
+    tk.Label(card, text=intro_ta, bg=CARD, fg=MUTED, font=(ta, 13),
+             justify="center").pack(pady=(4, 0))
+
+    tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=12)
+
+    # Each rule is numbered in an amber badge down the left, the English and
+    # the Tamil sharing one text column so a rule reads as one item in a list
+    # of three rather than as two lists of three.
+    rules = tk.Frame(card, bg=CARD)
+    rules.pack(fill="x")
+    rules.columnconfigure(1, weight=1)
+    for i, (en, tam) in enumerate(_SAFETY_RULES):
+        tk.Label(rules, text=str(i + 1), bg="#1a1a1a", fg=ACCENT,
+                 font=("Arial", 13, "bold"), width=3, pady=2).grid(
+            row=i, column=0, sticky="n", pady=(0, 10))
+        body = tk.Frame(rules, bg=CARD)
+        body.grid(row=i, column=1, sticky="ew", padx=(14, 0), pady=(0, 10))
+        tk.Label(body, text=en, bg=CARD, fg=TEXT, font=("Arial", 14),
+                 anchor="w", justify="left").pack(fill="x")
+        tk.Label(body, text=tam, bg=CARD, fg=MUTED, font=(ta, 13), anchor="w",
+                 justify="left", wraplength=640).pack(fill="x", pady=(1, 0))
+
+    tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=(2, 12))
+
     chk_var = tk.BooleanVar(value=False)
-    
+
     def on_check():
         if chk_var.get():
-            btn_accept.config(state="normal", bg="#1b5e20", fg="white")
+            btn_accept.config(state="normal", bg="#1b5e20", fg="white",
+                              activebackground="#2e7d32", cursor="hand2")
         else:
-            btn_accept.config(state="disabled", bg="#333", fg="#777")
-            
-    chk = tk.Checkbutton(dialog, text="I have read and understood the instructions.", 
-                         variable=chk_var, bg="black", fg="#e8a000", selectcolor="black", 
-                         activebackground="black", activeforeground="#e8a000", font=("Arial", 12),
-                         command=on_check)
-    chk.pack(pady=20)
-    
+            btn_accept.config(state="disabled", bg="#1a1a1a", fg="#555",
+                              cursor="arrow")
+
+    ack = tk.Frame(card, bg=CARD)
+    ack.pack()
+    chk = tk.Checkbutton(ack, text=_ACK_EN, variable=chk_var, bg=CARD, fg=ACCENT,
+                         selectcolor="#1a1a1a", activebackground=CARD,
+                         activeforeground=ACCENT, font=("Arial", 14), bd=0,
+                         highlightthickness=0, cursor="hand2", command=on_check)
+    chk.pack(anchor="w")
+    # The Tamil line ticks the box too. It is the same sentence, and the
+    # operator reading that line is the one being asked to tick it.
+    ack_ta = tk.Label(ack, text=_ACK_TA, bg=CARD, fg=MUTED, font=(ta, 13),
+                      cursor="hand2")
+    ack_ta.pack(anchor="w", padx=(26, 0))
+    ack_ta.bind("<Button-1>", lambda _e: (chk.toggle(), on_check()))
+
     def on_accept():
         dialog.destroy()
-        
-    btn_accept = tk.Button(dialog, text="ACCEPT", state="disabled", bg="#333", fg="#777", font=("Arial", 14, "bold"), bd=0, padx=30, pady=10, command=on_accept)
-    btn_accept.pack(pady=20)
-    
+
+    btn_accept = tk.Button(card, text="ACCEPT  /  ஏற்கிறேன்", state="disabled",
+                           bg="#1a1a1a", fg="#555", font=(ta, 16, "bold"), bd=0,
+                           padx=54, pady=10, activeforeground="white",
+                           command=on_accept)
+    btn_accept.pack(pady=(14, 2))
+
+    # Sized to its content rather than to the fixed 600x400 the text had long
+    # since outgrown, then centred and clamped so it cannot open off-screen.
+    dialog.update_idletasks()
+    w, h = dialog.winfo_reqwidth(), dialog.winfo_reqheight()
+    x = max(0, (dialog.winfo_screenwidth() - w) // 2)
+    y = max(0, (dialog.winfo_screenheight() - h) // 3)
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+    dialog.deiconify()
+    dialog.grab_set()
+
     # Wait for the window to be destroyed before returning
     parent_root.wait_window(dialog)
 
