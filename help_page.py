@@ -199,7 +199,7 @@ CHAPTERS = [
         ["@lotNo@", "The lot number of this test"],
         ["@traceabilityCode@", "The lot number again, under the name some templates use for it"],
         ["@irValues@", "The measured insulation resistance of every channel, CH1 first, comma separated — 1204,1198,1211 for a three-channel part"],
-        ["@acwValues@", "The measured withstand current of every channel the same way, to two decimals — 0.12,0.50,1.00"],
+        ["@acwValues@", "The measured withstand current of every channel the same way, to three decimals — 0.123,0.500,1.000"],
         ["@machineID_NoAlphabet@", "The machine ID with its leading letters removed — PB1 becomes 1"],
         ["@ddMMyy@", "The date the label was printed, six digits"],
         ["@HH:mm:ss@", "The time the label was printed"],

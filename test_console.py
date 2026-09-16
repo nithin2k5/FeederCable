@@ -825,7 +825,7 @@ def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
     """One channel's measured value per slot, in channel order, comma separated.
 
     Formatted the way the Testing grid showed it -- IR to the whole MO, ACW to
-    two decimals -- so the number on the label is the number the operator
+    three decimals -- so the number on the label is the number the operator
     watched go past rather than a second rounding of it.
 
     A channel with no reading leaves its slot empty instead of being dropped:
@@ -969,7 +969,7 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         # beats a placeholder per channel on a part whose channel count varies.
         text = _apply_lot_3_letters(text, _lot_3_letters(now))
         text = text.replace("@irValues@", _fmt_channel_values(ir_ch, num_channels, ".0f"))
-        text = text.replace("@acwValues@", _fmt_channel_values(acw_ch, num_channels, ".2f"))
+        text = text.replace("@acwValues@", _fmt_channel_values(acw_ch, num_channels, ".3f"))
         tmp = os.path.join(base, "TEMPPRN.prn")
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
@@ -2964,11 +2964,11 @@ def render(parent):
                 s = state["spec_acw"].get(ch, {}); passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed: all_pass = False
                 acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed)}
-                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".2f"), p=passed: _set_cell("ACW", c, v, p))
+                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=passed: _set_cell("ACW", c, v, p))
             if plc.is_open:
                 plc.set_all_channels(n_ch, False)
                 for i in range(n_ch): _after(0, lambda idx=i: (_set_io(io_ir_acw_labels, idx, False), _set_io(io_in_labels, idx, False)))
-            _log(f"ACW (Combined): {_meas_text(acw_val, '.2f')} mA — {'PASS' if all_pass else 'FAIL'}")
+            _log(f"ACW (Combined): {_meas_text(acw_val, '.3f')} mA — {'PASS' if all_pass else 'FAIL'}")
         else:
             for ch in range(1, n_ch + 1):
                 _log(f"ACW Test: Testing CH{ch}...")
@@ -2991,7 +2991,7 @@ def render(parent):
                 passed = acw_val is not None and float(s.get("min", 0)) <= acw_val <= float(s.get("max", 10))
                 if not passed or not ack_ok: all_pass = False
                 acw_res[ch] = {"appvol": s.get("appvol", 1500), "value": acw_val, "result": _meas_result(acw_val, passed and ack_ok)}
-                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".2f"), p=(passed and ack_ok): _set_cell("ACW", c, v, p))
+                _after(0, lambda c=ch-1, v=_meas_text(acw_val, ".3f"), p=(passed and ack_ok): _set_cell("ACW", c, v, p))
                 if plc.is_open:
                     _log(f"CH{ch} -> OFF")
                     plc.set_channel(ch, False)
