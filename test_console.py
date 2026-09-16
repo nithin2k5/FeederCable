@@ -572,14 +572,37 @@ class DeltaPLC:
         bits = self.read_inputs_bulk(_PLC_ACK_BASE, 8)
         return {ch: bits[ch - 1] for ch in range(1, min(n_ch, 8) + 1)}
 
-    def confirm_channels_on(self, n_ch: int, retries: int = 5, delay: float = 0.2) -> bool:
-        """Verify all channel relays confirmed ON via X20~X27 with retries."""
-        for _ in range(retries):
-            acks = self.read_all_acks(n_ch)
-            if all(acks.values()):
+    def confirm_channel_on(self, ch: int, timeout: float = 0.5, poll: float = 0.02) -> bool:
+        """Wait until one channel relay acknowledges ON via its X20~X27 input.
+
+        The Individual-mode twin of confirm_channels_on, bounded the same way
+        and returning the same thing a single read after the old fixed sleep
+        returned: True if the relay is up, False if it never came up inside
+        the wait.
+        """
+        deadline = time.time() + timeout
+        while True:
+            if self.read_channel_ack(ch):
                 return True
-            time.sleep(delay)
-        return False
+            if time.time() >= deadline:
+                return False
+            time.sleep(poll)
+
+    def confirm_channels_on(self, n_ch: int, timeout: float = 0.5, poll: float = 0.02) -> bool:
+        """Wait until every channel relay acknowledges ON via X20~X27.
+
+        Bounded by `timeout` rather than a retry count, so a caller can hold it
+        to exactly the fixed sleep it stands in for: all relays up returns in a
+        couple of Modbus reads, and one that never comes up costs no more than
+        the wait it replaced.
+        """
+        deadline = time.time() + timeout
+        while True:
+            if all(self.read_all_acks(n_ch).values()):
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(poll)
 
     # ── Safety relay (CRITICAL — prevents HV short circuit) ──────────────
 
@@ -3165,6 +3188,43 @@ def render(parent):
                 return False
             time.sleep(poll)
 
+    def _wait_x2_high(ctx: str, timeout: float = 0.5, poll: float = 0.02) -> bool:
+        """Wait for X2 (Contact OK) to rise after a channel coil is energised.
+
+        The mirror of _wait_x2_low, and here for the same reason it is: a coil
+        write returning does not mean the relay has closed, and the fixed 0.5s
+        that used to stand here never proved it had -- it only waited long
+        enough to be fairly sure, then took one sample.
+
+        `timeout` is that same 0.5s, so no channel can ever wait longer than it
+        did before. A contact that is there answers in a few tens of
+        milliseconds and the phase moves on; one that is not still takes the
+        full 0.5s and reads exactly the NG it read before. Faster or equal,
+        never slower, and the verdict is unchanged either way.
+
+        Two consecutive High reads, not one. A closing relay bounces, and
+        unlike the falling edge -- where an early answer is caught out by the
+        next channel reading its own contact -- an early High here would pass
+        a channel outright. The confirming read costs one Modbus round trip
+        against the 0.5s sample it replaces.
+        """
+        deadline = time.time() + timeout
+        seen = 0
+        while True:
+            if plc.is_contact_ok():
+                seen += 1
+                if seen >= 2:
+                    _after(0, lambda: _set_x2_indicator(True))
+                    return True
+            else:
+                seen = 0
+            if time.time() >= deadline:
+                _after(0, lambda: _set_x2_indicator(False))
+                if seen:
+                    _log(f"{ctx}: X2 (Contact OK) would not hold High for two reads.")
+                return False
+            time.sleep(poll)
+
     def _run_contact_test(n_ch: int) -> tuple:
         """Contact test via PLC — set each channel coil, read acknowledge input."""
         _log("Contact Test → PLC Modbus (M coils / X inputs)")
@@ -3187,10 +3247,11 @@ def render(parent):
             _log(f"CH{ch} -> ON")
             plc.set_channel(ch, True)
             _after(0, lambda c=ch-1: _set_io(io_contact_labels, c, True))
-            time.sleep(0.5)
-            # Verify X2 is still True (Contact OK)
+            # The wait and the reading are one act: _wait_x2_high returns as
+            # soon as X2 is up and holding, and False if it never was inside
+            # the 0.5s this used to spend before sampling once.
             # Note: X20-X27 are hardware-linked to IR/ACW relays only, so we do not check them here.
-            x2_passed = plc.is_contact_ok()
+            x2_passed = _wait_x2_high(f"CH{ch} -> ON")
             _log(f"X2 (Contact OK): {'OK (High)' if x2_passed else 'NG (Low)'}")
             _after(0, lambda a=x2_passed: _set_x2_indicator(a))
             passed = x2_passed
@@ -3265,9 +3326,11 @@ def render(parent):
             idx = ch - 1
             plc.set_channel(ch, True)
             _after(0, lambda i=idx: _set_io(io_contact_labels, i, True))
-            time.sleep(0.5)
+            # The channel expected to make contact answers in milliseconds;
+            # the one probed to prove it does not still costs the same 0.5s
+            # this slept unconditionally.
+            x2 = _wait_x2_high(f"CH{ch} -> ON")
             ack = plc.read_channel_ack(ch)
-            x2 = plc.is_contact_ok()
             _after(0, lambda i=idx, a=ack: _set_io(io_in_labels, i, a))
             _after(0, lambda a=x2: _set_x2_indicator(a))
             if not plc.set_channel(ch, False):
@@ -3389,7 +3452,9 @@ def render(parent):
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
         set_com_status("HiPot", True); time.sleep(0.5)
-        if _plc_open():
+        # plc.is_open, not _plc_open(): the guard above already opened the
+        # port, and _plc_open() closes whatever is open before opening again.
+        if plc.is_open:
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             _after(0, lambda: _set_safety_indicator(False))
@@ -3404,7 +3469,11 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
-                time.sleep(0.5)
+                # Bounded at the 0.5s this used to sleep flat, so a rack of
+                # relays that is up returns at once and one that is not costs
+                # no more than before. The per-channel reads below still decide
+                # the verdict; this only stops them being taken too early.
+                plc.confirm_channels_on(n_ch)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -3448,8 +3517,11 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
-                    time.sleep(0.5)
-                    ack_ok = plc.read_channel_ack(ch)
+                    # Capped at the 0.5s this replaced, so a relay that comes
+                    # up answers immediately and one that does not fails no
+                    # later than it did. Worth the most here: Individual mode
+                    # pays this settle once per channel, twice per cycle.
+                    ack_ok = plc.confirm_channel_on(ch)
                     _after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
                         _log(f"IR (Individual): Channel {ch} ACK failed!")
@@ -3495,7 +3567,9 @@ def render(parent):
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
         time.sleep(0.5)
-        if _plc_open():
+        # See _run_ir_test: the port is already open, and reopening it here
+        # only tore down a connection made moments earlier.
+        if plc.is_open:
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
             plc.safety_relay_to_hv()
             _after(0, lambda: _set_safety_indicator(False))
@@ -3510,7 +3584,11 @@ def render(parent):
             if plc.is_open:
                 plc.set_all_channels(n_ch, True)
                 for i in range(n_ch): _after(0, lambda idx=i: _set_io(io_ir_acw_labels, idx, True))
-                time.sleep(0.5)
+                # Bounded at the 0.5s this used to sleep flat, so a rack of
+                # relays that is up returns at once and one that is not costs
+                # no more than before. The per-channel reads below still decide
+                # the verdict; this only stops them being taken too early.
+                plc.confirm_channels_on(n_ch)
                 for ch in range(1, n_ch + 1):
                     ack = plc.read_channel_ack(ch)
                     _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
@@ -3553,8 +3631,11 @@ def render(parent):
                     _log(f"CH{ch} -> ON")
                     plc.set_channel(ch, True)
                     _after(0, lambda idx=ch-1: _set_io(io_ir_acw_labels, idx, True))
-                    time.sleep(0.5)
-                    ack_ok = plc.read_channel_ack(ch)
+                    # Capped at the 0.5s this replaced, so a relay that comes
+                    # up answers immediately and one that does not fails no
+                    # later than it did. Worth the most here: Individual mode
+                    # pays this settle once per channel, twice per cycle.
+                    ack_ok = plc.confirm_channel_on(ch)
                     _after(0, lambda idx=ch-1, a=ack_ok: _set_io(io_in_labels, idx, a))
                     if not ack_ok:
                         _log(f"ACW (Individual): Channel {ch} ACK failed!")
