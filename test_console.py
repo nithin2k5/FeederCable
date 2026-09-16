@@ -2963,17 +2963,22 @@ def render(parent):
 
     def _save_vision_pass_image(lot_no: str) -> str:
         """If vision passed on this cycle, save the judged (boxed) frame to
-        vision_captures/<yyyy-mm>/<lotno>.jpg and return its path, else None.
+        vision_captures/<yyyy>/<mm>/<dd>/<lotno>.jpg and return its path,
+        else None.
 
-        One folder per month. A station saves an image per PASS all shift, so
-        a flat directory reached tens of thousands of files inside a year --
-        slow to open, and with no way to archive or clear down one month at a
-        time. The folder is named <yyyy-mm> rather than by month name so it
-        sorts chronologically and never merges the same month of two years.
+        One folder per day, nested under its month and year. A station saves
+        an image per PASS all shift, so a flat directory reached tens of
+        thousands of files inside a year -- slow to open, and with no way to
+        archive or clear down a single day or month. Every level is numeric
+        and zero padded, so the folders sort chronologically in any file
+        browser and the same month of two years can never merge.
+
+        The whole chain is created on the first save of the day; a day that
+        produced no PASS leaves no empty folder behind.
 
         Each record stores its own path in testmaster.visionimg, so rows
-        written before this keep pointing at the flat layout and still
-        preview; existing files are left exactly where they are.
+        written before this keep pointing at wherever their image went and
+        still preview; existing files are left exactly where they are.
         """
         result = state.get("last_vision_result")
         if result is None or result.judgement != "OK" or not _cv2_ok:
@@ -2982,10 +2987,11 @@ def render(parent):
         if frame is None:
             return None
         try:
-            month_dir = os.path.join(_VISION_IMG_DIR,
-                                     datetime.datetime.now().strftime("%Y-%m"))
-            os.makedirs(month_dir, exist_ok=True)
-            path = os.path.join(month_dir, f"{lot_no}.jpg")
+            now = datetime.datetime.now()
+            day_dir = os.path.join(_VISION_IMG_DIR, now.strftime("%Y"),
+                                   now.strftime("%m"), now.strftime("%d"))
+            os.makedirs(day_dir, exist_ok=True)
+            path = os.path.join(day_dir, f"{lot_no}.jpg")
             cv2.imwrite(path, frame)
             _log(f"Vision pass image saved: {path}")
             return path
