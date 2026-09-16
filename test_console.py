@@ -846,25 +846,31 @@ def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
 # The three character code that stands for today's date on a label: one
 # character for the day, one for the month, one for the year, in that order.
 #
-# The characters themselves are not derived, they are looked up in date.txt,
-# month.txt and year.txt beside this file -- plain comma separated tables, day
-# 1 first, month 1 first, YEAR_FIRST first. Keeping them in files rather than
-# in code is the point: a customer with a different coding scheme is a text
-# edit, not a rebuild, and the tables are re-read on every print so an edit
-# takes effect on the very next label.
-_LOT_CODE_TABLES = {"day": "date.txt", "month": "month.txt", "year": "year.txt"}
-_LOT_CODE_YEAR_FIRST = 2026
+# The characters themselves are not derived, they are looked up in
+# "DAY CODE.txt", "MONTH CODE.txt" and "YEAR CODE.txt" beside this file --
+# plain comma separated tables, day 1 first, month 1 first, YEAR_FIRST first.
+# Keeping them in files rather than in code is the point: a customer with a
+# different coding scheme is a text edit, not a rebuild, and the tables are
+# re-read on every print so an edit takes effect on the very next label.
+_LOT_CODE_TABLES = {"day": "DAY CODE.txt", "month": "MONTH CODE.txt",
+                    "year": "YEAR CODE.txt"}
+# The customer's year sequence began at 2021, so that is the year the first
+# entry in the year table stands for -- not the year the feature was written.
+# Getting this wrong offsets every year code, which is why it is named here
+# once rather than worked out from the table's length.
+_LOT_CODE_YEAR_FIRST = 2021
 # Used only when a table is missing, empty or unreadable, so a broken file
 # still prints a label instead of stopping the line. Same values the shipped
-# files hold: days 1-9 as digits then A-V, months A-L, years A-Y from 2026.
+# files hold: days 1-9 as digits then A-V, months A-L, years A-T from 2021
+# (through 2040).
 _LOT_CODE_FALLBACK = {
     "day":   [str(d) for d in range(1, 10)] + [chr(ord("A") + i) for i in range(22)],
     "month": [chr(ord("A") + i) for i in range(12)],
-    "year":  [chr(ord("A") + i) for i in range(25)],
+    "year":  [chr(ord("A") + i) for i in range(20)],
 }
 # What goes on the label when the date falls outside a table -- a year past the
-# end of year.txt, say. Deliberately something an operator will notice rather
-# than a character that reads as a real code.
+# end of the year table, say, or one before it starts. Deliberately something an
+# operator will notice rather than a character that reads as a real code.
 _LOT_CODE_UNKNOWN = "?"
 
 
