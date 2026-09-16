@@ -16,6 +16,23 @@ import os
 import re
 import configparser
 
+# ── Type scale ────────────────────────────────────────────────────────────────
+# Every font size on this page goes through _fs(), and every pixel dimension
+# that exists only to hold text through _px(), so the whole console can be
+# sized from this one number. The sizes below were picked at a desk; the
+# operator reads this screen standing a metre back from the machine.
+_FONT_SCALE = 1.2
+
+
+def _fs(size: int) -> int:
+    """A point size, scaled."""
+    return max(1, round(size * _FONT_SCALE))
+
+
+def _px(dim: int) -> int:
+    """A pixel dimension of a box built around text, scaled with the text."""
+    return round(dim * _FONT_SCALE)
+
 # ── Optional hardware libraries (graceful degradation) ─────────────────────────
 try:
     import serial
@@ -1611,14 +1628,14 @@ def render(parent):
     try: style.theme_use("clam")
     except tk.TclError: pass
     style.configure("TC.TLabelframe", background="black", foreground="white", bordercolor="#444")
-    style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", 9))
-    style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", 9, "bold"))
-    style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", 9), rowheight=26)
+    style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", _fs(9)))
+    style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", _fs(9), "bold"))
+    style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", _fs(9)), rowheight=_px(26))
     # Read standing up, a metre or so back, so the day's lots are sized to be
     # legible from there. rowheight follows the type, or the taller glyphs
     # clip against the row above.
-    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", 10, "bold"))
-    style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", 11), rowheight=28)
+    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", _fs(10), "bold"))
+    style.configure("Lot.Treeview", background="#060d00", foreground="#aee571", fieldbackground="#060d00", font=("Arial", _fs(11)), rowheight=_px(28))
     # Column headers otherwise brighten on mouse-over / press -- pin each
     # heading style's color so it stays flat in every state.
     for heading_style, bg, fg in (
@@ -1689,7 +1706,7 @@ def render(parent):
     content.rowconfigure(0, weight=1); content.rowconfigure(1, weight=0)
     content.columnconfigure(0, weight=1); content.columnconfigure(1, weight=0)
     left_area = tk.Frame(content, bg="black"); left_area.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    right_panel = tk.Frame(content, bg="black", width=220)
+    right_panel = tk.Frame(content, bg="black", width=_px(220))
     right_panel.grid(row=0, column=1, rowspan=2, sticky="nsew")
     right_panel.grid_propagate(False)
     right_panel.columnconfigure(0, weight=1)
@@ -1703,7 +1720,7 @@ def render(parent):
     # slim strip underneath rather than inside it.
     result_outer = tk.Frame(right_panel, bg="#333", padx=1, pady=1)
     result_outer.grid(row=1, column=0, sticky="nsew", pady=(0, 3))
-    result_lbl = tk.Label(result_outer, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", 30, "bold"), anchor="center")
+    result_lbl = tk.Label(result_outer, text="READY", bg="#1a1a1a", fg="#555", font=("Arial", _fs(30), "bold"), anchor="center")
     result_lbl.pack(fill="both", expand=True)
 
     def _set_verdict(text, bg, fg):
@@ -1711,7 +1728,7 @@ def render(parent):
         wide as "PASS", so one fixed size either clips it or wastes the block
         on the short words -- pick the size from the word instead."""
         result_lbl.config(text=text, bg=bg, fg=fg,
-                          font=("Arial", 30 if len(text) <= 5 else 22, "bold"))
+                          font=("Arial", _fs(30) if len(text) <= 5 else _fs(22), "bold"))
 
     # Lot number and elapsed time tuck under the verdict as a two-line strip:
     # caption left, value right, small enough that the verdict block keeps
@@ -1719,8 +1736,8 @@ def render(parent):
     meta = tk.Frame(right_panel, bg="black")
     meta.grid(row=2, column=0, sticky="ew", padx=2, pady=(0, 3))
     meta.columnconfigure(1, weight=1)
-    _META_CAP = {"bg": "black", "fg": "#444", "font": ("Arial", 7), "anchor": "w"}
-    _META_VAL = {"bg": "black", "fg": "#888", "font": ("Consolas", 8), "anchor": "e"}
+    _META_CAP = {"bg": "black", "fg": "#444", "font": ("Arial", _fs(7)), "anchor": "w"}
+    _META_VAL = {"bg": "black", "fg": "#888", "font": ("Consolas", _fs(8)), "anchor": "e"}
     tk.Label(meta, text="LOT NO", **_META_CAP).grid(row=0, column=0, sticky="w")
     lot_lbl = tk.Label(meta, text="—", **_META_VAL)
     lot_lbl.grid(row=0, column=1, sticky="ew", padx=(4, 0))
@@ -1733,7 +1750,7 @@ def render(parent):
     # stays readable without stealing room from the verdict. Blinking is done
     # by swapping its color, not its text, while X3 (rework select) is high.
     rework_lbl = tk.Label(right_panel, text="REWORK", bg="#2a2a2a", fg="#555",
-                          font=("Arial", 8), pady=3, bd=1, relief="solid")
+                          font=("Arial", _fs(8)), pady=3, bd=1, relief="solid")
     rework_lbl.grid(row=3, column=0, sticky="ew", pady=(0, 3))
 
     com_lf = ttk.LabelFrame(right_panel, text="COM Status", style="TC.TLabelframe")
@@ -1752,7 +1769,7 @@ def render(parent):
     com_labels = {}
     for i, dev in enumerate(["HiPot", "IO Ctrl", "Scanner", "Printer"]):
         r, c = divmod(i, 2)
-        lbl = tk.Label(com_inner, text=dev, bg="#2a2a2a", fg="#555", font=("Arial", 8), width=9, pady=3, bd=1, relief="solid")
+        lbl = tk.Label(com_inner, text=dev, bg="#2a2a2a", fg="#555", font=("Arial", _fs(8)), width=9, pady=3, bd=1, relief="solid")
         lbl.grid(row=r, column=c, padx=2, pady=2, sticky="ew")
         com_labels[dev] = lbl
         com_inner.columnconfigure(c, weight=1)
@@ -1839,7 +1856,7 @@ def render(parent):
         res_options = [r[0] for r in resolutions]
 
         # Camera Config
-        lf = tk.LabelFrame(dlg, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
+        lf = tk.LabelFrame(dlg, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
         lf.pack(fill="x", padx=10, pady=5)
         
         tk.Label(lf, text="Device:", bg="#222", fg="white").grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -1868,12 +1885,12 @@ def render(parent):
         # dropdown is guesswork on a rig with two identical USB cameras --
         # the picture is the only thing that says which one is which.
         _PREV_W, _PREV_H = 320, 240
-        lf2 = tk.LabelFrame(dlg, text="Preview", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
+        lf2 = tk.LabelFrame(dlg, text="Preview", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
         lf2.pack(fill="x", padx=10, pady=5)
         prev_box = tk.Frame(lf2, bg="#111", width=_PREV_W, height=_PREV_H, bd=1, relief="solid")
         prev_box.pack_propagate(False)
         prev_box.pack(padx=6, pady=6)
-        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", 10))
+        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", _fs(10)))
         prev_lbl.pack(fill="both", expand=True)
 
         preview = {"feed": None}
@@ -1904,7 +1921,7 @@ def render(parent):
         cmb_r.bind("<<ComboboxSelected>>", _start_preview)
 
         # Active Dataset config (vision_config.json)
-        lf3 = tk.LabelFrame(dlg, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", 10, "bold"))
+        lf3 = tk.LabelFrame(dlg, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
         lf3.pack(fill="x", padx=10, pady=5)
         
         from vision_engine.vision_controller import load_vision_config, save_vision_config
@@ -1962,7 +1979,7 @@ def render(parent):
             try: parent.winfo_toplevel().event_generate("<<NavigateHome>>")
             except: pass
 
-        tk.Button(dlg, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", 11, "bold"), bd=0, padx=20, pady=8, command=_save).pack(pady=15)
+        tk.Button(dlg, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", _fs(11), "bold"), bd=0, padx=20, pady=8, command=_save).pack(pady=15)
 
         def _close(_e=None):
             """Dismissed without saving. nav_camera stopped the page's own
@@ -2022,7 +2039,7 @@ def render(parent):
         container.pack(pady=(0, 4))
 
         lbl = tk.Label(container, text=f"[ {cam_label} ]\n(Click to configure)",
-                       bg="#1a1a1a", fg="#555", font=("Arial", 10, "bold"), cursor="hand2")
+                       bg="#1a1a1a", fg="#555", font=("Arial", _fs(10), "bold"), cursor="hand2")
         lbl.pack(fill="both", expand=True)
         container.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
         lbl.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))
@@ -2066,38 +2083,38 @@ def render(parent):
     row0.columnconfigure(0, weight=3); row0.columnconfigure(1, weight=2)
     pf = ttk.LabelFrame(row0, text="Product Info", style="TC.TLabelframe")
     pf.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-    pi = tk.Frame(pf, bg="black", padx=8, pady=5)
+    pi = tk.Frame(pf, bg="black", padx=8, pady=3)
     pi.pack(fill="both", expand=True)
     for col in range(8): pi.columnconfigure(col, weight=1 if col % 2 != 0 else 0)
-    def _lbl(parent, text): return tk.Label(parent, text=text, bg="black", fg="#999", font=("Arial", 11))
-    def _ent(parent, w=13, editable=True, fg="white", size=12):
+    def _lbl(parent, text): return tk.Label(parent, text=text, bg="black", fg="#999", font=("Arial", _fs(11)))
+    def _ent(parent, w=13, editable=True, fg="white", size=_fs(12)):
         st = "normal" if editable else "readonly"
         e = tk.Entry(parent, bg="black" if editable else "#0d0d0d", fg=fg, font=("Arial", size), insertbackground="white", bd=1, relief="solid", width=w, highlightbackground="#444", highlightcolor="#888", highlightthickness=1, readonlybackground="#0d0d0d", state=st)
         return e
 
-    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=7); ent_pno = _ent(pi, w=15, editable=False); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Part No").grid(row=0, column=0, sticky="w", pady=4); ent_pno = _ent(pi, w=15, editable=False); ent_pno.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "EMP ID").grid(row=0, column=4, sticky="w", padx=(10, 4)); ent_emp = _ent(pi, w=7, editable=True); ent_emp.grid(row=0, column=5, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Part Name").grid(row=1, column=0, sticky="w", pady=7); ent_pname = _ent(pi, w=7, editable=False); ent_pname.grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "Part Name").grid(row=1, column=0, sticky="w", pady=4); ent_pname = _ent(pi, w=7, editable=False); ent_pname.grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Customer").grid(row=1, column=4, sticky="w", padx=(10, 4)); ent_cust = _ent(pi, w=7, editable=False); ent_cust.grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
-    _lbl(pi, "Model").grid(row=2, column=0, sticky="w", pady=7); ent_model = _ent(pi, w=7, editable=False); ent_model.grid(row=2, column=1, sticky="ew", padx=5)
+    _lbl(pi, "Model").grid(row=2, column=0, sticky="w", pady=4); ent_model = _ent(pi, w=7, editable=False); ent_model.grid(row=2, column=1, sticky="ew", padx=5)
     _lbl(pi, "ALC").grid(row=2, column=2, sticky="w", padx=(8, 4)); ent_alc = _ent(pi, w=5, editable=False); ent_alc.grid(row=2, column=3, sticky="ew", padx=5)
     # The full lot number is on the header and in the results grid; this box
     # carries the three character date code out of DAY/MONTH/YEAR CODE.txt,
     # which neither of those shows.
     _lbl(pi, "Lot Code").grid(row=2, column=4, sticky="w", padx=(8, 4)); ent_lot = _ent(pi, w=7, editable=False); ent_lot.grid(row=2, column=5, columnspan=2, sticky="ew", padx=5)
-    _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=7); ent_vendor = _ent(pi, w=7, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
+    _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=4); ent_vendor = _ent(pi, w=7, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
     _lbl(pi, "EO No").grid(row=3, column=2, sticky="w", padx=(8, 4)); ent_eo = _ent(pi, w=7, editable=False); ent_eo.grid(row=3, column=3, sticky="ew", padx=5)
     _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=7, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
-    _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=7); ent_jig = _ent(pi, w=15, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
+    _lbl(pi, "JIG Scan").grid(row=4, column=0, sticky="w", pady=4); ent_jig = _ent(pi, w=15, editable=False); ent_jig.grid(row=4, column=1, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Test Type").grid(row=4, column=4, sticky="w", padx=(8, 4)); ent_testtype = _ent(pi, w=7, editable=False); ent_testtype.grid(row=4, column=5, sticky="ew", padx=5)
 
     # Both buttons sit with the Part No / JIG fields they act on, START
     # stacked directly above NEXT PART so the two actions of a cycle read
     # top to bottom in one place. Their commands are wired further down,
     # once _trigger_test() and _next_part() exist.
-    btn_start = tk.Button(pi, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", 11, "bold"), bd=0, padx=10, pady=5, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
+    btn_start = tk.Button(pi, text="▶  START TEST", bg="#1a1a1a", fg="#444", font=("Arial", _fs(11), "bold"), bd=0, padx=10, pady=5, cursor="hand2", activebackground="#2e7d32", activeforeground="white")
     btn_start.grid(row=3, column=6, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 4))
-    btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
+    btn_next_part = tk.Button(pi, text="»  NEXT PART", bg="#0d47a1", fg="white", font=("Arial", _fs(10), "bold"), bd=0, padx=10, pady=4, cursor="hand2", activebackground="#1565c0", activeforeground="white")
     btn_next_part.grid(row=4, column=6, columnspan=2, sticky="ew", padx=(10, 0))
     
     def _fill_ro(entry, val):
@@ -2126,7 +2143,7 @@ def render(parent):
     # who knows if this box needs one is the operator packing it.
     lot_label_var = tk.BooleanVar(value=cfg.get("lot_label_enabled", True))
     tk.Checkbutton(ci, text="Print lot label", variable=lot_label_var,
-                   bg="black", fg="#888", font=("Arial", 8), selectcolor="#1a1a1a",
+                   bg="black", fg="#888", font=("Arial", _fs(8)), selectcolor="#1a1a1a",
                    activebackground="black", activeforeground="white",
                    highlightthickness=0, bd=0, cursor="hand2", anchor="w",
                    command=lambda: _toggle_lot_label()).grid(
@@ -2205,9 +2222,9 @@ def render(parent):
         body = tk.Frame(dlg, bg="#111", padx=44, pady=26)
         body.pack(fill="both", expand=True)
         tk.Label(body, text="\u2714", bg="#111", fg="#76ff03",
-                 font=("Arial", 40)).pack()
+                 font=("Arial", _fs(40))).pack()
         tk.Label(body, text="Lot quantity reached!", bg="#111", fg="white",
-                 font=("Arial", 20, "bold")).pack(pady=(8, 0))
+                 font=("Arial", _fs(20), "bold")).pack(pady=(8, 0))
 
         # What the box label will carry, taken now: the dialog is modal, so
         # nothing can move on underneath it, and reading it here keeps the
@@ -2223,7 +2240,7 @@ def render(parent):
         # strut of that width. The dialog measures itself once, before the
         # probe has answered, so a line that grew afterwards would be clipped
         # by a window already sized for the "Checking..." it replaced.
-        _prn_font = tkfont.Font(family="Arial", size=9)
+        _prn_font = tkfont.Font(family="Arial", size=_fs(9))
         _prn_msgs = (
             "Lot label printing is off",
             f"Checking {_LOT_PRINTER_NAME}…",
@@ -2314,7 +2331,7 @@ def render(parent):
             _close(do_print=True)
 
         btn = tk.Button(body, text="OK", bg="#1b5e20", fg="white",
-                        font=("Arial", 13, "bold"), bd=0, padx=48, pady=9,
+                        font=("Arial", _fs(13), "bold"), bd=0, padx=48, pady=9,
                         cursor="hand2", activebackground="#2e7d32",
                         activeforeground="white", command=_ok)
         btn.pack(pady=(22, 0))
@@ -2351,9 +2368,9 @@ def render(parent):
         except Exception: pass
 
     shf = tk.Frame(left_area, bg="black")
-    shf.pack(fill="x", pady=(6, 2))
-    tk.Label(shf, text="Inspection Specification", bg="black", fg="white", font=("Arial", 10, "bold")).pack(side="left")
-    spec_status_lbl = tk.Label(shf, text="[ No part loaded ]", bg="black", fg="#444", font=("Arial", 9))
+    shf.pack(fill="x", pady=(4, 1))
+    tk.Label(shf, text="Inspection Specification", bg="black", fg="white", font=("Arial", _fs(10), "bold")).pack(side="left")
+    spec_status_lbl = tk.Label(shf, text="[ No part loaded ]", bg="black", fg="#444", font=("Arial", _fs(9)))
     spec_status_lbl.pack(side="left", padx=10)
     cols_spec = ("TEST", "CH", "APPLIED VOLTS (V)", "TEST TIME (S)", "MIN", "MAX")
     # One channel's specs are three rows -- IR, ACW, Contact -- and the grid
@@ -2381,7 +2398,7 @@ def render(parent):
         tree_spec.yview_moveto(first / len(items))
         tree_spec.selection_set(items[first:first + _SPEC_ROWS_PER_CH])
 
-    tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", 10, "bold")).pack(fill="x", pady=(8, 2))
+    tk.Label(left_area, text="Testing", bg="black", fg="white", font=("Arial", _fs(10), "bold")).pack(fill="x", pady=(4, 1))
     # Outer white border, the same 1px padded-wrapper trick the verdict and
     # scan boxes use -- without it this table has no outline of its own and
     # runs straight into the black background, unlike the treeviews above and
@@ -2393,18 +2410,18 @@ def render(parent):
     MAX_CH = 8
     ch_header = ["TEST", "UNIT"] + [f"CH{i}" for i in range(1, MAX_CH + 1)] + ["RESULT"]
     for i in range(len(ch_header)): test_frame.columnconfigure(i, weight=1)
-    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", 10, "bold"), bd=1, relief="solid", pady=7).grid(row=0, column=i, sticky="nsew")
+    for i, h in enumerate(ch_header): tk.Label(test_frame, text=h, bg="#1a1a1a", fg="white", font=("Arial", _fs(10), "bold"), bd=1, relief="solid", pady=5).grid(row=0, column=i, sticky="nsew")
     test_rows_def = [("IR", "Insulation (IR)", "MΩ"), ("ACW", "Withstand (ACW)", "mA"), ("Contact", "Contact", "—")]
     result_rows = {}
     for r_idx, (key, name, unit) in enumerate(test_rows_def, start=1):
-        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", 10), bd=1, relief="solid", pady=9).grid(row=r_idx, column=0, sticky="nsew")
-        tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", 10, "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
+        tk.Label(test_frame, text=name, bg="#111", fg="white", font=("Arial", _fs(10)), bd=1, relief="solid", pady=6).grid(row=r_idx, column=0, sticky="nsew")
+        tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", _fs(10), "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
         row_cells = []
         for ch_i in range(MAX_CH):
-            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 11), bd=1, relief="solid", pady=9)
+            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", _fs(11)), bd=1, relief="solid", pady=6)
             lbl.grid(row=r_idx, column=2 + ch_i, sticky="nsew")
             row_cells.append(lbl)
-        res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", 11, "bold"), bd=1, relief="solid")
+        res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", _fs(11), "bold"), bd=1, relief="solid")
         res_lbl.grid(row=r_idx, column=2 + MAX_CH, sticky="nsew")
         result_rows[key] = {"cells": row_cells, "result": res_lbl}
 
@@ -2429,11 +2446,11 @@ def render(parent):
         result_rows[test_key]["result"].config(text=text, bg=bg, fg=fg)
 
     scan_outer = tk.Frame(left_area, bg="#222", padx=2, pady=2)
-    scan_outer.pack(fill="x", pady=(8, 3))
-    scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", 11, "bold"), pady=8)
+    scan_outer.pack(fill="x", pady=(4, 2))
+    scan_lbl = tk.Label(scan_outer, text="Enter Part Number + Employee ID, then press ENTER or START", bg="#001830", fg="#555", font=("Arial", _fs(11), "bold"), pady=5)
     scan_lbl.pack(fill="both", expand=True)
 
-    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", 12, "bold")).pack(fill="x", pady=(6, 2))
+    tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", _fs(12), "bold")).pack(fill="x", pady=(3, 1))
     # Identity first (lot, part, who, when), verdicts last -- the four result
     # columns are what the operator reads across to, so they sit together at
     # the right-hand end rather than split by EMP/TIME.
@@ -2447,7 +2464,7 @@ def render(parent):
     # height of this column goes to the records table.
     tree_lot.pack(fill="both", expand=True)
 
-    bottom = tk.Frame(content, bg="black", height=128)
+    bottom = tk.Frame(content, bg="black", height=_px(128))
     bottom.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(4, 0))
     bottom.grid_propagate(False)
     bottom.columnconfigure(0, weight=0)                # I/O: only as wide as its indicator grid
@@ -2489,9 +2506,9 @@ def render(parent):
     # own font, and this row's font is not the cells' font, so any character
     # count that lines up is a coincidence waiting for a font change to break.
     # _align_bank_captions() below does it off the real geometry, once.
-    grp_row = tk.Frame(io_inner, bg="black", height=15); grp_row.pack(fill="x")
+    grp_row = tk.Frame(io_inner, bg="black", height=_px(15)); grp_row.pack(fill="x")
     grp_row.pack_propagate(False)
-    _CAP = {"bg": "black", "fg": "#9a9a9a", "font": ("Arial", 7, "bold")}
+    _CAP = {"bg": "black", "fg": "#9a9a9a", "font": ("Arial", _fs(7), "bold")}
     cap_contact = tk.Label(grp_row, text="CONTACT", **_CAP)
     cap_hv = tk.Label(grp_row, text="IR / ACW", **_CAP)
 
@@ -2501,26 +2518,26 @@ def render(parent):
     # thing on the panel that answered "which channel is that?", and they were
     # the dimmest thing on it.
     hdr_row = tk.Frame(io_inner, bg="black"); hdr_row.pack(anchor="w")
-    tk.Label(hdr_row, text="CH #:", bg="black", fg="#cfcfcf", font=("Arial", 7, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
+    tk.Label(hdr_row, text="CH #:", bg="black", fg="#cfcfcf", font=("Arial", _fs(7), "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
     tk.Label(hdr_row, text="", bg="black", width=_IO_CELL_W).pack(side="left", padx=(0, _IO_GAP))  # spacer over Safety/ACK cell
     for bank in range(2):
         for ch in range(1, 9):
-            tk.Label(hdr_row, text=str(ch), bg="black", fg="#cfcfcf", font=("Arial", 7, "bold"), width=_IO_CELL_W).pack(side="left", padx=1)
+            tk.Label(hdr_row, text=str(ch), bg="black", fg="#cfcfcf", font=("Arial", _fs(7), "bold"), width=_IO_CELL_W).pack(side="left", padx=1)
         if bank == 0:
             tk.Frame(hdr_row, bg="black", width=_IO_GAP).pack(side="left")
 
     # ── ROW 1: PLC Outputs (M Coils) ──
     out_row = tk.Frame(io_inner, bg="black"); out_row.pack(anchor="w", pady=(2, 5))
-    tk.Label(out_row, text="OUT (M):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
+    tk.Label(out_row, text="OUT (M):", bg="black", fg="#777", font=("Arial", _fs(8), "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
 
     # Safety Relay
-    safety_lbl = tk.Label(out_row, text="M28", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    safety_lbl = tk.Label(out_row, text="M28", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     safety_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # Contact Relays
     io_contact_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{29+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(out_row, text=f"M{29+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", _fs(7)), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_contact_labels.append(lbl)
 
@@ -2529,16 +2546,16 @@ def render(parent):
     # HV Relays
     io_ir_acw_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(out_row, text=f"M{19+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(out_row, text=f"M{19+i}", bg=_IO_OFF_BG, fg=_IO_OFF_FG, font=("Arial", _fs(7)), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_ir_acw_labels.append(lbl)
 
     # ── ROW 2: PLC Inputs (X Pins) ──
     in_row = tk.Frame(io_inner, bg="black"); in_row.pack(anchor="w", pady=(0, 2))
-    tk.Label(in_row, text="IN (X):", bg="black", fg="#777", font=("Arial", 8, "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
+    tk.Label(in_row, text="IN (X):", bg="black", fg="#777", font=("Arial", _fs(8), "bold"), width=_IO_LBL_W, anchor="w").pack(side="left")
 
     # Safety ACK
-    x4_lbl = tk.Label(in_row, text="X4", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x4_lbl = tk.Label(in_row, text="X4", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x4_lbl.pack(side="left", padx=(0, _IO_GAP))
 
     # The machine-wide inputs, in X order. None of these is per-channel --
@@ -2552,16 +2569,16 @@ def render(parent):
     #   X3  rework select -- drives the REWORK badge and which barcode
     #       template gets printed, so it belongs on the panel with the rest of
     #       the inputs rather than only behind a blinking label
-    x0_lbl = tk.Label(in_row, text="X0", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x0_lbl = tk.Label(in_row, text="X0", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x0_lbl.pack(side="left", padx=1)
 
-    x1_lbl = tk.Label(in_row, text="X1", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x1_lbl = tk.Label(in_row, text="X1", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x1_lbl.pack(side="left", padx=1)
 
-    x2_lbl = tk.Label(in_row, text="X2", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x2_lbl = tk.Label(in_row, text="X2", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
 
-    x3_lbl = tk.Label(in_row, text="X3", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7, "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    x3_lbl = tk.Label(in_row, text="X3", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x3_lbl.pack(side="left", padx=1)
 
     # X4 and X0-X3 are machine-wide signals that happen to sit under channel
@@ -2569,7 +2586,7 @@ def render(parent):
     # CH # header lies. The dead cells under M34-M37 are the natural place to
     # say so, and cost nothing: they were empty padding.
     tk.Label(in_row, text="← not per-channel", bg="black", fg="#888",
-             font=("Arial", 6), anchor="w",
+             font=("Arial", _fs(6)), anchor="w",
              width=_IO_CELL_W * 4 + 4).pack(side="left", padx=1)
 
     tk.Frame(in_row, bg="black", width=_IO_GAP).pack(side="left")
@@ -2577,7 +2594,7 @@ def render(parent):
     # HV ACKs (aligns under M20-M27)
     io_in_labels = []
     for i in range(1, 9):
-        lbl = tk.Label(in_row, text=f"X{19+i}", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", 7), bd=1, relief="solid", width=_IO_CELL_W)
+        lbl = tk.Label(in_row, text=f"X{19+i}", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7)), bd=1, relief="solid", width=_IO_CELL_W)
         lbl.pack(side="left", padx=1)
         io_in_labels.append(lbl)
 
@@ -2694,7 +2711,7 @@ def render(parent):
     scan_head = tk.Frame(scan_inner, bg="black")
     scan_head.pack(fill="x")
     scan_verdict_lbl = tk.Label(scan_head, text="—", bg="black", fg="#555",
-                                font=("Arial", 11, "bold"), anchor="w")
+                                font=("Arial", _fs(11), "bold"), anchor="w")
     scan_verdict_lbl.pack(side="left")
 
     # Turning verification off lets parts ship without their printed label
@@ -2702,7 +2719,7 @@ def render(parent):
     # the toggle asks for a login and puts itself back if that is refused.
     scan_req_var = tk.BooleanVar(value=cfg.get("scan_enabled", True))
     tk.Checkbutton(scan_head, text="Scan required", variable=scan_req_var,
-                   bg="black", fg="#888", font=("Arial", 8), selectcolor="#1a1a1a",
+                   bg="black", fg="#888", font=("Arial", _fs(8)), selectcolor="#1a1a1a",
                    activebackground="black", activeforeground="white",
                    highlightthickness=0, bd=0, cursor="hand2",
                    command=lambda: _toggle_scan_required()).pack(side="right")
@@ -2710,7 +2727,7 @@ def render(parent):
     # The operator never has to click anywhere -- after a PASS this entry
     # gets keyboard focus directly, so a keyboard-wedge scanner's trigger
     # pull types the code straight in here and its own Enter submits it.
-    ent_scan = _ent(scan_inner, w=16, editable=False, size=10)
+    ent_scan = _ent(scan_inner, w=16, editable=False, size=_fs(10))
     ent_scan.pack(fill="x", pady=(3, 3))
 
     def _lock_scan_entry():
@@ -2723,7 +2740,7 @@ def render(parent):
     # The scanned code is long and full of separators; wrap it rather than
     # truncate, so the operator can read the whole thing against the part.
     scan_data_lbl = tk.Label(scan_inner, text="Waiting for scan…", bg="black", fg="#666",
-                             font=("Consolas", 8), anchor="nw", justify="left", wraplength=300)
+                             font=("Consolas", _fs(8)), anchor="nw", justify="left", wraplength=300)
     scan_data_lbl.pack(fill="both", expand=True, pady=(2, 0))
 
     def _set_scan_box(verdict: str, raw: str = ""):
@@ -2796,7 +2813,7 @@ def render(parent):
 
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=2, sticky="nsew")
-    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", 8), bd=0, height=5, width=1)
+    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", _fs(8)), bd=0, height=5, width=1)
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
