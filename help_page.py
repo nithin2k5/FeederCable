@@ -234,14 +234,14 @@ CHAPTERS = [
           "in order, so the first entry in DAY CODE.txt is the code for the 1st "
           "and the first in YEAR CODE.txt is the code for 2021."),
     ("p", "As shipped the days run A to Z then 1 to 5, the months A to L, and "
-          "the years Q to Z — 2021 to 2030. A customer who codes dates "
+          "the years Q to Z then A to J — 2021 to 2040. A customer who codes dates "
           "differently only needs these files edited — the tables are read again "
           "for every label, so a change applies to the next one printed without "
           "restarting. A full stop on the end of a line is ignored, so a table "
           "typed out as a sentence still reads correctly."),
     ("note", "A label reading ? in place of one of the three characters means "
              "the date fell outside its file — YEAR CODE.txt running out after "
-             "2030 is the one to expect. Add the missing entries and reprint."),
+             "2040 is the one to expect. Add the missing entries and reprint."),
     ("note", "A placeholder the template does not use is simply left alone. A "
              "misspelled one prints as itself — so a label that comes out reading "
              "@partNumber@ instead of the part number is a typo in the template, "

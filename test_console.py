@@ -863,11 +863,13 @@ _LOT_CODE_YEAR_FIRST = 2021
 # still prints a label instead of stopping the line. These have to stay in step
 # with the shipped files by hand: a station whose table went missing would
 # otherwise print a code nobody chose and give no sign of it. As shipped, days
-# A-Z then 1-5, months A-L, years Q-Z from 2021 (through 2030).
+# A-Z then 1-5, months A-L, and years Q-Z then A-J for 2021 through 2040 -- the
+# year letters run off the end of the alphabet at 2030 and carry on from A, so
+# they are spelled out rather than counted from one starting letter.
 _LOT_CODE_FALLBACK = {
     "day":   [chr(ord("A") + i) for i in range(26)] + [str(d) for d in range(1, 6)],
     "month": [chr(ord("A") + i) for i in range(12)],
-    "year":  [chr(ord("Q") + i) for i in range(10)],
+    "year":  [chr(ord("Q") + i) for i in range(10)] + [chr(ord("A") + i) for i in range(10)],
 }
 # What goes on the label when the date falls outside a table -- a year past the
 # end of the year table, say, or one before it starts. Deliberately something an
