@@ -20,3 +20,4 @@ build/
 dist/
 FeederCable.spec
 .install.lock/
+.build.stamp

@@ -113,7 +113,11 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     die "Another install.sh is already running (lock: $LOCK_DIR).
        If no other run is active, delete that directory and try again."
 fi
-cleanup() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
+BUILD_STAMP="$HERE/.build.stamp"
+cleanup() {
+    rm -f "$BUILD_STAMP" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
 trap cleanup EXIT INT TERM
 
 # ── What the frozen app needs beside itself ──────────────────────────────────
@@ -224,9 +228,24 @@ if [ "$DO_BUILD" = 1 ]; then
         ARGS+=(--exclude-module "$excl")
     done
 
+    # Something to date the build against. A run that is interrupted, or that
+    # fails after PyInstaller has already reported itself happy, leaves the
+    # previous dist/ standing -- and then the existence check below passes on an
+    # exe from days ago. That is how a station came to be running a build that
+    # predated the date code tables entirely, with the installer printing "ok"
+    # against every one of them. Whatever this run really wrote is newer than
+    # this file; anything left over from last time is not.
+    : > "$BUILD_STAMP"
+
     "$VPY" -m PyInstaller "${ARGS[@]}" "$ENTRY"
 
     [ -f "dist/$APP_NAME/$APP_NAME.exe" ] || die "Build finished but dist/$APP_NAME/$APP_NAME.exe is missing."
+    [ "dist/$APP_NAME/$APP_NAME.exe" -nt "$BUILD_STAMP" ] \
+        || die "dist/$APP_NAME/$APP_NAME.exe is left over from an earlier build -- this run
+       did not write it, so none of your changes are in it. The usual cause is
+       $APP_NAME.exe still running, which stops PyInstaller replacing dist/.
+       Close it and re-run with --clean."
+    rm -f "$BUILD_STAMP"
     say "Built dist/$APP_NAME/$APP_NAME.exe"
     note "$(du -sh "dist/$APP_NAME" 2>/dev/null | cut -f1) on disk"
 fi
@@ -235,6 +254,42 @@ fi
 
 # ── Install the payload ──────────────────────────────────────────────────────
 [ -d "dist/$APP_NAME" ] || die "dist/$APP_NAME not found. Run without --install-only first."
+
+# Refuse to install a build older than the source it claims to ship, and refuse
+# before anything is copied -- a station left with a stale payload and an error
+# message is worse off than one the installer declined to touch.
+#
+# This is the check the verify step at the end cannot make: every line down
+# there is satisfied by whatever the *last* install put on the station, so a
+# stale payload passes them all. That is how a station came to be running a
+# build that predated the date code tables, with the installer reporting "ok"
+# against every one of them.
+#
+# Dated against dist/, not against the exe in $DEST: copying stamps the
+# destination with the time of the copy, which is always now, so an installed
+# exe always looks current no matter how old the build behind it is. dist/
+# still carries the time PyInstaller wrote it.
+#
+# The TEMP* label templates are skipped on purpose. The app rewrites them in
+# place every time it prints, so a developer who ran the app from this checkout
+# would trip the check on a build that is perfectly current.
+STALE=0
+STALE_AGAINST=(*.py)
+for f in "${ASSET_FILES[@]}"; do
+    case "$f" in TEMPPRN.prn|TEMPMARKER_START.prn|TEMPLOTPRN.prn) continue ;; esac
+    STALE_AGAINST+=("$f")
+done
+for f in "${STALE_AGAINST[@]}"; do
+    [ -f "$f" ] || continue
+    if [ "$f" -nt "dist/$APP_NAME/$APP_NAME.exe" ]; then
+        printf '    STALE  %s changed after dist/%s was built\n' "$f" "$APP_NAME"
+        STALE=$((STALE + 1))
+    fi
+done
+[ "$STALE" -eq 0 ] || die "$STALE source file(s) changed after dist/$APP_NAME was built, so that
+       build does not contain them and nothing has been installed. Re-run
+       without --install-only to rebuild first, or with --clean to force a
+       full rebuild."
 
 case "$(printf '%s' "$DEST" | tr 'A-Z' 'a-z')" in
     */program\ files*|*/program\ files\ \(x86\)*)
