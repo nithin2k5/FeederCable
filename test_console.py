@@ -2497,7 +2497,11 @@ def render(parent):
         tk.Label(test_frame, text=unit, bg="#111", fg="#ffcc00", font=("Arial", _fs(10), "bold"), bd=1, relief="solid").grid(row=r_idx, column=1, sticky="nsew")
         row_cells = []
         for ch_i in range(MAX_CH):
-            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", _fs(11)), bd=1, relief="solid", pady=6)
+            # Bold, like the RESULT cell at the end of the row and the UNIT at
+            # the start of it. These are the measured numbers the operator
+            # reads across from a step back, and they were the only thing in
+            # the row set lighter than the labels around them.
+            lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", _fs(11), "bold"), bd=1, relief="solid", pady=6)
             lbl.grid(row=r_idx, column=2 + ch_i, sticky="nsew")
             row_cells.append(lbl)
         res_lbl = tk.Label(test_frame, text="—", bg="#0d0d0d", fg="#333", font=("Arial", _fs(11), "bold"), bd=1, relief="solid")
