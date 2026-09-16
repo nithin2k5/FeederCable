@@ -1451,12 +1451,16 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
 def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number: str,
                      lot_no: str, qty: int, count: int, emp: str, machine_id: str,
                      printer_name: str = _LOT_PRINTER_NAME) -> bool:
-    """Print the box label for a completed lot. True when it went to the spooler.
+    """Print the box label for a lot. True when it went to the spooler.
 
     Fired from the lot dialog's OK button, never from the test cycle: the
     label is for a box the operator is closing, and printing it the instant
     the count ticked over put it on the roll while they were still holding the
     part that tripped it.
+
+    Also called by the Report page for a box left part-filled, where the
+    quantity is typed rather than counted. Same template, same fields, same
+    label -- what differs is only how the numbers on it were arrived at.
 
     LOTPRN.prn is a plain TSPL template with @placeholders@ in it, the same
     arrangement the part labels use, so the layout can be redrawn in the label

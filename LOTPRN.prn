@@ -9,9 +9,16 @@ SET PARTIAL_CUTTER OFF
 SET TEAR ON
 CLS
 CODEPAGE 1252
-; Lot (box) label. Printed by _print_lot_label() in test_console.py when the
-; operator presses OK on the "Lot quantity reached" dialog, and sent to the
-; printer Windows knows as LOTPRINTER.
+; Lot (box) label. Built and sent by _print_lot_label() in test_console.py,
+; to the printer Windows knows as LOTPRINTER. Two callers, one label:
+;
+;   Test Console -- OK on the "Lot quantity reached" dialog, for a box filled
+;                   to the quantity the operator set for it.
+;   Report page  -- PRINT BATCH LABEL, for a box left part-filled by a part
+;                   change or a program close, with its quantity typed in.
+;
+; Both rebuild this file from scratch on every press, so each one is a fresh
+; label carrying its own print time. Nothing is cached and nothing reprints.
 ;
 ; Every @name@ below is substituted before the file is sent, so this layout
 ; can be redrawn in the label designer without touching any Python. The full
@@ -23,8 +30,12 @@ CODEPAGE 1252
 ;   @machineID@    @machineID_NoAlphabet@
 ;   @ddMMyy@       @dd/MM/yy@    @HH:mm:ss@
 ;
-; @lotQty@ is the box size the operator typed; @lotCount@ is the running OK
-; count that reached it, so the second box of 50 reads QTY 50 / COUNT 100.
+; @lotQty@ is the box size and @lotCount@ is how many went into it. Both
+; callers pass the same figure for the two -- a full box reached its quantity,
+; and a short box is described by what it holds -- so the layout below draws
+; QTY alone. They stayed separate fields because the count was once the day's
+; running total, which made the second box of 50 read COUNT 100; it counts per
+; box now, and a layout that wants it back has @lotCount@ waiting.
 ;
 ; Rotation 180 matches the part labels, which come off the roll the same way
 ; up. Under 180 the x below is the reading-LEFT edge of the line, so the
