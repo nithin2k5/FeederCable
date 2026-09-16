@@ -624,6 +624,24 @@ _SPEC_FIELDS = ("appvol", "testtime", "min", "max")
 # MEAS? response and the result line TEST:RET ON volunteers when a test ends.
 _VERDICT_FAIL = re.compile(r"(?<![A-Z])(FAIL|F_AIL|NG|HIGH|LOW|OVER)(?![A-Z])", re.I)
 _VERDICT_PASS = re.compile(r"(?<![A-Z])(PASS|GOOD)(?![A-Z])", re.I)
+# The second field of a reply is the instrument's state, and while the test is
+# under way it reads TEST rather than a verdict:
+#
+#     ACW,TEST ,1.000kV,0.002 mA ,T=001.7S
+#
+# A reply in that state carries no judgement and its number is whatever the
+# current had reached part way through, not the value the limits are written
+# against. It is worth waiting out rather than recording.
+_MEAS_RUNNING = re.compile(r"(?<![A-Z])(TEST|RAMP)(?![A-Z])", re.I)
+# How long to keep asking after the dwell before giving up on a settled
+# reply. Bounded, because a tester that never settles must not hold a
+# channel open indefinitely.
+_SETTLE_TIMEOUT_S = 2.0
+
+
+def _meas_running(response: str) -> bool:
+    """Whether the reply says the test was still going when it was produced."""
+    return bool(_MEAS_RUNNING.search(response or ""))
 
 
 def _parse_verdict(response: str):
@@ -684,6 +702,18 @@ _LIMIT_PLAUSIBLE = {
 _LIMIT_KIND = {
     "MANU:ACW:CHIS": "acw", "MANU:ACW:CLOS": "acw",
     "MANU:IR:RHIS":  "ir",  "MANU:IR:RLOS":  "ir",
+}
+# Whether each keyword is the top of its window or the bottom, which is what
+# decides the direction a limit gets tighter in. An instrument that cannot
+# hold the value asked for clamps it to its own range -- MANU:IR:RLOS 0 comes
+# back as 1, because 1 MOhm is as low as this tester's resistance floor goes.
+# A clamp towards the middle of the window is the instrument judging more
+# strictly than the part is specified to, which can only fail a part the spec
+# would also have to question; a clamp outwards is it judging more loosely,
+# and that is the thing none of this may allow.
+_LIMIT_IS_UPPER = {
+    "MANU:ACW:CHIS": True,   "MANU:IR:RHIS":  True,
+    "MANU:ACW:CLOS": False,  "MANU:IR:RLOS":  False,
 }
 
 
@@ -899,6 +929,29 @@ class HiPotSerial:
         if self.is_open:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
+    # A tester that is streaming status lines refills the buffer as fast as it
+    # is emptied, so draining "until empty" is a condition that need never
+    # arrive. Far more than any one test produces, and still an end.
+    _DRAIN_MAX_LINES = 50
+
+    def drain(self) -> list:
+        """The lines already waiting, oldest first, up to _DRAIN_MAX_LINES.
+
+        They are kept rather than flushed away: the line the instrument sends
+        of its own accord as a test ends is where some firmware puts the
+        verdict, and it is the only copy of it.
+        """
+        lines = []
+        if not self.is_open: return lines
+        try:
+            while getattr(self._ser, "in_waiting", 0) and len(lines) < self._DRAIN_MAX_LINES:
+                line = self._ser.readline().decode("ascii", errors="ignore").strip()
+                if not line: break
+                print(f"[HIPOT DEBUG] << (queued) {line!r}")
+                lines.append(line)
+        except Exception as e:
+            print(f"[HIPOT DEBUG] drain EXCEPTION: {e}")
+        return lines
     def stop_test(self):
         """Take the tester out of the TEST state and clear its status.
 
@@ -956,10 +1009,17 @@ class HiPotSerial:
             return False
         # The instrument rounds to its own resolution, so this is "close
         # enough to be the value asked for", not equality.
-        if abs(back - float(value)) > max(abs(float(value)) * 0.001, 1e-4):
-            print(f"[HIPOT DEBUG] {label}: {key} set to {text} but reads back {back} -- REFUSED")
-            return False
-        return True
+        if abs(back - float(value)) <= max(abs(float(value)) * 0.001, 1e-4):
+            return True
+        upper = _LIMIT_IS_UPPER.get(key)
+        if upper is not None and ((back < float(value)) if upper else (back > float(value))):
+            print(f"[HIPOT DEBUG] {label}: {key} asked for {text}, instrument holds "
+                  f"{back} -- clamped to its own range, and tighter than asked, "
+                  f"so it stands")
+            return True
+        print(f"[HIPOT DEBUG] {label}: {key} set to {text} but reads back {back} "
+              f"-- looser than asked, REFUSED")
+        return False
 
     def _measure(self, instr: list, dwell_s: float, label: str):
         """Run one configured test and read it back. None means no reading.
@@ -985,14 +1045,41 @@ class HiPotSerial:
             self.stop_test()
             return _Reading(raw="<setup did not reach the instrument>")
         time.sleep(dwell_s)
-        if not self.write_line("MEAS?"):
-            self.stop_test()
-            return _Reading(raw="<MEAS? could not be sent>")
-        time.sleep(0.02)
-        response = self.read_line()
+        # TEST:RET ON makes the instrument send lines of its own while the test
+        # runs, and they sit in the buffer in front of the answer to MEAS?.
+        # Reading without clearing them first returned the oldest of them -- a
+        # line from the moment the test began, still reading TEST, with the
+        # current only part way up and no judgement on it yet. They are kept
+        # rather than dropped, because the last of them is where the verdict
+        # may be.
+        volunteered = self.drain()
+        response = ""
+        deadline = time.time() + _SETTLE_TIMEOUT_S
+        while True:
+            if not self.write_line("MEAS?"):
+                self.stop_test()
+                return _Reading(raw="<MEAS? could not be sent>")
+            time.sleep(0.05)
+            response = self.read_line()
+            if _parse_verdict(response) is not None: break
+            if not _meas_running(response): break
+            if time.time() >= deadline:
+                print(f"[HIPOT DEBUG] {label}: still reads as running after "
+                      f"{_SETTLE_TIMEOUT_S}s -- taking the reply as it stands")
+                break
+            time.sleep(0.1)
+            volunteered += self.drain()
         self.stop_test()
         value = _parse_meas(response)
         verdict = _parse_verdict(response)
+        if verdict is None:
+            # The settled reply had no judgement in it, so fall back to the
+            # most recent line the instrument volunteered, newest first.
+            for line in reversed(volunteered):
+                verdict = _parse_verdict(line)
+                if verdict is not None:
+                    print(f"[HIPOT DEBUG] {label}: verdict {verdict} taken from {line!r}")
+                    break
         print(f"[HIPOT DEBUG] {label}: MEAS? -> {response!r}, parsed value={value}, verdict={verdict}")
         if verdict is None:
             print(f"[HIPOT DEBUG] {label}: no PASS/FAIL in the reply -- "
