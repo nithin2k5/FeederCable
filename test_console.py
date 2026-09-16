@@ -629,14 +629,18 @@ _VERDICT_PASS = re.compile(r"(?<![A-Z])(PASS|GOOD)(?![A-Z])", re.I)
 #
 #     ACW,TEST ,1.000kV,0.002 mA ,T=001.7S
 #
-# A reply in that state carries no judgement and its number is whatever the
-# current had reached part way through, not the value the limits are written
-# against. It is worth waiting out rather than recording.
+# That is a reply from during the test: no judgement on it yet, and a number
+# that is only where the current had got to. Seeing it means the dwell ended
+# before the test did, which _RAMP_TIME_S is what stops -- it is logged rather
+# than worked around, because by then the reading is already wrong.
 _MEAS_RUNNING = re.compile(r"(?<![A-Z])(TEST|RAMP)(?![A-Z])", re.I)
-# How long to keep asking after the dwell before giving up on a settled
-# reply. Bounded, because a tester that never settles must not hold a
-# channel open indefinitely.
-_SETTLE_TIMEOUT_S = 2.0
+# The instrument ramps the voltage up before the programmed test time starts,
+# so a test lasts ramp + TTIM and a dwell of TTIM alone expires part way
+# through it. The ramp is a setting, not a constant, and left alone it holds
+# whatever the front panel was last set to -- which is why replies were coming
+# back mid-test. TestConsole.cs pinned it at 0.1 s for exactly this reason
+# (MANU:RTIMe 0.1), and that is the number the dwell is built around.
+_RAMP_TIME_S = 0.1
 
 
 def _meas_running(response: str) -> bool:
@@ -815,9 +819,13 @@ def _meas_dwell(test_time_s: float) -> float:
     end-of-dwell value the spec limits are written against rather than one
     taken while the cable is still charging. The 0.9 s floor keeps the old
     behaviour for parts specced shorter than that.
+
+    The ramp is part of that wait. A test runs for the ramp and then for the
+    programmed time, so a dwell of TTIM + a margin ends while the instrument
+    is still testing and MEAS? answers with a mid-test line.
     """
-    try: return max(float(test_time_s) + 0.3, 0.9)
-    except (TypeError, ValueError): return 0.9
+    try: return max(float(test_time_s) + _RAMP_TIME_S + 0.3, 0.9)
+    except (TypeError, ValueError): return 0.9 + _RAMP_TIME_S
 
 
 def _parse_meas(response: str):
@@ -929,29 +937,6 @@ class HiPotSerial:
         if self.is_open:
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
-    # A tester that is streaming status lines refills the buffer as fast as it
-    # is emptied, so draining "until empty" is a condition that need never
-    # arrive. Far more than any one test produces, and still an end.
-    _DRAIN_MAX_LINES = 50
-
-    def drain(self) -> list:
-        """The lines already waiting, oldest first, up to _DRAIN_MAX_LINES.
-
-        They are kept rather than flushed away: the line the instrument sends
-        of its own accord as a test ends is where some firmware puts the
-        verdict, and it is the only copy of it.
-        """
-        lines = []
-        if not self.is_open: return lines
-        try:
-            while getattr(self._ser, "in_waiting", 0) and len(lines) < self._DRAIN_MAX_LINES:
-                line = self._ser.readline().decode("ascii", errors="ignore").strip()
-                if not line: break
-                print(f"[HIPOT DEBUG] << (queued) {line!r}")
-                lines.append(line)
-        except Exception as e:
-            print(f"[HIPOT DEBUG] drain EXCEPTION: {e}")
-        return lines
     def stop_test(self):
         """Take the tester out of the TEST state and clear its status.
 
@@ -1046,40 +1031,22 @@ class HiPotSerial:
             return _Reading(raw="<setup did not reach the instrument>")
         time.sleep(dwell_s)
         # TEST:RET ON makes the instrument send lines of its own while the test
-        # runs, and they sit in the buffer in front of the answer to MEAS?.
-        # Reading without clearing them first returned the oldest of them -- a
-        # line from the moment the test began, still reading TEST, with the
-        # current only part way up and no judgement on it yet. They are kept
-        # rather than dropped, because the last of them is where the verdict
-        # may be.
-        volunteered = self.drain()
-        response = ""
-        deadline = time.time() + _SETTLE_TIMEOUT_S
-        while True:
-            if not self.write_line("MEAS?"):
-                self.stop_test()
-                return _Reading(raw="<MEAS? could not be sent>")
-            time.sleep(0.05)
-            response = self.read_line()
-            if _parse_verdict(response) is not None: break
-            if not _meas_running(response): break
-            if time.time() >= deadline:
-                print(f"[HIPOT DEBUG] {label}: still reads as running after "
-                      f"{_SETTLE_TIMEOUT_S}s -- taking the reply as it stands")
-                break
-            time.sleep(0.1)
-            volunteered += self.drain()
+        # runs, and they queue in front of the answer to MEAS?. Clearing them
+        # first is what makes the next line read the answer to this question
+        # rather than the instrument's report from some earlier moment.
+        self.flush()
+        if not self.write_line("MEAS?"):
+            self.stop_test()
+            return _Reading(raw="<MEAS? could not be sent>")
+        time.sleep(0.05)
+        response = self.read_line()
         self.stop_test()
         value = _parse_meas(response)
         verdict = _parse_verdict(response)
-        if verdict is None:
-            # The settled reply had no judgement in it, so fall back to the
-            # most recent line the instrument volunteered, newest first.
-            for line in reversed(volunteered):
-                verdict = _parse_verdict(line)
-                if verdict is not None:
-                    print(f"[HIPOT DEBUG] {label}: verdict {verdict} taken from {line!r}")
-                    break
+        if _meas_running(response):
+            print(f"[HIPOT DEBUG] {label}: reply came back mid-test -- the dwell "
+                  f"ended before the instrument did. This reading is not the "
+                  f"settled one; check MANU:RTIMe against _RAMP_TIME_S.")
         print(f"[HIPOT DEBUG] {label}: MEAS? -> {response!r}, parsed value={value}, verdict={verdict}")
         if verdict is None:
             print(f"[HIPOT DEBUG] {label}: no PASS/FAIL in the reply -- "
@@ -1112,7 +1079,8 @@ class HiPotSerial:
         instr = [
             "MANU:EDIT:MODE IR", "TEST:RET ON", f"MANU:IR:VOLT {ir_volt_kv:.4f}",
         ] + limits + [
-            f"MANU:IR:TTIM {ir_time_s:.1f}", "MANU:IR:REF 0", "FUNC:TEST ON"
+            f"MANU:IR:TTIM {ir_time_s:.1f}", "MANU:IR:REF 0",
+            f"MANU:RTIMe {_RAMP_TIME_S}", "FUNC:TEST ON"
         ]
         reading = self._measure(instr, _meas_dwell(ir_time_s), label)
         reading.limits_set = limits_set
@@ -1139,7 +1107,8 @@ class HiPotSerial:
             "MANU:EDIT:MODE ACW", "TEST:RET ON", f"MANU:ACW:VOLT {acw_volt_kv:.4f}",
             "MANU:ACW:FREQ 60",
         ] + limits + [
-            f"MANU:ACW:TTIM {acw_time_s:.1f}", "MANU:ACW:REF 0.00", "FUNC:TEST ON"
+            f"MANU:ACW:TTIM {acw_time_s:.1f}", "MANU:ACW:REF 0.00",
+            f"MANU:RTIMe {_RAMP_TIME_S}", "FUNC:TEST ON"
         ]
         reading = self._measure(instr, _meas_dwell(acw_time_s), label)
         reading.limits_set = limits_set
