@@ -652,26 +652,84 @@ def render(parent):
             messagebox.showerror("DB Error", str(ex))
 
     def on_update():
-        pno = selected_pno["value"]
-        if not pno:
+        """Save the form over the selected part, part number included.
+
+        The part number was the one field an update could not change. This
+        read it from selected_pno and never looked at the box, and the UPDATE
+        left pno out of its SET list, so anything typed there was written
+        nowhere and the dialog reported success under the old number.
+        """
+        old_pno = selected_pno["value"]
+        if not old_pno:
             messagebox.showwarning("Validation", "Select a part first.")
+            return
+        new_pno = ent_pno.get().strip().upper()
+        if not new_pno:
+            messagebox.showwarning("Validation", "PART NUMBER is required.")
             return
         save_spec_ui()
         if not validate_channel_data():
             return
+
+        renaming = new_pno != old_pno
+        if renaming:
+            # pno is the primary key of settingmaster and the column every
+            # spec row hangs off, so a rename has to be checked before it is
+            # attempted rather than caught as a duplicate-key error halfway.
+            try:
+                with db.get_cursor() as cur:
+                    cur.execute("SELECT pno FROM settingmaster WHERE pno=%s", (new_pno,))
+                    clash = cur.fetchone() is not None
+                    cur.execute("SELECT COUNT(*) FROM testmaster WHERE pno=%s", (old_pno,))
+                    row = cur.fetchone()
+                    history = int(row[0]) if row else 0
+            except Exception as ex:
+                messagebox.showerror("DB Error", str(ex))
+                return
+            if clash:
+                messagebox.showerror(
+                    "Error",
+                    f"Part number '{new_pno}' already exists.\n\n"
+                    f"Two parts cannot share a number. Rename that one first, "
+                    f"or edit it instead of this one.")
+                return
+            warning = (f"Rename part '{old_pno}' to '{new_pno}'?")
+            if history:
+                # Renaming the part does not move its results. testmaster and
+                # testresult are keyed by the part number as it was at the
+                # time, and the lot numbers on labels already printed carry
+                # the old one, so rewriting them would put records under a
+                # number that was never on the parts.
+                warning += (
+                    f"\n\n{history} test record(s) are filed under '{old_pno}'. "
+                    f"They stay there: past results keep the number they were "
+                    f"tested under, and the labels already printed carry it too.")
+            if not messagebox.askyesno("Confirm rename", warning):
+                return
+
         try:
             with db.get_cursor(commit=True) as cur:
+                # The spec rows go first, and that order is not a preference.
+                # settingspec.pno is a foreign key onto settingmaster.pno with
+                # ON DELETE CASCADE but no ON UPDATE CASCADE, so while any spec
+                # row still references the old number the master row's key
+                # cannot change -- MySQL refuses it with errno 1451. Clearing
+                # the children first leaves the parent free to be renamed, and
+                # they are about to be rewritten from the form anyway.
+                #
+                # Both statements are in one transaction. get_cursor only
+                # commits on a clean exit, so a failure part way through leaves
+                # the part with its specs rather than stripped of them.
+                cur.execute("DELETE FROM settingspec WHERE pno=%s", (old_pno,))
                 cur.execute(
-                    "UPDATE settingmaster SET pname=%s, cname=%s, mname=%s, vendorcode=%s, "
+                    "UPDATE settingmaster SET pno=%s, pname=%s, cname=%s, mname=%s, vendorcode=%s, "
                     "eocode=%s, alc=%s, chsel=%s, lblsel=%s, machine=%s, testmode=%s WHERE pno=%s",
-                    (ent_pname.get().strip(), ent_cname.get().strip(),
+                    (new_pno, ent_pname.get().strip(), ent_cname.get().strip(),
                      ent_model.get().strip(), ent_vcode.get().strip(),
                      ent_eon.get().strip(), ent_alc.get().strip(),
                      cb_channels.get(), cb_label.get(), cb_machine.get(),
-                     cb_testmode.get(), pno))
+                     cb_testmode.get(), old_pno))
 
-                # Delete old specs and re-insert
-                cur.execute("DELETE FROM settingspec WHERE pno=%s", (pno,))
                 num_channels = int(cb_channels.get())
                 for ch in range(1, num_channels + 1):
                     for test_name in ("IR", "ACW"):
@@ -679,9 +737,13 @@ def render(parent):
                         cur.execute(
                             "INSERT INTO settingspec (pno, testname, chsel, appvol, testtime, min, max) "
                             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                            (pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
+                            (new_pno, test_name, str(ch), vals[0], vals[1], vals[2], vals[3]))
 
-            messagebox.showinfo("Success", f"Part '{pno}' updated.")
+            selected_pno["value"] = new_pno
+            if renaming:
+                messagebox.showinfo("Success", f"Part '{old_pno}' renamed to '{new_pno}' and updated.")
+            else:
+                messagebox.showinfo("Success", f"Part '{new_pno}' updated.")
             set_mode("VIEW")
             refresh_parts_list()
             lock_form(True)
