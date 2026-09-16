@@ -1019,19 +1019,29 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         return
     now = datetime.datetime.now()
     # Captions padded to the longest one so the colons line up down the block.
+    #
+    # Date and time share one row. They are one fact about the run -- when it
+    # opened, when it closed -- and split across two rows they cost a line of
+    # a four line label for no reading anyone does by eye. The time is minutes
+    # only: with seconds the row comes to 25 characters, and at 12 dots a
+    # character in font "2" that is 300 dots against a 280 dot label, so the
+    # D&T caption would print off the edge. Seconds are still recorded where
+    # they are used, on the part label and in testmaster.
     fields = [f"{cap:<5} : {val}" for cap, val in (
         ("P/NO",  pno),
-        ("DATE",  now.strftime("%d/%m/%y")),
-        ("TIME",  now.strftime("%H:%M:%S")),
+        ("D&T",   now.strftime("%d/%m/%y %H:%M")),
         ("MC ID", machine_id),
     )]
     # The title centres on itself; the fields share one left edge, with the
     # block as a whole centred via its widest line.
     block_w = max(len(f) for f in fields) * _MARKER_FONT_W["2"]
     # Read top to bottom on the label; with rotation 180 that is y descending.
+    # Three rows at the old 28 dot pitch, centred in the band the four used to
+    # fill, so dropping a row moves the block down instead of leaving it hung
+    # under the title with the gap at the bottom.
     body = "\r\n".join(
         [_marker_line(170, "3", 1, f"{marker} LABEL")]
-        + [_marker_line(y, "2", 1, f, block_w) for y, f in zip((132, 104, 76, 48), fields)]
+        + [_marker_line(y, "2", 1, f, block_w) for y, f in zip((118, 90, 62), fields)]
     )
     try:
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
