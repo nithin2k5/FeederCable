@@ -2961,6 +2961,14 @@ def render(parent):
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
+    # Saved at OpenCV's default the 640x480 pass image is ~64 KB, and a
+    # station writes one per PASS all shift, every shift, for as long as the
+    # records are kept. Quality 80 with an optimized Huffman table halves that
+    # -- ~33 KB -- for 41 dB PSNR against the source frame, which on a boxed
+    # overlay whose whole job is to show where the match was and what it
+    # scored is a difference nobody will see.
+    _VISION_JPEG_QUALITY = 80
+
     def _save_vision_pass_image(lot_no: str) -> str:
         """If vision passed on this cycle, save the judged (boxed) frame to
         vision_captures/<yyyy>/<mm>/<dd>/<lotno>.jpg and return its path,
@@ -2992,8 +3000,10 @@ def render(parent):
                                    now.strftime("%m"), now.strftime("%d"))
             os.makedirs(day_dir, exist_ok=True)
             path = os.path.join(day_dir, f"{lot_no}.jpg")
-            cv2.imwrite(path, frame)
-            _log(f"Vision pass image saved: {path}")
+            cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, _VISION_JPEG_QUALITY,
+                                      cv2.IMWRITE_JPEG_OPTIMIZE, 1])
+            _log(f"Vision pass image saved: {path} "
+                 f"({os.path.getsize(path) / 1024:.0f} KB)")
             return path
         except Exception as ex:
             _log(f"Vision image save error: {ex}")
