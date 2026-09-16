@@ -1239,14 +1239,18 @@ def _read_lot_code_table(kind: str) -> list:
 
 
 def _lot_3_letters(when: datetime.datetime = None) -> str:
-    """Today's date as the three character lot code, day then month then year.
+    """Today's date as the three character lot code, year then month then day.
+
+    Y/M/D, most significant first, the way a date is written when it is going
+    to be sorted or compared. It was built D/M/Y here, which reads the way a
+    date is spoken and is the wrong way round for a code.
 
     Pass `when` to code a date other than now; the label printers leave it
     unset and get the system date.
     """
     now = when or datetime.datetime.now()
-    slots = (("day", now.day - 1), ("month", now.month - 1),
-             ("year", now.year - _LOT_CODE_YEAR_FIRST))
+    slots = (("year", now.year - _LOT_CODE_YEAR_FIRST),
+             ("month", now.month - 1), ("day", now.day - 1))
     out = []
     for kind, index in slots:
         table = _read_lot_code_table(kind)
@@ -2856,6 +2860,11 @@ def render(parent):
                 if testmode: testmode = testmode.strip()
                 state.update({"pno": pno, "alc": alc, "model": mod, "vendor_code": vendor, "eo_number": eo or "", "pname": pname, "cname": cname, "num_channels": channel, "testmode": testmode})
                 _fill_ro(ent_pname, pname); _fill_ro(ent_cust, cname); _fill_ro(ent_model, mod); _fill_ro(ent_alc, alc); _fill_ro(ent_vendor, vendor); _fill_ro(ent_eo, eo or ""); _fill_ro(ent_testtype, testmode)
+                # The code is the day's, not the part's, so it is known before
+                # anything is tested. Filling it only at the end of a run left
+                # the box empty for the whole of the first part, which is when
+                # somebody setting the line up wants to read it.
+                _fill_ro(ent_lot, _lot_3_letters())
                 cur.execute("SELECT testname, chsel AS channel, appvol, testtime, min, max FROM settingspec WHERE pno=%s", (pno,))
                 rows = cur.fetchall()
             spec_ir = {}; spec_acw = {}
