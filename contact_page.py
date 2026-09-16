@@ -14,66 +14,46 @@ def render(parent):
     tk.Label(content, text="Contact Information", bg="black", fg="white",
              font=("Arial", 16, "bold")).pack(anchor="w", pady=(0, 16))
 
-    contacts = [
-        ("Company",    "Nice Automation Pvt. Ltd."),
-        ("Address",    "Bangalore, Karnataka, India"),
-        ("Phone",      "+91-XXXX-XXXXXX"),
-        ("Email",      "support@niceautomation.com"),
-        ("Website",    "www.niceautomation.com"),
-    ]
+    def section(title, rows):
+        """One bordered block of caption/value rows.
 
-    info_frame = tk.LabelFrame(content, text="  Support  ", bg="black", fg="#e8a000",
-                               font=("Arial", 11, "bold"), bd=1, relief="solid",
-                               highlightbackground="#333", highlightthickness=1,
-                               padx=16, pady=12)
-    info_frame.pack(fill="x", pady=(0, 12))
-
-    for i, (label, value) in enumerate(contacts):
-        row = tk.Frame(info_frame, bg="black")
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text=f"{label}:", bg="black", fg="#999", font=("Arial", 10, "bold"),
-                 width=12, anchor="w").pack(side="left")
-        tk.Label(row, text=value, bg="black", fg="white", font=("Arial", 10),
-                 anchor="w").pack(side="left", padx=8)
-
-    # Developer info
-    dev_frame = tk.LabelFrame(content, text="  Developer  ", bg="black", fg="#e8a000",
+        All three blocks on this page are the same shape, so they are built
+        the same way -- the address is the only value long enough to need
+        wrapping, and it wraps rather than pushing the page wide.
+        """
+        frame = tk.LabelFrame(content, text=f"  {title}  ", bg="black", fg="#e8a000",
                               font=("Arial", 11, "bold"), bd=1, relief="solid",
                               highlightbackground="#333", highlightthickness=1,
                               padx=16, pady=12)
-    dev_frame.pack(fill="x", pady=(0, 12))
+        frame.pack(fill="x", pady=(0, 12))
+        for label, value in rows:
+            row = tk.Frame(frame, bg="black")
+            row.pack(fill="x", pady=4)
+            tk.Label(row, text=f"{label}:", bg="black", fg="#999",
+                     font=("Arial", 10, "bold"), width=12, anchor="w").pack(side="left")
+            tk.Label(row, text=value, bg="black", fg="white", font=("Arial", 10),
+                     anchor="w", justify="left", wraplength=900).pack(side="left", padx=8)
+        return frame
 
-    dev_contacts = [
-        ("Name",       "—"),
-        ("Email",      "—"),
-        ("Phone",      "—"),
-    ]
+    # The website row is gone: the address that was there belonged to a
+    # different company name and has no replacement.
+    section("Support", [
+        ("Name",        "Venkaiah Alla"),
+        ("Company",     "Nice Computer Education & Software Solutions"),
+        ("Address",     "8-30-32/2, Revenue ward No.8, Vaikuntapuram, Kavali, "
+                        "Sri Potti Sriramulu Nellore, Andhra Pradesh, 525201"),
+        ("Phone",       "+91 93467 40314"),
+        ("Email",       "niceavr@gmail.com"),
+    ])
 
-    for label, value in dev_contacts:
-        row = tk.Frame(dev_frame, bg="black")
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text=f"{label}:", bg="black", fg="#999", font=("Arial", 10, "bold"),
-                 width=12, anchor="w").pack(side="left")
-        tk.Label(row, text=value, bg="black", fg="white", font=("Arial", 10),
-                 anchor="w").pack(side="left", padx=8)
+    section("Developer", [
+        ("Name",        "\u2014"),
+        ("Email",       "koppisettinithin.dev@gmail.com"),
+        ("Phone",       "+91 93982 25082"),
+    ])
 
-    # App info
-    app_frame = tk.LabelFrame(content, text="  Application  ", bg="black", fg="#e8a000",
-                              font=("Arial", 11, "bold"), bd=1, relief="solid",
-                              highlightbackground="#333", highlightthickness=1,
-                              padx=16, pady=12)
-    app_frame.pack(fill="x")
-
-    app_info = [
+    section("Application", [
         ("Application", "Feeder Cable EOL Tester"),
         ("Version",     "2.0 (Python)"),
         ("Platform",    "Windows / Tkinter"),
-    ]
-
-    for label, value in app_info:
-        row = tk.Frame(app_frame, bg="black")
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text=f"{label}:", bg="black", fg="#999", font=("Arial", 10, "bold"),
-                 width=12, anchor="w").pack(side="left")
-        tk.Label(row, text=value, bg="black", fg="white", font=("Arial", 10),
-                 anchor="w").pack(side="left", padx=8)
+    ])
