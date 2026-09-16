@@ -16,7 +16,7 @@ import contact_page
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Feeder Cable App")
+        self.root.title("Feeder Cable EOL(End of Line) Tester")
         self.root.bind("<<NavigateVisionSettings>>", lambda e: self.load_page("vision_settings"))
         self.root.bind("<<NavigateHome>>", lambda e: self.load_page("test_console"))
         # Open filling the screen. The machine runs one part-test page all
@@ -217,7 +217,7 @@ class App:
             
         # 2. Render the new page and update the title
         if page_name == "test_console":
-            self.lbl_title.config(text="Feeder Cable", fg="#e8a000")
+            self.lbl_title.config(text="Feeder Cable EOL(End of Line) Tester", fg="#e8a000")
             test_console.render(self.content_area)
             
         elif page_name == "model_settings":
