@@ -1394,23 +1394,35 @@ def _marker_line(y: int, font: str, mul: int, content: str, label_w: int) -> str
     but these internal fonts are fixed width, so a line's rendered width is
     exact and the position can just be computed.
 
-    Every line is placed against the same left edge, and x is worked out from
-    each line's own width to put it there.
+    Every line takes the same x, and that is what left aligns them. This has
+    been got wrong twice, in both directions, so here is the actual geometry.
 
-    A single x for every line was the first attempt at this and it aligned
-    the wrong edge. Under rotation 180 a line occupies the span ending at its
-    anchor, so a shared anchor is a shared *trailing* edge -- right aligned,
-    however the label is then read. Which of the two physical edges that
-    corresponds to does not actually matter here: a shared anchor lines up
-    one of them, it was not the wanted one, so the other is the one to line
-    up, and that is the end of the span the anchor does not sit on.
+    Under rotation 180 a line grows in -x from its anchor, so it occupies
+    printer-x [x - width, x]. Reading it means turning the label around, and
+    that turn reverses the axis: printer-x P is read at label_w - P. The span
+    is therefore read as [label_w - x, label_w - x + width], and the anchor --
+    the end the *printer* treats as trailing -- is the end the *reader* sees
+    first. One x for every line is one left margin for every line.
 
-    A line too long for the stock is pushed back to the label edge rather
-    than hanging off it, which breaks it out of alignment with the rest --
+    The trap is stopping at the printer's own span. "The line ends at its
+    anchor, so a shared anchor lines up trailing edges" is true and still
+    gives a left aligned block, because the label is read the other way up.
+    Adding each line's width to spread the anchors, as the previous attempt
+    did, right aligns it instead.
+
+    Four templates settle it rather than any reasoning here. VW DATAMATRIX,
+    nice DATAMATRIX1 and TEMPPRN each put four lines of plainly different
+    lengths at a flat x=90, all at rotation 180 and all written by the label
+    designer, which would not emit that for anything but an aligned block.
+    LOTPRN does the same at x=265 on this same 35 mm stock, and that one goes
+    out on boxes today.
+
+    A line too long for the stock is pushed back to the edge rather than
+    hanging off it, which breaks it out of alignment with the rest --
     visibly, which is the point. Nothing is silently cropped.
     """
     width = len(content) * _MARKER_FONT_W[font] * mul
-    x = min(_MARKER_LEFT_MARGIN + width, label_w)
+    x = min(max(width, label_w - _MARKER_LEFT_MARGIN), label_w)
     return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
 
 def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
