@@ -2073,7 +2073,10 @@ def render(parent):
     _lbl(pi, "Customer").grid(row=1, column=4, sticky="w", padx=(10, 4)); ent_cust = _ent(pi, w=7, editable=False); ent_cust.grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
     _lbl(pi, "Model").grid(row=2, column=0, sticky="w", pady=7); ent_model = _ent(pi, w=7, editable=False); ent_model.grid(row=2, column=1, sticky="ew", padx=5)
     _lbl(pi, "ALC").grid(row=2, column=2, sticky="w", padx=(8, 4)); ent_alc = _ent(pi, w=5, editable=False); ent_alc.grid(row=2, column=3, sticky="ew", padx=5)
-    _lbl(pi, "LOT No").grid(row=2, column=4, sticky="w", padx=(8, 4)); ent_lot = _ent(pi, w=7, editable=False); ent_lot.grid(row=2, column=5, columnspan=2, sticky="ew", padx=5)
+    # The full lot number is on the header and in the results grid; this box
+    # carries the three character date code out of DAY/MONTH/YEAR CODE.txt,
+    # which neither of those shows.
+    _lbl(pi, "Lot Code").grid(row=2, column=4, sticky="w", padx=(8, 4)); ent_lot = _ent(pi, w=7, editable=False); ent_lot.grid(row=2, column=5, columnspan=2, sticky="ew", padx=5)
     _lbl(pi, "Vendor").grid(row=3, column=0, sticky="w", pady=7); ent_vendor = _ent(pi, w=7, editable=False); ent_vendor.grid(row=3, column=1, sticky="ew", padx=5)
     _lbl(pi, "EO No").grid(row=3, column=2, sticky="w", padx=(8, 4)); ent_eo = _ent(pi, w=7, editable=False); ent_eo.grid(row=3, column=3, sticky="ew", padx=5)
     _lbl(pi, "Machine").grid(row=3, column=4, sticky="w", padx=(8, 4)); ent_machine = _ent(pi, w=7, editable=False); ent_machine.grid(row=3, column=5, sticky="ew", padx=5)
@@ -3639,7 +3642,7 @@ def render(parent):
         # Queued, not called here: this runs on the test thread and the
         # announcement is a modal dialog.
         if overall == "PASS": _after(0, _check_lot_target)
-        _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda l=lot_no: _fill_ro(ent_lot, l))
+        _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda c=_lot_3_letters(): _fill_ro(ent_lot, c))
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
