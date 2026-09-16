@@ -1506,18 +1506,24 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
 # part's run when the program exits; None when no Test Console page is live.
 _ACTIVE = {"close_out": None}
 
-def close_out_run():
+def close_out_run() -> bool:
     """Print the END label for whatever part is still loaded, if any.
 
     Called by main.py on window close. Deliberately synchronous: the marker
     printers otherwise use daemon threads, which die the moment the
     interpreter exits, so a threaded print here would usually never reach the
     spooler.
+
+    False means the operator called the close off and the window should stay
+    open. Anything else -- no console page, or a close-out that threw -- is
+    True: a fault in here must not leave a station that cannot be shut down.
     """
     fn = _ACTIVE.get("close_out")
-    if fn is None: return
-    try: fn()
-    except Exception as ex: print(f"[PRINT DEBUG] close-out failed: {ex}")
+    if fn is None: return True
+    try: return fn() is not False
+    except Exception as ex:
+        print(f"[PRINT DEBUG] close-out failed: {ex}")
+        return True
 
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 def _load_cam_cfg() -> dict:
@@ -4034,14 +4040,30 @@ def render(parent):
         threading.Thread(target=_print_marker_label,
                          args=(pno, marker, cfg["machine_id"]), daemon=True).start()
 
-    def _close_out_run():
+    def _close_out_run() -> bool:
         """END for the part still loaded when the program closes. Prints on
         this thread -- see close_out_run() -- and clears the part so a second
-        call can't put a duplicate END on the roll."""
-        if state["pno"]:
-            _log(f"END label -> {state['pno']} (program closing)")
-            _print_marker_label(state["pno"], "END", cfg["machine_id"])
-            state["pno"] = None
+        call can't put a duplicate END on the roll.
+
+        Returns False to call the shutdown off, which is what a part-filled
+        box gets here: closing the program abandons it exactly as a part
+        change does, and the operator is as able to press the window X by
+        mistake as they are Next Part. Asked before the END prints, since
+        that is the point the run is closed off.
+
+        The dialog works here only because main.py asks on WM_DELETE_WINDOW,
+        with the root still alive and its mainloop still running -- a nested
+        event loop has something to nest in. There is no equivalent on a kill
+        or a power cut, and a box open at one of those is simply lost.
+        """
+        if not state["pno"]: return True
+        if not _confirm_short_box("Closing now leaves this box without a lot label.",
+                                  "Close anyway"):
+            return False
+        _log(f"END label -> {state['pno']} (program closing)")
+        _print_marker_label(state["pno"], "END", cfg["machine_id"])
+        state["pno"] = None
+        return True
     _ACTIVE["close_out"] = _close_out_run
 
     def _clear_part_fields():
@@ -4063,8 +4085,12 @@ def render(parent):
         _update_counts()
         btn_start.config(bg="#1a1a1a", fg="#444")
 
-    def _confirm_short_box() -> bool:
-        """Ask before a part change abandons a box that is not full. True to go.
+    def _confirm_short_box(detail: str, go_text: str) -> bool:
+        """Ask before a box that is not full is abandoned. True to go ahead.
+
+        Asked on a part change and again on program close -- the two ways a
+        part-filled box is left behind. `detail` says which, and `go_text` is
+        what the go-ahead button reads.
 
         Nothing already recorded is at stake -- every part counted into the
         box has its testmaster row and its own barcode label, and still counts
@@ -4099,7 +4125,7 @@ def render(parent):
                             f"{done} of {qty} tested.",
                  bg="#111", fg="#ccc", font=("Arial", _fs(12)),
                  justify="center").pack(pady=(10, 0))
-        tk.Label(body, text="Changing part closes this box without a lot label.",
+        tk.Label(body, text=detail,
                  bg="#111", fg="#888", font=("Arial", _fs(9))).pack(pady=(10, 0))
 
         # Guarded like the lot dialog's: every way out lands here, and
@@ -4121,14 +4147,15 @@ def render(parent):
                                cursor="hand2", activebackground="#2a2a2a",
                                activeforeground="white", command=lambda: _finish(False))
         btn_cancel.pack(side="left", padx=6)
-        tk.Button(btns, text="Change part", bg="#b71c1c", fg="white",
+        tk.Button(btns, text=go_text, bg="#b71c1c", fg="white",
                   font=("Arial", _fs(13), "bold"), bd=0, padx=30, pady=9,
                   cursor="hand2", activebackground="#d32f2f",
                   activeforeground="white", command=lambda: _finish(True)).pack(side="left", padx=6)
 
         # Escape and the window X mean Cancel, and so does ENTER: keeping the
         # box open is the recoverable answer, and this dialog appears when the
-        # operator may not have meant to be here at all. <space> is left to
+        # operator may have pressed Next Part, or the window X, by mistake.
+        # <space> is left to
         # Tk's own button binding so a focused button is not fired twice.
         dlg.protocol("WM_DELETE_WINDOW", lambda: _finish(False))
         dlg.bind("<Escape>", lambda e: _finish(False))
@@ -4174,7 +4201,8 @@ def render(parent):
             _log("Test in progress — finish it before changing part."); return
         # Asked first, while everything is still recoverable: the END marker
         # below and _clear_part_fields are both one way.
-        if not _confirm_short_box():
+        if not _confirm_short_box("Changing part closes this box without a lot label.",
+                                  "Change part"):
             _log("Part change cancelled — the box is still open."); return
         # Read before _clear_part_fields() zeroes them, so the log can say what
         # was in the box that just went unlabelled.

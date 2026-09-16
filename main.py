@@ -63,7 +63,12 @@ class App:
         # spooler while the interpreter is still alive. No-op unless a Test
         # Console page is live with a part loaded.
         try:
-            test_console.close_out_run()
+            # False means a box was part-filled and the operator chose to keep
+            # the window open. Nothing below has run yet, so backing out here
+            # leaves the station exactly as it was -- no END marker, no PLC
+            # reset, no destroy.
+            if test_console.close_out_run() is False:
+                return
         except Exception as e:
             print(f"Error printing END label on exit: {e}")
         try:
