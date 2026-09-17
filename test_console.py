@@ -374,6 +374,20 @@ _PLC_X_COUNT = 24
 _PLC_M_BASE  = 0x0814   # M20 — M20-M27, M28, the unused M29, then M30-M37
 _PLC_M_COUNT = 18
 
+# How long M28 is given to physically change over before X4 is read for its
+# acknowledgement. Paid only when the relay actually has to move: a phase that
+# asks for the mode the previous one left it in used to sleep this again for a
+# relay that was already there and already settled, and the cycle ran through
+# three such switches.
+_RELAY_SETTLE_S = 0.5
+
+# The quiet the USB-serial adapter needs between a close and the next open of
+# the same port. Reopening sooner is the pattern it drops transactions on. It
+# used to be spent only inside one helper, while the phase boundaries -- where
+# a port really is closed and immediately reopened -- covered it by accident,
+# with half-second spacers that were not there for this and did not say so.
+_PORT_REOPEN_QUIET_S = 0.05
+
 _PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
 _PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M28)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
@@ -393,13 +407,25 @@ class DeltaPLC:
         self._baud = baud
         self._slave_id = slave_id
         self._client = None
-        self._is_hv_mode = False
+        self._closed_at = 0.0
+        # None, not False: nothing has driven M28 yet this session, so the
+        # relay's physical position is unknown. Callers pay the settle on the
+        # first switch and skip it only once this has been set by a write of
+        # their own. It reads as "contact mode" for coil selection either way,
+        # which is what False meant here before.
+        self._is_hv_mode = None
 
     def open(self) -> bool:
         if not _modbus_ok:
             return False
         try:
             self.close()
+            # Whatever is left of the adapter's quiet period, and nothing if it
+            # has already passed -- which it has, any time the port has been
+            # shut for longer than it takes to get back here.
+            quiet = self._closed_at + _PORT_REOPEN_QUIET_S - time.time()
+            if quiet > 0:
+                time.sleep(quiet)
             self._client = ModbusSerialClient(
                 framer='ascii',
                 port=self._port,
@@ -414,11 +440,19 @@ class DeltaPLC:
             return False
 
     def close(self):
+        # Stamped only when a handle was actually open. open() closes before it
+        # opens, and stamping that unconditionally would have every open wait
+        # out a quiet period for a port that was already shut.
+        was_open = False
         try:
             if self._client:
+                was_open = self._client.is_socket_open()
                 self._client.close()
         except Exception:
             pass
+        finally:
+            if was_open:
+                self._closed_at = time.time()
 
     @property
     def is_open(self):
@@ -440,6 +474,38 @@ class DeltaPLC:
             print(f"[PLC DEBUG] write_coil EXCEPTION: {e}")
             self.close()  # drop a dead handle now, instead of retrying it on every call after
             return False
+
+    def write_coils(self, address: int, values: list) -> bool:
+        """Write a run of consecutive coils in one transaction (FC15).
+
+        The eight channel relays of either mode are one unbroken run of
+        addresses, so driving them is one frame rather than eight. At 9600
+        baud with ASCII framing each frame is ~35ms on the wire, and the
+        per-coil loop this replaces paid that eight times over plus a 20ms
+        sleep between each -- about 0.45s to do what one frame does.
+
+        Falls back to the single-coil loop if the PLC refuses FC15, so a
+        controller that does not implement it behaves exactly as before.
+        """
+        if not self.is_open:
+            print(f"[PLC DEBUG] write_coils(0x{address:04X}, {values}): port not open!")
+            return False
+        try:
+            result = self._client.write_coils(address, values=values, device_id=self._slave_id)
+            if not result.isError():
+                print(f"[PLC DEBUG] write_coils(0x{address:04X}, {values}): OK")
+                return True
+            print(f"[PLC DEBUG] write_coils(0x{address:04X}) refused ({result}) "
+                  f"-- falling back to one coil at a time")
+        except Exception as e:
+            print(f"[PLC DEBUG] write_coils EXCEPTION: {e} -- falling back to one coil at a time")
+            self.close()
+            return False
+        ok = True
+        for i, v in enumerate(values):
+            if not self.write_coil(address + i, v):
+                ok = False
+        return ok
 
     def read_input(self, address: int) -> bool:
         """Read a single discrete input (FC02) via bulk read for Delta PLC reliability."""
@@ -539,24 +605,30 @@ class DeltaPLC:
         return self.read_coil(addr)
 
     def set_all_channels(self, n_ch: int, on: bool) -> bool:
-        """Turn ON/OFF all channel relays."""
-        ok = True
-        for ch in range(1, min(n_ch, 8) + 1):
-            if not self.set_channel(ch, on):
-                ok = False
-            time.sleep(0.02)
-        return ok
+        """Turn ON/OFF all channel relays of the current mode, in one frame.
+
+        The relays of one mode are consecutive, so this is a single FC15 where
+        it used to be one FC05 per channel with a 20ms sleep after each. Same
+        coils, same values; the caller still confirms them against X20-X27
+        before anything is judged on them.
+        """
+        coils = _PLC_IR_ACW_COILS if self._is_hv_mode else _PLC_CONTACT_COILS
+        n = min(n_ch, 8)
+        base = coils.get(1)
+        if base is None or n < 1:
+            return False
+        return self.write_coils(base, [on] * n)
 
     def reset_all_channels(self) -> bool:
-        """Turn OFF all 8 channel relays (both Contact and IR/ACW coils)."""
-        ok = True
-        for addr in _PLC_IR_ACW_COILS.values():
-            if not self.write_coil(addr, False):
-                ok = False
-        for addr in _PLC_CONTACT_COILS.values():
-            if not self.write_coil(addr, False):
-                ok = False
-        return ok
+        """Turn OFF all 8 channel relays (both Contact and IR/ACW coils).
+
+        Two frames, one per mode's run. They are written separately rather
+        than as one 18-coil block because M28 -- the safety relay -- sits
+        between them, and a single block spanning both would drive it too.
+        """
+        ir_ok = self.write_coils(_PLC_IR_ACW_COILS[1], [False] * 8)
+        contact_ok = self.write_coils(_PLC_CONTACT_COILS[1], [False] * 8)
+        return ir_ok and contact_ok
 
     # ── Acknowledge / confirmation inputs ────────────────────────────────
 
@@ -605,6 +677,11 @@ class DeltaPLC:
             time.sleep(poll)
 
     # ── Safety relay (CRITICAL — prevents HV short circuit) ──────────────
+
+    @property
+    def is_hv_mode(self):
+        """True in IR/ACW mode, False in Contact mode, None if nothing has said."""
+        return self._is_hv_mode
 
     def safety_relay_to_hv(self) -> bool:
         """Switch to IR/ACW (high-voltage) mode. MUST call before HV tests."""
@@ -1065,8 +1142,13 @@ class HiPotSerial:
         The instrument's own verdict comes back with the number. The reply was
         being read for the number alone and the judgement thrown away, which
         left the console free to pass a part the instrument had just failed.
+
+        Callers arrive with the instrument already stopped -- run_ir_test and
+        run_acw_test both open with stop_test() and send only setup between
+        there and here, none of which starts a test. So this clears the buffer
+        rather than stopping what is not running.
         """
-        self.stop_test()
+        self.flush()
         sent = all([self.write_line(cmd) for cmd in instr])
         if not sent:
             print(f"[HIPOT DEBUG] {label}: setup did not reach the instrument")
@@ -3195,15 +3277,25 @@ def render(parent):
         except FileNotFoundError: return True
 
     def _plc_open() -> bool:
-        """Open PLC Modbus RTU connection."""
+        """Open the PLC Modbus port, or keep the one already open.
+
+        A handle that is open is handed back as it is. The phases of a cycle
+        call this one after another, and tearing a working connection down to
+        build the same one again cost a close, an open and 50ms each time --
+        on the adapter this code already knows drops transactions when a port
+        is reopened shortly after being closed. A handle that dies is closed
+        by the read or write that discovers it, so the next call opens afresh.
+        """
         if not _modbus_ok: return False
-        if plc.is_open: plc.close(); time.sleep(0.05)
+        if plc.is_open:
+            set_com_status("IO Ctrl", True)
+            return True
         ok = plc.open()
         if not ok: _log("PLC: could not open Modbus RTU port"); set_com_status("IO Ctrl", False)
         else: set_com_status("IO Ctrl", True)
         return ok
 
-    def _wait_x2_low(ctx: str, timeout: float = 2.0, poll: float = 0.1) -> bool:
+    def _wait_x2_low(ctx: str, timeout: float = 2.0, poll: float = 0.02) -> bool:
         """Wait for X2 (Contact OK) to fall after a channel coil is dropped.
 
         X2 is one global signal shared by all eight channels, not one per
@@ -3274,9 +3366,10 @@ def render(parent):
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
         # Ensure safety relay is in Contact Test mode
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
+        moved = plc.is_hv_mode is not False
         plc.safety_relay_to_contact()
         _after(0, lambda: _set_safety_indicator(True))
-        time.sleep(0.5)
+        if moved: time.sleep(_RELAY_SETTLE_S)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
         _after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -3349,8 +3442,9 @@ def render(parent):
 
         # 1) Turn on Safety Relay and confirm X4
         _log("M28 (Safety Relay) -> ON (Contact Mode)")
+        moved = plc.is_hv_mode is not False
         plc.safety_relay_to_contact()
-        time.sleep(0.5)
+        if moved: time.sleep(_RELAY_SETTLE_S)
         x4_ack = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'OK (High)' if x4_ack else 'NO ACK! (Low)'}")
         _after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -3409,9 +3503,10 @@ def render(parent):
 
         # 4) Turn off safety relay M28 and ensure no X4 feedback is received
         _log("M28 (Safety Relay) -> OFF (Preparing for HV Mode)")
+        moved = plc.is_hv_mode is not True
         plc.safety_relay_to_hv()
         _after(0, lambda: _set_safety_indicator(False))
-        time.sleep(0.5)
+        if moved: time.sleep(_RELAY_SETTLE_S)
         x4_off = plc.read_input(_PLC_SAFETY_ACK)
         _log(f"X4 (Safety ACK): {'Still ON! (WARNING)' if x4_off else 'OFF (Low - OK)'}")
         _after(0, lambda a=x4_off: _set_x4_indicator(a))
@@ -3492,14 +3587,15 @@ def render(parent):
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
-        set_com_status("HiPot", True); time.sleep(0.5)
+        set_com_status("HiPot", True)
         # plc.is_open, not _plc_open(): the guard above already opened the
-        # port, and _plc_open() closes whatever is open before opening again.
+        # port, and there is nothing here that could have closed it since.
         if plc.is_open:
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
+            moved = plc.is_hv_mode is not True
             plc.safety_relay_to_hv()
             _after(0, lambda: _set_safety_indicator(False))
-            time.sleep(0.5)
+            if moved: time.sleep(_RELAY_SETTLE_S)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             _after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -3515,8 +3611,12 @@ def render(parent):
                 # no more than before. The per-channel reads below still decide
                 # the verdict; this only stops them being taken too early.
                 plc.confirm_channels_on(n_ch)
+                # X20-X27 are one unbroken run, so every channel's
+                # acknowledgement arrives in a single read. Asking per channel
+                # read all eight inputs eight times to pick one bit out of each.
+                acks = plc.read_all_acks(n_ch)
                 for ch in range(1, n_ch + 1):
-                    ack = plc.read_channel_ack(ch)
+                    ack = acks.get(ch, False)
                     _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
                     if not ack:
                         _log(f"IR (Combined): Channel {ch} ACK failed!")
@@ -3607,14 +3707,14 @@ def render(parent):
             _log("CRITICAL: PLC Modbus port blocked or disconnected!")
             return False, {ch: {"result": "FAIL"} for ch in range(1, n_ch + 1)}
             
-        time.sleep(0.5)
-        # See _run_ir_test: the port is already open, and reopening it here
-        # only tore down a connection made moments earlier.
+        # See _run_ir_test: the port is already open, and asking for it again
+        # here says nothing the guard above has not already settled.
         if plc.is_open:
             _log("M28 (Safety Relay) -> OFF (HV Mode)")
+            moved = plc.is_hv_mode is not True
             plc.safety_relay_to_hv()
             _after(0, lambda: _set_safety_indicator(False))
-            time.sleep(0.5)
+            if moved: time.sleep(_RELAY_SETTLE_S)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             _after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -3630,8 +3730,12 @@ def render(parent):
                 # no more than before. The per-channel reads below still decide
                 # the verdict; this only stops them being taken too early.
                 plc.confirm_channels_on(n_ch)
+                # X20-X27 are one unbroken run, so every channel's
+                # acknowledgement arrives in a single read. Asking per channel
+                # read all eight inputs eight times to pick one bit out of each.
+                acks = plc.read_all_acks(n_ch)
                 for ch in range(1, n_ch + 1):
-                    ack = plc.read_channel_ack(ch)
+                    ack = acks.get(ch, False)
                     _after(0, lambda c=ch-1, a=ack: _set_io(io_in_labels, c, a))
                     if not ack:
                         _log(f"ACW (Combined): Channel {ch} ACK failed!")
@@ -3710,8 +3814,9 @@ def render(parent):
         if plc.is_open:
             plc.set_all_channels(n_ch, False)
             _log("M28 (Safety Relay) -> ON (Contact Mode)")
+            moved = plc.is_hv_mode is not False
             plc.safety_relay_to_contact()
-            time.sleep(0.5)
+            if moved: time.sleep(_RELAY_SETTLE_S)
             x4_ack = plc.read_input(_PLC_SAFETY_ACK)
             _log(f"X4 (Safety ACK): {'OK' if x4_ack else 'NO ACK!'}")
             _after(0, lambda a=x4_ack: _set_x4_indicator(a))
@@ -3837,11 +3942,11 @@ def render(parent):
                 _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
                 state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
-        _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch); time.sleep(0.5)
+        _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
-        _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch); time.sleep(0.5)
+        _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return
-        _after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch); time.sleep(0.2)
+        _after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch)
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
