@@ -1363,10 +1363,21 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
 # TSPL's internal fonts are sized in dots, so a label's width in mm only
 # becomes a usable number with this. 8 dots/mm is 203 dpi, which is what the
 # font widths below are measured at.
-_MARKER_DPMM = 8
+# 300 dpi. TSPL counts in dots and this was set to 8 dots/mm, which is a
+# 203 dpi printer -- so every width here was computed against 280 dots of a
+# stock that is really 420, and the anchor meant to sit 15 dots from the edge
+# sat 155 dots in. That is the indent that three attempts at this label's
+# alignment were all looking at: the maths was placing the block correctly on
+# a label a third narrower than the one in the printer.
+#
+# Measured off a printed END marker: the block started 36% of the way across
+# the stock. With one anchor for every line, reading-left = label_w - 265, so
+# label_w = 265 / (1 - 0.36) = 411 dots, which is 11.8 dots/mm on 35 mm --
+# 300 dpi, where TSPL counts 12 dots to the millimetre.
+_MARKER_DPMM = 12
 # 35 mm, the stock MARKER.prn is written for. Only used if its SIZE line
 # cannot be read.
-_MARKER_LABEL_W_DEFAULT = 280
+_MARKER_LABEL_W_DEFAULT = 35 * _MARKER_DPMM
 # Every number below is LOTPRN.prn's, not one worked out here. That label
 # prints on this same 35 x 25 mm stock at this same rotation, and it is the
 # layout going out on boxes today -- so its geometry is known good, where this
@@ -1378,7 +1389,11 @@ _MARKER_LEFT_MARGIN = 280 - 265
 _MARKER_TITLE_Y = 172
 _MARKER_FIRST_ROW_Y = 140
 _MARKER_ROW_PITCH = 24
-_MARKER_FONT_W = {"2": 12, "3": 16}
+# The internal bitmap fonts are 12 and 16 dots wide on a 203 dpi printer and
+# scale with the head, so on this one they are half again as wide. Only the
+# overflow guard reads these; getting them wrong lets a line run off the edge
+# rather than misplacing the block.
+_MARKER_FONT_W = {"2": 18, "3": 24}
 _MARKER_SIZE_LINE = re.compile(r"^\s*SIZE\s+([\d.]+)\s*mm", re.I | re.M)
 
 
@@ -1442,7 +1457,7 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     this label, it is read by eye.
 
     MARKER.prn holds the stock setup (size, gap, tear) and the body is
-    generated here, because centring each line needs the rendered text.
+    generated here, because placing each line needs its rendered width.
     """
     base = os.path.dirname(__file__)
     prn_file = os.path.join(base, "MARKER.prn")
