@@ -1367,9 +1367,17 @@ _MARKER_DPMM = 8
 # 35 mm, the stock MARKER.prn is written for. Only used if its SIZE line
 # cannot be read.
 _MARKER_LABEL_W_DEFAULT = 280
-# How far in from the reading-left edge the text starts. 1 mm, enough to
-# clear the die cut without looking indented.
-_MARKER_LEFT_MARGIN = 8
+# Every number below is LOTPRN.prn's, not one worked out here. That label
+# prints on this same 35 x 25 mm stock at this same rotation, and it is the
+# layout going out on boxes today -- so its geometry is known good, where this
+# one's has been derived from first principles twice and been wrong both
+# times. LOTPRN anchors every line at x=265 on 280 dots of stock, a
+# reading-left margin of 15; its title sits at y=172 and its field rows step
+# down by 24 from y=140.
+_MARKER_LEFT_MARGIN = 280 - 265
+_MARKER_TITLE_Y = 172
+_MARKER_FIRST_ROW_Y = 140
+_MARKER_ROW_PITCH = 24
 _MARKER_FONT_W = {"2": 12, "3": 16}
 _MARKER_SIZE_LINE = re.compile(r"^\s*SIZE\s+([\d.]+)\s*mm", re.I | re.M)
 
@@ -1465,12 +1473,14 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         ("MC ID", machine_id),
     )]
     # Read top to bottom on the label; with rotation 180 that is y descending.
-    # Three rows at the old 28 dot pitch, centred in the band the four used to
-    # fill, so dropping a row moves the block down instead of leaving it hung
-    # under the title with the gap at the bottom.
-    body = "\r\n".join(
-        [_marker_line(170, "3", 1, f"{marker} LABEL", label_w)]
-        + [_marker_line(y, "2", 1, f, label_w) for y, f in zip((118, 90, 62), fields)]
+    # Title then rows, on LOTPRN's own title height and row pitch, so the two
+    # labels coming off this machine are laid out the same way. Three rows
+    # against that label's six leaves the lower part of the stock clear, which
+    # is what LOTPRN would look like with three fields on it.
+    rows = [_MARKER_FIRST_ROW_Y - i * _MARKER_ROW_PITCH for i in range(len(fields))]
+    body = '\r\n'.join(
+        [_marker_line(_MARKER_TITLE_Y, "3", 1, f"{marker} LABEL", label_w)]
+        + [_marker_line(y, "2", 1, f, label_w) for y, f in zip(rows, fields)]
     )
     try:
         text = template.replace("@body@", body)
