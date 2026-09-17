@@ -1827,7 +1827,7 @@ def render(parent):
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "dev_polling": False, "total": 0, "ok": 0, "ng": 0,
         "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
-        "ct_last": None, "batch_no": 0, "batch_ok": 0, "batch_reason": "", "batch_shown": None,
+        "ct_last": None, "ct_running": False, "batch_no": 0, "batch_ok": 0, "batch_reason": "", "batch_shown": None,
         "cam_results": {1: None, 2: None},
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
@@ -2307,6 +2307,28 @@ def render(parent):
                    command=lambda: _toggle_lot_label()).grid(
         row=4, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
+    def _set_ct(text: str):
+        """Write the CT (s) box. It is readonly, so it is opened to be set."""
+        cnt_ct.config(state="normal"); cnt_ct.delete(0, "end")
+        cnt_ct.insert(0, text); cnt_ct.config(state="readonly")
+
+    def _ct_text() -> str:
+        """What the CT (s) box should read right now.
+
+        A cycle in progress counts up in whole seconds; between cycles the box
+        holds the last finished cycle's time to a tenth, which is what it has
+        always shown. Both answers live here because _update_counts can be
+        called mid-cycle by anything that touches the counts -- the lot
+        quantity being typed, a record reload -- and it would otherwise write
+        the previous part's time over a clock that is still running.
+        """
+        if state.get("ct_running") and state.get("start_time"):
+            # Whole seconds elapsed, floored rather than rounded: read off a
+            # counter this is a measurement, and it should never say a cycle
+            # has taken longer than it has.
+            return str(int((datetime.datetime.now() - state['start_time']).total_seconds()))
+        return f"{state['ct_last']:.1f}" if state["ct_last"] is not None else "—"
+
     def _update_counts():
         t = state["total"]; o = state["ok"]; n = state["ng"]
         pct = f"{(n/t*100):.1f}%" if t > 0 else "0.0%"
@@ -2314,8 +2336,9 @@ def render(parent):
         # Cycle time is measured live, not stored -- testmaster keeps no
         # duration column, so unlike the counts above (which are read back
         # from today's rows) it only covers the tests run since the current
-        # part was loaded. "—" until the first one finishes.
-        ct = f"{state['ct_last']:.1f}" if state["ct_last"] is not None else "—"
+        # part was loaded. "—" until the first one finishes, and the running
+        # count while one is under way.
+        ct = _ct_text()
         # "6/10" once a lot quantity is typed, plain "6" before then: the
         # target is the operator's to set, and a denominator invented here
         # would be a box size nobody chose.
@@ -2636,24 +2659,24 @@ def render(parent):
             except Exception: pass
 
     def _ct_tick():
-        """Count the cycle time up a second at a time while the test runs.
+        """Count the cycle time up a second at a time, in the CT (s) box.
 
-        The elapsed time used to appear only once the verdict was in, so a
-        cycle in progress showed a dash and there was nothing on the screen
-        to tell a long test from a stalled one -- the first thing an operator
-        wants to know when a part is taking longer than it should.
+        CT used to hold the previous cycle's time for the whole of the next
+        one, so a cycle in progress showed a number belonging to a part that
+        had already been taken off the jig -- and nothing on the screen told
+        a long test from a stalled one, which is the first thing worth
+        knowing when a part is taking longer than it should.
 
-        Whole seconds here, because that is what is worth reading off a
-        counter that is still moving. _finish_test still writes the settled
-        time to a tenth of a second when the cycle ends, and this stops
-        before it does so, so the last word is always the measured one.
+        Whole seconds while it runs, because that is what is worth reading
+        off a counter that is still moving. _finish_test clears ct_running
+        before it queues anything, so the settled time to a tenth is what
+        lands last.
         """
-        if not state.get("test_running") or not state.get("start_time"):
+        if not state.get("ct_running") or not state.get("start_time"):
             state["ct_job"] = None
             return
-        secs = (datetime.datetime.now() - state["start_time"]).total_seconds()
         try:
-            elapsed_lbl.config(text=f"{secs:.0f}")
+            _set_ct(_ct_text())
         except Exception:
             state["ct_job"] = None
             return
@@ -3873,7 +3896,7 @@ def render(parent):
         if not emp: _after(0, lambda: messagebox.showwarning("Validation", "Enter Employee ID.")); return
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
-        state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None; state["cam_results"] = {1: None, 2: None}
+        state["test_running"] = True; state["ct_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None; state["cam_results"] = {1: None, 2: None}
         _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry); _after(0, _ct_tick_start)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
@@ -3982,7 +4005,7 @@ def render(parent):
                 _log(f"Contact boundary check failed ({verdict}) — aborting")
                 _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
-                state["test_running"] = False; _after(0, _ct_tick_stop); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
+                state["test_running"] = False; state["ct_running"] = False; _after(0, _ct_tick_stop); _after(0, _update_counts); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
         _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch)
@@ -3992,6 +4015,10 @@ def render(parent):
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
     def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, fail_banner: str = None):
+        # First thing, and on this thread: everything queued below repaints the
+        # CT box from _ct_text, and the clock has to be stopped before any of
+        # it is queued or the running count would be what lands last.
+        state["ct_running"] = False
         _clear_all_io_indicators()
         if _plc_open():
             _log("Resetting all PLC pins (Contact + IR/ACW + Safety Relay)...")
