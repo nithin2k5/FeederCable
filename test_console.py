@@ -2627,6 +2627,47 @@ def render(parent):
         res_lbl.grid(row=r_idx, column=2 + MAX_CH, sticky="nsew")
         result_rows[key] = {"cells": row_cells, "result": res_lbl}
 
+    def _ct_tick_stop():
+        """Stop the running-cycle clock, leaving whatever it last showed."""
+        job = state.get("ct_job")
+        state["ct_job"] = None
+        if job is not None:
+            try: parent.after_cancel(job)
+            except Exception: pass
+
+    def _ct_tick():
+        """Count the cycle time up a second at a time while the test runs.
+
+        The elapsed time used to appear only once the verdict was in, so a
+        cycle in progress showed a dash and there was nothing on the screen
+        to tell a long test from a stalled one -- the first thing an operator
+        wants to know when a part is taking longer than it should.
+
+        Whole seconds here, because that is what is worth reading off a
+        counter that is still moving. _finish_test still writes the settled
+        time to a tenth of a second when the cycle ends, and this stops
+        before it does so, so the last word is always the measured one.
+        """
+        if not state.get("test_running") or not state.get("start_time"):
+            state["ct_job"] = None
+            return
+        secs = (datetime.datetime.now() - state["start_time"]).total_seconds()
+        try:
+            elapsed_lbl.config(text=f"{secs:.0f}")
+        except Exception:
+            state["ct_job"] = None
+            return
+        state["ct_job"] = parent.after(1000, _ct_tick)
+
+    def _ct_tick_start():
+        """Start the clock from the cycle's own start_time, not from now.
+
+        Anything already spent between START and this reaching the UI thread
+        is time the cycle has taken, so it counts.
+        """
+        _ct_tick_stop()
+        _ct_tick()
+
     def _reset_test_display():
         for key in result_rows:
             for cell in result_rows[key]["cells"]: cell.config(text="—", bg="#0d0d0d", fg="#333")
@@ -3015,7 +3056,7 @@ def render(parent):
 
     log_lf = ttk.LabelFrame(bottom, text="Log", style="TC.TLabelframe")
     log_lf.grid(row=0, column=2, sticky="nsew")
-    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", _fs(8)), bd=0, height=5, width=1)
+    log_txt = tk.Text(log_lf, bg="black", fg="#aaa", font=("Consolas", _fs(11)), bd=0, height=5, width=1)
     log_txt.pack(fill="both", expand=True, padx=4, pady=3); log_txt.config(state="disabled")
     def _log(msg: str):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -3833,7 +3874,7 @@ def render(parent):
         if not _validate_employee(emp): _after(0, lambda: messagebox.showwarning("Auth", "Employee number not found.")); return
         if state["test_running"]: return
         state["test_running"] = True; state["start_time"] = datetime.datetime.now(); state["flag"] = True; state["last_vision_result"] = None; state["cam_results"] = {1: None, 2: None}
-        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry)
+        _after(0, lambda: btn_start.config(state="disabled", bg="#555", text="TESTING...")); _after(0, _reset_test_display); _after(0, lambda: _set_verdict("TESTING", "#0033aa", "white")); _after(0, lambda: scan_lbl.config(text="⏳  Test in progress...", bg="#001830", fg="#e8a000")); _after(0, _lock_scan_entry); _after(0, _ct_tick_start)
         n_ch = state["num_channels"]; _log("── Test Started ──")
 
         # Re-check X3 (rework select) fresh for this cycle -- the background
@@ -3941,7 +3982,7 @@ def render(parent):
                 _log(f"Contact boundary check failed ({verdict}) — aborting")
                 _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
-                state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
+                state["test_running"] = False; _after(0, _ct_tick_stop); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
         _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch)
@@ -3971,7 +4012,7 @@ def render(parent):
         # Queued, not called here: this runs on the test thread and the
         # announcement is a modal dialog.
         if overall == "PASS": _after(0, _count_pass_into_lot)
-        _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda c=_lot_3_letters(): _fill_ro(ent_lot, c))
+        _after(0, _ct_tick_stop); _after(0, lambda l=lot_no: lot_lbl.config(text=l)); _after(0, lambda e=elapsed_str: elapsed_lbl.config(text=e)); _after(0, lambda c=_lot_3_letters(): _fill_ro(ent_lot, c))
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
