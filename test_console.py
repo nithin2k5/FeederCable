@@ -1769,102 +1769,6 @@ class CameraFeed:
             self._cam_stream.release()
         self._cam_stream = None
 
-# ── Today's PASS Records ──────────────────────────────────────────────────────
-# Identity first (lot, part, who, when), verdicts last -- the four result
-# columns are what the operator reads across to, so they sit together at the
-# right-hand end rather than split by EMP/TIME.
-#
-# Widths are in characters, not pixels, because this table is laid out in a
-# fixed-pitch font. That is what lets one column be coloured on its own: see
-# LotTable for why it is not a Treeview.
-_LOT_COLS = (("#", 4), ("LOT NO", 21), ("ALC", 8), ("EMP", 7), ("TIME", 9),
-             ("CAM1", 6), ("CAM2", 6), ("RESULT", 7), ("SCAN", 6))
-_LOT_RESULT_COL = 7           # index into _LOT_COLS of the column that stays green
-_LOT_GAP = " "                # what the columns are joined with
-
-
-def _lot_line(values) -> str:
-    """One row laid out in fixed-pitch columns, centred as the old table was.
-
-    A value too long for its column is cut rather than allowed to push the
-    columns after it out of line -- an overflowing cell would take the colour
-    of the RESULT column with it, since the colour is applied to a character
-    range and nothing else knows the row has shifted.
-    """
-    cells = list(values) + [""] * len(_LOT_COLS)
-    return _LOT_GAP.join(str(v)[:w].center(w) for (_, w), v in zip(_LOT_COLS, cells))
-
-
-def _lot_col_span(col: int) -> tuple:
-    """(first, last) character column of one field in a line from _lot_line.
-
-    The separators count: every column before this one contributes its width
-    plus the one character it was joined with.
-    """
-    start = sum(w for _, w in _LOT_COLS[:col]) + len(_LOT_GAP) * col
-    return start, start + _LOT_COLS[col][1]
-
-
-class LotTable:
-    """Today's PASS records, as a fixed-pitch text table.
-
-    Not a Treeview, and that is the whole point of it. ttk tags attach to
-    items, so a Treeview colours whole rows; Tk 8.6 has no per-cell or
-    per-column foreground at all. This table exists so RESULT can read green
-    while every other value reads white.
-
-    One Text widget rather than a grid of labels: a day's records run to
-    hundreds of rows, a label per cell would be thousands of widgets, and
-    they would be rebuilt after every cycle -- the reload runs at the end of
-    each test. Here a reload is one delete and one insert, whatever the day's
-    count has got to.
-
-    The heading is its own Text rather than a Label so that it cannot drift
-    out of line with the body: same widget class, same font, same padding,
-    therefore the same character pitch measured the same way.
-    """
-
-    def __init__(self, parent, font, heading_bg="#0a1a00", body_bg="#060d00",
-                 value_fg="#ffffff", result_fg="#aee571"):
-        self._frame = tk.Frame(parent, bg=body_bg)
-        common = {"bd": 0, "highlightthickness": 0, "padx": 4, "wrap": "none",
-                  "cursor": "arrow"}
-
-        self._head = tk.Text(self._frame, height=1, bg=heading_bg, fg="#ffffff",
-                             font=(font[0], font[1], "bold"), **common)
-        self._head.pack(fill="x")
-        self._head.insert("1.0", _lot_line(name for name, _ in _LOT_COLS))
-        self._head.config(state="disabled")
-
-        body = tk.Frame(self._frame, bg=body_bg)
-        body.pack(fill="both", expand=True)
-        self._body = tk.Text(body, height=4, bg=body_bg, fg=value_fg, font=font, **common)
-        bar = ttk.Scrollbar(body, orient="vertical", style="Lot.Vertical.TScrollbar",
-                            command=self._body.yview)
-        self._body.config(yscrollcommand=bar.set)
-        bar.pack(side="right", fill="y")
-        self._body.pack(side="left", fill="both", expand=True)
-        # The one column that keeps the colour the whole table used to have.
-        self._body.tag_configure("result", foreground=result_fg)
-        self._body.config(state="disabled")
-
-    def pack(self, **kw):
-        self._frame.pack(**kw)
-        return self
-
-    def set_rows(self, rows):
-        """Replace the contents. `rows` is a sequence of per-column values."""
-        start, end = _lot_col_span(_LOT_RESULT_COL)
-        self._body.config(state="normal")
-        self._body.delete("1.0", "end")
-        for line_no, values in enumerate(rows, start=1):
-            self._body.insert("end", _lot_line(values) + "\n")
-            self._body.tag_add("result", f"{line_no}.{start}", f"{line_no}.{end}")
-        self._body.config(state="disabled")
-        # Newest first, so a reload puts the part just tested back in view.
-        self._body.yview_moveto(0.0)
-
-
 def render(parent):
     cfg = _load_cfg()
     style = ttk.Style()
@@ -1879,18 +1783,21 @@ def render(parent):
     style.configure("TC.TLabelframe.Label", background="black", foreground="#aaa", font=("Arial", _fs(9)))
     style.configure("Spec.Treeview.Heading", background="#1a1a1a", foreground="white", font=("Arial", _fs(9), "bold"))
     style.configure("Spec.Treeview", background="#0d0d0d", foreground="white", fieldbackground="#0d0d0d", font=("Arial", _fs(9)), rowheight=_px(26))
-    # Column headers otherwise brighten on mouse-over / press -- pin the
+    # Read standing up, a metre or so back, so the day's lots are sized to be
+    # legible from there. rowheight follows the type, or the taller glyphs
+    # clip against the row above.
+    style.configure("Lot.Treeview.Heading", background="#0a1a00", foreground="white", font=("Arial", _fs(10), "bold"))
+    style.configure("Lot.Treeview", background="#060d00", foreground="#ffffff", fieldbackground="#060d00", font=("Arial", _fs(11)), rowheight=_px(28))
+    # Column headers otherwise brighten on mouse-over / press -- pin each
     # heading style's color so it stays flat in every state.
-    style.map("Spec.Treeview.Heading", background=[("active", "#1a1a1a"), ("pressed", "#1a1a1a")],
-              foreground=[("active", "white"), ("pressed", "white")])
+    for heading_style, bg, fg in (
+        ("Spec.Treeview.Heading", "#1a1a1a", "white"),
+        ("Lot.Treeview.Heading", "#0a1a00", "white"),
+    ):
+        style.map(heading_style, background=[("active", bg), ("pressed", bg)],
+                  foreground=[("active", fg), ("pressed", fg)])
     style.map("Spec.Treeview", background=[("selected", "#1c3a5e")])
-    # The scrollbar on today's records, in the same green-black as the table
-    # it belongs to. clam draws every one of these from the style, so an
-    # unstyled bar would come out in the default grey against near-black.
-    style.configure("Lot.Vertical.TScrollbar", background="#1b3a00", troughcolor="#060d00",
-                    bordercolor="#0a1a00", arrowcolor="#aee571",
-                    darkcolor="#1b3a00", lightcolor="#1b3a00")
-    style.map("Lot.Vertical.TScrollbar", background=[("active", "#2d5e00")])
+    style.map("Lot.Treeview",  background=[("selected", "#1c3a5e")])
 
     try:
         db.ensure_column("testmaster", "visionimg", "VARCHAR(255)")
@@ -2787,13 +2694,18 @@ def render(parent):
     scan_lbl.pack(fill="both", expand=True)
 
     tk.Label(left_area, text="Today's PASS Records", bg="black", fg="white", font=("Arial", _fs(12), "bold")).pack(fill="x", pady=(3, 1))
-    # Read standing up, a metre or so back, so the day's lots are sized to be
-    # legible from there. Fixed-pitch, which is what holds the columns in line
-    # and lets RESULT alone carry the green -- see LotTable.
-    #
+    # Identity first (lot, part, who, when), verdicts last -- the four result
+    # columns are what the operator reads across to, so they sit together at
+    # the right-hand end rather than split by EMP/TIME.
+    lot_cols = ("#", "LOT NO", "ALC", "EMP", "TIME", "CAM1", "CAM2", "RESULT", "SCAN")
+    tree_lot = ttk.Treeview(left_area, columns=lot_cols, show="headings", height=4, style="Lot.Treeview")
+    lot_widths = {"#": 40, "LOT NO": 200, "ALC": 80, "RESULT": 80, "SCAN": 70,
+                  "CAM1": 70, "CAM2": 70, "EMP": 85, "TIME": 85}
+    for col in lot_cols: tree_lot.heading(col, text=col); tree_lot.column(col, anchor="center", width=lot_widths.get(col, 70))
+
     # START now lives in Product Info above NEXT PART, so the whole leftover
     # height of this column goes to the records table.
-    lot_table = LotTable(left_area, ("Consolas", _fs(11))).pack(fill="both", expand=True)
+    tree_lot.pack(fill="both", expand=True)
 
     bottom = tk.Frame(content, bg="black", height=_px(128))
     bottom.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(4, 0))
@@ -3260,6 +3172,7 @@ def render(parent):
         'result' column at all, so the old join both failed outright and, had
         the column existed, would have listed every lot once per channel.
         """
+        tree_lot.delete(*tree_lot.get_children())
         # Parameterised, not interpolated -- a part number reaches this from an
         # operator-typed field.
         where_pno = " AND pno=%s" if pno else ""
@@ -3283,11 +3196,11 @@ def render(parent):
         except Exception as ex:
             _log(f"Today's NG count: load failed ({ex})")
         state["total"] = ok + ng; state["ok"] = ok; state["ng"] = ng; _after(0, _update_counts)
-        # row order is lotno, alc, result, scanresult, cam1, cam2, emp, time
-        lot_table.set_rows((len(rows) - idx + 1, row[0], row[1], row[6], row[7],
-                           row[4] or "—", row[5] or "—",
-                           row[2] or "—", row[3] or "—")
-                          for idx, row in enumerate(rows, start=1))
+        for idx, row in enumerate(rows, start=1):
+            # row order is lotno, alc, result, scanresult, cam1, cam2, emp, time
+            tree_lot.insert("", "end", values=(len(rows) - idx + 1, row[0], row[1], row[6], row[7],
+                                              row[4] or "—", row[5] or "—",
+                                              row[2] or "—", row[3] or "—"))
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
