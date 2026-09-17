@@ -2985,7 +2985,7 @@ def render(parent):
     # the toggle asks for a login and puts itself back if that is refused.
     scan_req_var = tk.BooleanVar(value=cfg.get("scan_enabled", True))
     tk.Checkbutton(scan_head, text="Scan required", variable=scan_req_var,
-                   bg="black", fg="#888", font=("Arial", _fs(8)), selectcolor="#1a1a1a",
+                   bg="black", fg="#888", font=("Arial", _fs(11)), selectcolor="#1a1a1a",
                    activebackground="black", activeforeground="white",
                    highlightthickness=0, bd=0, cursor="hand2",
                    command=lambda: _toggle_scan_required()).pack(side="right")
@@ -3009,18 +3009,32 @@ def render(parent):
                              font=("Consolas", _fs(8)), anchor="nw", justify="left", wraplength=300)
     scan_data_lbl.pack(fill="both", expand=True, pady=(2, 0))
 
+    # The scanned code is data: fixed-pitch, small, and read against the part
+    # in the operator's hand. The two idle lines are not, and they do not say
+    # the same kind of thing either. "Waiting for scan…" is a prompt and reads
+    # like one. "Scan verification disabled" is a warning -- parts are leaving
+    # with their printed label never checked -- so it carries the same red as
+    # an NG verdict and is sized to be noticed from where the operator stands,
+    # rather than sitting in the same grey as the prompt it replaces.
+    _SCAN_DATA_FONT = ("Consolas", _fs(8))
+    _SCAN_WARN_FONT = ("Arial", _fs(11), "bold")
+
     def _set_scan_box(verdict: str, raw: str = ""):
         """verdict: "OK" | "NG" | "DUP" | "" (idle)."""
         colors = {"OK": ("✅  OK", "#76ff03"), "NG": ("❌  NG", "#ff5555"),
                   "DUP": ("⚠  Duplicate label", "#ff9800")}
         text, fg = colors.get(verdict, ("—", "#555"))
-        idle = "Waiting for scan…" if cfg.get("scan_enabled", True) else "Scan verification disabled"
+        if raw:
+            data, data_fg, data_font = _fmt_scan(raw), "#ccc", _SCAN_DATA_FONT
+        elif cfg.get("scan_enabled", True):
+            data, data_fg, data_font = "Waiting for scan…", "#666", _SCAN_DATA_FONT
+        else:
+            data, data_fg, data_font = "Scan verification disabled", "#ff5555", _SCAN_WARN_FONT
         try:
             if scan_verdict_lbl.winfo_exists():
                 scan_verdict_lbl.config(text=text, fg=fg)
             if scan_data_lbl.winfo_exists():
-                scan_data_lbl.config(text=_fmt_scan(raw) if raw else idle,
-                                     fg="#ccc" if raw else "#666")
+                scan_data_lbl.config(text=data, fg=data_fg, font=data_font)
         except Exception: pass
     _set_scan_box("")
 
