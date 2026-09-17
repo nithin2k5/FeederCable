@@ -356,8 +356,8 @@ def render(parent):
     bottom_bar = tk.Frame(panel, bg="#12151b")
     bottom_bar.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
     
-    tk.Button(bottom_bar, text="Complete", bg="#e0e0e0", fg="black", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=(5, 0))
-    tk.Button(bottom_bar, text="Update", bg="#2196f3", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=5)
+    # Rightmost, so it sits flush with the panel's own padding.
+    tk.Button(bottom_bar, text="Update", bg="#2196f3", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2").pack(side="right", padx=(5, 0))
     tk.Button(bottom_bar, text="Save", bg="#4caf50", fg="white", font=('Arial', 11, 'bold'), width=12, bd=0, pady=5, cursor="hand2", command=save_settings).pack(side="right", padx=5)
 
     # Text Area
