@@ -26,19 +26,44 @@ def render(parent):
     # Separator
     tk.Frame(panel, bg="#333", height=1).pack(fill="x", padx=20)
 
-    # Table Frame
-    table_frame = tk.Frame(panel, bg="#12151b")
-    table_frame.pack(fill="x", padx=20, pady=20)
-    
-    # Configure columns
-    for i in range(6):
-        table_frame.columnconfigure(i, weight=1 if i == 0 else 0)
+    # One row per device, and the row is the unit. The device name, its three
+    # settings and its TEST button sit together on a banded strip that lights
+    # up under the pointer, so the row a combobox belongs to is never in
+    # question.
+    #
+    # It used to be a grid whose first column took all the slack: the names
+    # sat hard left, the controls hard right, and reading across from "Delta
+    # PLC" to the box that configures it meant crossing the panel's whole
+    # width of empty space, past six identical boxes on the way. Nothing tied
+    # a row together but the reader's own eye-line.
+    _COLS = (("Device", 200), ("COM Port", 140), ("Baud Rate", 140),
+             ("Station ID", 120), ("Action", 130))
+    _BAND = ("#161b24", "#12151b")   # alternating row backgrounds
+    _BAND_HOVER = "#23324a"          # the row under the pointer
 
-    # Headers
-    headers = ["Device", "COM Port", "", "Baud Rate", "Station ID", "Action"]
-    for i, h in enumerate(headers):
-        sticky = "w" if i == 0 else ""
-        tk.Label(table_frame, text=h, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=0, column=i, sticky=sticky, padx=15, pady=(0, 15))
+    table_frame = tk.Frame(panel, bg="#12151b")
+    table_frame.pack(fill="x", padx=20, pady=(15, 8))
+
+    def _grid_cols(f):
+        """Every row uses the same column widths, which is what aligns them.
+
+        A minsize per column rather than a weight: a weight would hand the
+        spare width to a column and push the controls away from the names
+        again. The slack goes to a trailing column instead, so the table
+        stays gathered together on the left however wide the panel gets.
+        """
+        for i, (_, w) in enumerate(_COLS):
+            f.columnconfigure(i, minsize=w, weight=0)
+        f.columnconfigure(len(_COLS), weight=1)
+        return f
+
+    header = _grid_cols(tk.Frame(table_frame, bg="#12151b"))
+    header.pack(fill="x")
+    for i, (h, _) in enumerate(_COLS):
+        tk.Label(header, text=h, bg="#12151b", fg="#8fa3bf",
+                 font=('Arial', 10, 'bold')).grid(row=0, column=i, sticky="w",
+                                                  padx=(10, 0), pady=(0, 6))
+    tk.Frame(table_frame, bg="#2b3242", height=1).pack(fill="x")
 
     _CFG_PATH = os.path.join(os.path.dirname(__file__), "comport_cfg.ini")
     cfg = configparser.ConfigParser()
@@ -64,8 +89,8 @@ def render(parent):
     if not available_ports:
         available_ports = ["COM 1", "COM 2", "COM 3"]
 
-    def mk_combo(parent, vals, current_val):
-        cb = ttk.Combobox(parent, values=vals, font=('Arial', 10), width=10, state="readonly")
+    def mk_combo(parent, vals, current_val, width=12):
+        cb = ttk.Combobox(parent, values=vals, font=('Arial', 10), width=width, state="readonly")
         if current_val in vals:
             cb.set(current_val)
         elif vals:
@@ -177,38 +202,55 @@ def render(parent):
             log_msg(f"{dev}: Test not implemented yet.")
 
     combos = {}
-    for r, (dev, port, baud, sid) in enumerate(devices, start=1):
-        tk.Label(table_frame, text=dev, bg="#12151b", fg="white", font=('Arial', 11)).grid(row=r, column=0, sticky="w", padx=15, pady=10)
-        
-        # COM Port
+    for r, (dev, port, baud, sid) in enumerate(devices):
+        band = _BAND[r % 2]
+        row = _grid_cols(tk.Frame(table_frame, bg=band))
+        row.pack(fill="x")
+
+        name_lbl = tk.Label(row, text=dev, bg=band, fg="white", font=('Arial', 11), anchor="w")
+        name_lbl.grid(row=0, column=0, sticky="w", padx=(10, 0), pady=7)
+
         port_list = list(available_ports)
         if port not in port_list and port != "None":
             port_list.append(port)
-        cb_port = mk_combo(table_frame, port_list, port)
-        cb_port.grid(row=r, column=1, padx=15)
-        
-        # Hyphen
-        tk.Label(table_frame, text="-", bg="#12151b", fg="white", font=('Arial', 11)).grid(row=r, column=2, padx=5)
-        
-        # Baud Rate
+        cb_port = mk_combo(row, port_list, port)
+        cb_port.grid(row=0, column=1, sticky="w", padx=(10, 0))
+
         baud_list = list(baud_rates)
         if baud not in baud_list:
             baud_list.append(baud)
-        cb_baud = mk_combo(table_frame, baud_list, baud)
-        cb_baud.grid(row=r, column=3, padx=15)
-        
-        # Station ID
+        cb_baud = mk_combo(row, baud_list, baud)
+        cb_baud.grid(row=0, column=2, sticky="w", padx=(10, 0))
+
         sid_list = list(sids)
         if sid not in sid_list:
             sid_list.append(sid)
-        cb_sid = mk_combo(table_frame, sid_list, sid)
-        cb_sid.grid(row=r, column=4, padx=15)
-        
-        # TEST Button
-        btn = tk.Button(table_frame, text="TEST", bg="#e0e0e0", fg="black", font=('Arial', 10, 'bold'), width=10, bd=0)
+        cb_sid = mk_combo(row, sid_list, sid, width=7)
+        cb_sid.grid(row=0, column=3, sticky="w", padx=(10, 0))
+
+        btn = tk.Button(row, text="TEST", bg="#e0e0e0", fg="black",
+                        font=('Arial', 10, 'bold'), width=9, bd=0, cursor="hand2")
         btn.config(command=lambda d=dev, cp=cb_port, cb=cb_baud, cs=cb_sid, b=btn: test_connection(d, cp, cb, cs, b))
-        btn.grid(row=r, column=5, padx=15)
-        
+        btn.grid(row=0, column=4, sticky="w", padx=(10, 0), pady=4)
+
+        # The whole strip follows the pointer, so the row being pointed at is
+        # the row being read. Tk sends <Leave> to a frame when the pointer
+        # moves onto one of its own children, so every widget in the row is
+        # bound to the same pair -- otherwise the highlight would drop the
+        # moment the pointer reached the combobox it was meant to confirm.
+        tinted = (row, name_lbl)
+
+        def _tint(color, ws=tinted):
+            for w in ws:
+                try: w.config(bg=color)
+                except tk.TclError: pass
+
+        def _on_enter(_e, t=_tint): t(_BAND_HOVER)
+        def _on_leave(_e, t=_tint, c=band): t(c)
+        for w in (row, name_lbl, cb_port, cb_baud, cb_sid, btn):
+            w.bind("<Enter>", _on_enter)
+            w.bind("<Leave>", _on_leave)
+
         combos[dev] = (cb_port, cb_baud, cb_sid)
 
     # Machine ID -- stamped onto lot numbers and printed labels by Test Console.
@@ -324,7 +366,6 @@ def render(parent):
     
     log_text = tk.Text(text_frame, bg="#12151b", fg="white", font=('Consolas', 11), bd=0, height=8)
     log_text.pack(fill="both", expand=True, padx=10, pady=10)
-    log_text.insert("end", "!007F00\n")
     log_text.config(state="disabled")
 
 
