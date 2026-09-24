@@ -66,10 +66,11 @@ def _load_cam_cfg() -> dict:
         "width":   cfg.getint("CAMERA", "cam1_width", fallback=640),
         "height":  cfg.getint("CAMERA", "cam1_height", fallback=480),
         "enabled": cfg.getboolean("CAMERA", "cam1_enabled", fallback=False),
+        "flip":    cfg.getboolean("CAMERA", "cam1_flip", fallback=False),
     }
 
 
-def _save_cam_cfg(index: int, width: int, height: int, enabled: bool):
+def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool = False):
     """Update cam1_* in place, leaving cam2_* and any other keys untouched."""
     import configparser
     cfg = configparser.ConfigParser()
@@ -80,6 +81,7 @@ def _save_cam_cfg(index: int, width: int, height: int, enabled: bool):
     cfg.set("CAMERA", "cam1_width", str(width))
     cfg.set("CAMERA", "cam1_height", str(height))
     cfg.set("CAMERA", "cam1_enabled", str(bool(enabled)))
+    cfg.set("CAMERA", "cam1_flip", str(bool(flip)))
     with open(_CAM_CFG_PATH, "w") as f:
         cfg.write(f)
 
@@ -823,7 +825,8 @@ def render(parent):
         configured = cam["enabled"] and idx >= 0
         cam_device.config(text=("Camera %d" % idx) if configured else "Not configured",
                           fg=TXT if configured else TXT_FAINT)
-        cam_res.config(text="%d x %d" % (w, h) if configured else "—",
+        cam_res.config(text=("%d x %d" % (w, h) + ("  ·  flipped" if cam["flip"] else ""))
+                       if configured else "—",
                        fg=TXT if configured else TXT_FAINT)
 
         if not _cv2_ok:
@@ -2381,9 +2384,21 @@ def _open_camera_dialog(parent):
     from vision_engine import camera
 
     cam = _load_cam_cfg()
-    win = _dialog(parent, "Camera Configuration", 780, 560)
+    win = _dialog(parent, "Camera Configuration", 780, 700)
     _dialog_header(win, "Inspection Camera",
                    "The preview is the exact feed inspection will use.")
+
+    # Footer packed before the body so it keeps its height: packed after, it
+    # got whatever the body left and the buttons fell off the bottom.
+    foot = tk.Frame(win, bg=PANEL)
+    foot.pack(side="bottom", fill="x")
+    tk.Frame(win, bg=LINE, height=1).pack(side="bottom", fill="x")
+    foot_in = tk.Frame(foot, bg=PANEL)
+    foot_in.pack(fill="x", padx=18, pady=12)
+    btn_save = _btn(foot_in, "Save", BTN_PRIMARY, font_size=12, pady=8)
+    btn_save.pack(side="right")
+    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=8)
+    btn_cancel.pack(side="right", padx=(0, 8))
 
     alive = {"v": True}
     stream = {"s": None, "index": None}
@@ -2431,6 +2446,17 @@ def _open_camera_dialog(parent):
              bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
              justify="left", anchor="w").pack(fill="x")
 
+    flip_var = tk.BooleanVar(value=cam["flip"])
+    tk.Checkbutton(cb_body, text="  Flip image top to bottom", variable=flip_var,
+                   bg=PANEL, fg=TXT, selectcolor=FIELD, activebackground=PANEL,
+                   activeforeground=TXT, font=("Arial", 11, "bold"), bd=0,
+                   highlightthickness=0, anchor="w", cursor="hand2",
+                   command=lambda: _apply_flip()).pack(fill="x", pady=(10, 0))
+    tk.Label(cb_body, text="For a camera mounted upside down. Parts taught before "
+                           "changing this must be re-taught.",
+             bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
+             justify="left", anchor="w").pack(fill="x")
+
     btn_rescan = _btn(cb_body, "Re-scan", BTN_NEUTRAL, pady=5)
     btn_rescan.pack(fill="x", pady=(10, 0))
 
@@ -2438,15 +2464,6 @@ def _open_camera_dialog(parent):
                       wraplength=250, justify="left", anchor="w")
     status.pack(fill="x", pady=(12, 0))
 
-    tk.Frame(win, bg=LINE, height=1).pack(fill="x")
-    foot = tk.Frame(win, bg=PANEL)
-    foot.pack(fill="x")
-    foot_in = tk.Frame(foot, bg=PANEL)
-    foot_in.pack(fill="x", padx=18, pady=12)
-    btn_save = _btn(foot_in, "Save", BTN_PRIMARY, font_size=12, pady=8)
-    btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=8)
-    btn_cancel.pack(side="right", padx=(0, 8))
 
     DISABLED = "Disabled (no vision capture)"
 
@@ -2466,6 +2483,12 @@ def _open_camera_dialog(parent):
                 return c["index"]
         return -1
 
+    def _apply_flip():
+        """Show the flip on the preview straight away. Only Save writes it; any
+        other way out puts the saved orientation back (see _close)."""
+        if stream["index"] is not None:
+            camera.preview_flip(stream["index"], flip_var.get())
+
     def _on_device_change(*_a):
         idx = _selected_index()
         _stop_stream()
@@ -2479,6 +2502,7 @@ def _open_camera_dialog(parent):
         status.config(text="", fg=TXT_DIM)
         stream["s"] = camera.acquire(idx, w, h)
         stream["index"] = idx
+        _apply_flip()
 
     cmb_dev.bind("<<ComboboxSelected>>", _on_device_change)
     cmb_res.bind("<<ComboboxSelected>>", _on_device_change)
@@ -2555,13 +2579,14 @@ def _open_camera_dialog(parent):
                     "No frames have arrived from camera %d yet.\n\nSave anyway?" % idx,
                     parent=win):
                 return
-        _save_cam_cfg(idx, w, h, idx >= 0)
+        _save_cam_cfg(idx, w, h, idx >= 0, flip_var.get())
         changed["v"] = True
         _close()
 
     def _close():
         alive["v"] = False
         _stop_stream()
+        camera.end_flip_preview()
         try:
             win.grab_release()
         except Exception:

@@ -8,6 +8,8 @@ preview and the inspection path must share one stream rather than each opening
 the device. Consumers acquire a reference-counted stream by index; the device is
 opened on the first acquire and released when the last reference goes away.
 """
+import configparser
+import os
 import threading
 import time
 from typing import Optional
@@ -17,6 +19,47 @@ import numpy as np
 
 _REGISTRY_LOCK = threading.Lock()
 _STREAMS: dict = {}
+
+# Device index -> flip the picture top to bottom. Applied to every frame the
+# stream serves, so the live previews, teaching, Run Test and the line all see
+# the same orientation -- a taught template only matches frames flipped the
+# way its references were.
+_CAM_CFG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "camera_cfg.ini")
+_FLIP: dict = {}
+# Unsaved flips a settings dialog is previewing. Kept apart from _FLIP so that
+# a device opening (which re-reads the config) cannot undo them mid-preview.
+_FLIP_PREVIEW: dict = {}
+
+
+def _flipped(index: int) -> bool:
+    return _FLIP_PREVIEW.get(index, _FLIP.get(index, False))
+
+
+def reload_flips():
+    """Re-read each configured camera's flip setting from camera_cfg.ini.
+    Running streams consult it on every frame, so a saved change shows at once."""
+    cfg = configparser.ConfigParser()
+    cfg.read(_CAM_CFG_PATH)
+    flips = {}
+    for cid in (1, 2):
+        index = cfg.getint("CAMERA", f"cam{cid}_index", fallback=-1)
+        if index >= 0 and cfg.getboolean("CAMERA", f"cam{cid}_enabled", fallback=False):
+            flips[index] = flips.get(index, False) or cfg.getboolean(
+                "CAMERA", f"cam{cid}_flip", fallback=False)
+    _FLIP.clear()
+    _FLIP.update(flips)
+
+
+def preview_flip(index: int, flip: bool):
+    """Flip one device's frames without touching the config, for a settings
+    dialog to show the choice live. end_flip_preview() drops it again."""
+    _FLIP_PREVIEW[index] = bool(flip)
+
+
+def end_flip_preview():
+    """Back to the saved orientation: drop every preview, re-read the config."""
+    _FLIP_PREVIEW.clear()
+    reload_flips()
 
 # ~1s of failed reads at the 20ms retry interval.
 _MAX_CONSECUTIVE_READ_FAILURES = 50
@@ -66,6 +109,8 @@ class CameraStream:
         while self._running:
             ret, frame = self._cap.read()
             if ret:
+                if _flipped(self.index):
+                    frame = cv2.flip(frame, 0)
                 with self._frame_lock:
                     self._frame = frame
                     self._frames_read += 1
@@ -144,6 +189,8 @@ def acquire(index: int, width: int = 640, height: int = 480) -> Optional[CameraS
     with _REGISTRY_LOCK:
         stream = _STREAMS.get(index)
         if stream is None:
+            # Pick up the saved flip settings whenever a device is opened.
+            reload_flips()
             stream = CameraStream(index, width, height)
             _STREAMS[index] = stream
             stream._refs = 1

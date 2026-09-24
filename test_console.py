@@ -1684,6 +1684,8 @@ def _load_cam_cfg() -> dict:
         "cam2_height":  cfg.getint("CAMERA", "cam2_height",  fallback=480),
         "cam1_enabled": cfg.getboolean("CAMERA", "cam1_enabled", fallback=False),
         "cam2_enabled": cfg.getboolean("CAMERA", "cam2_enabled", fallback=False),
+        "cam1_flip":    cfg.getboolean("CAMERA", "cam1_flip",    fallback=False),
+        "cam2_flip":    cfg.getboolean("CAMERA", "cam2_flip",    fallback=False),
     }
 
 class CameraFeed:
@@ -2033,6 +2035,18 @@ def render(parent):
         cmb_r.current(r_idx)
         cmb_r.grid(row=1, column=1, padx=5, pady=5)
 
+        # For a camera mounted upside down. Applied in vision_engine.camera, so
+        # the preview, both panels, teaching and the vision check all see it.
+        flip_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_flip"])
+        tk.Checkbutton(lf, text="Flip image top to bottom", variable=flip_var,
+                       bg="#222", fg="white", selectcolor="#111", activebackground="#222",
+                       activeforeground="white", font=("Arial", _fs(10)),
+                       command=lambda: _apply_flip()).grid(row=2, column=0, columnspan=2,
+                                                          padx=5, pady=(5, 0), sticky="w")
+        tk.Label(lf, text="Parts taught before changing this must be re-taught.",
+                 bg="#222", fg="#888", font=("Arial", _fs(9))).grid(
+                     row=3, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="w")
+
         # Live preview. Choosing between "Camera 0" and "Camera 1" from a
         # dropdown is guesswork on a rig with two identical USB cameras --
         # the picture is the only thing that says which one is which.
@@ -2053,6 +2067,12 @@ def render(parent):
                 try: feed.stop()
                 except Exception: pass
 
+        def _apply_flip():
+            """Show the flip on the preview straight away; only Save keeps it."""
+            d_sel = cmb_c.current()
+            if _cv2_ok and d_sel > 0:
+                camera.preview_flip(cam_indices[d_sel], flip_var.get())
+
         def _start_preview(*_a):
             """(Re)open the preview for whatever the two dropdowns now say."""
             _stop_preview()
@@ -2067,6 +2087,7 @@ def render(parent):
             prev_lbl.config(text="Opening camera…", fg="#e8a000")
             feed = CameraFeed(prev_lbl, idx, display_w=_PREV_W, display_h=_PREV_H, width=w, height=h)
             preview["feed"] = feed
+            _apply_flip()
             feed.start()
 
         cmb_c.bind("<<ComboboxSelected>>", _start_preview)
@@ -2106,6 +2127,7 @@ def render(parent):
             cfg[f"cam{cam_id}_enabled"] = d_sel > 0
             cfg[f"cam{cam_id}_width"] = resolutions[r_sel][1]
             cfg[f"cam{cam_id}_height"] = resolutions[r_sel][2]
+            cfg[f"cam{cam_id}_flip"] = flip_var.get()
             
             import configparser
             new_cam = configparser.ConfigParser()
@@ -2125,6 +2147,8 @@ def render(parent):
                 save_vision_config(v_cfg)
                 
             _stop_preview()
+            if _cv2_ok:
+                camera.end_flip_preview()
             dlg.destroy()
             
             # Reload page to apply changes
@@ -2139,6 +2163,8 @@ def render(parent):
             back -- otherwise cancelling left both panels dead until the next
             navigation."""
             _stop_preview()
+            if _cv2_ok:
+                camera.end_flip_preview()
             for feed in _cam_feeds:
                 try: feed.start()
                 except Exception: pass
