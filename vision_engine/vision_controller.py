@@ -12,12 +12,20 @@ Methodology:
   - Inspect: capture a live frame and search for the Template across it with
     cv2.matchTemplate.
   - Result: if the best match score >= threshold the part is present and correct.
+
+Pieces:
+  A part number can be checked as up to MAX_PIECES separate pieces (say, both
+  connectors and the label). Each piece has its own templates and is searched
+  for exactly as a single-piece part is, against the same threshold; the part
+  is OK only when every piece is. Combining the verdicts is the only new step,
+  so a piece is judged no more loosely than a whole part was. A model saved
+  before pieces existed reads as one piece.
 """
 import configparser
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
@@ -26,11 +34,21 @@ import numpy as np
 from . import camera
 
 DEFAULT_MATCH_THRESHOLD = 0.75
+MAX_PIECES = 3
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 _VISION_CFG_PATH = os.path.join(_ROOT_DIR, "vision_config.json")
 _CAM_CFG_PATH = os.path.join(_ROOT_DIR, "camera_cfg.ini")
 _MODELS_DIR = os.path.join(_ROOT_DIR, "vision_models")
+
+
+@dataclass
+class PieceResult:
+    """How one piece of a part fared in an inspection."""
+    name: str
+    ok: bool
+    score: float = 0.0
+    box: Optional[Tuple[int, int, int, int]] = None         # (x, y, w, h) in frame
 
 
 @dataclass
@@ -49,6 +67,10 @@ class VisionResult:
     # number, without duplicating the matching logic outside inspect().
     match_box: Optional[Tuple[int, int, int, int]] = None   # (x, y, w, h) in frame
     frame: Optional[np.ndarray] = None                      # frame that was judged
+    # One entry per taught piece. match_score / match_box above describe the
+    # weakest piece, which is the one that decides the verdict -- for a
+    # single-piece part that is simply the part, as before.
+    pieces: List[PieceResult] = field(default_factory=list)
 
 
 def _default_config() -> dict:
@@ -140,13 +162,21 @@ class VisionController:
             data = np.load(path, allow_pickle=True)
             model_cfg = json.loads(str(data["config"]))
 
-            templates = []
-            i = 0
-            while f"template_{i}" in data:
-                templates.append(data[f"template_{i}"])
-                i += 1
+            pieces = []
+            for k, meta in enumerate(model_cfg.get("pieces") or [{}]):
+                # Piece 1 keeps the pre-pieces key names, so a model saved
+                # before pieces existed loads as a one-piece model untouched.
+                prefix = "template_" if k == 0 else f"piece{k}_template_"
+                templates = []
+                i = 0
+                while f"{prefix}{i}" in data:
+                    templates.append(data[f"{prefix}{i}"])
+                    i += 1
+                pieces.append({"name": meta.get("name") or f"Piece {k + 1}",
+                               "templates": templates})
 
-            model_cfg["templates"] = templates
+            model_cfg["pieces"] = pieces
+            model_cfg["templates"] = pieces[0]["templates"]
             self._model_cache[part_number] = model_cfg
             return model_cfg
         except (OSError, ValueError, KeyError):
@@ -182,8 +212,8 @@ class VisionController:
         if model is None:
             return _error(f"No vision model found for '{part_number}'")
 
-        templates = model.get("templates", [])
-        if not templates:
+        pieces = model.get("pieces", [])
+        if not pieces or not all(p["templates"] for p in pieces):
             return _error("Model contains no templates")
 
         if frame is None:
@@ -192,62 +222,80 @@ class VisionController:
                 return _error("Camera not available")
 
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        best_score = -1.0
-        best_box = None
-        compared = 0
-        for template in templates:
-            if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
-                continue
-            res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            if max_val > best_score:
-                best_score = max_val
-                best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
-            compared += 1
-
-        print(f"[VISION DEBUG] pno={part_number} frame={gray_frame.shape[1]}x{gray_frame.shape[0]} "
-              f"brightness={gray_frame.mean():.1f} templates={[(t.shape[1], t.shape[0]) for t in templates]} "
-              f"compared={compared} best_score={best_score:.3f}")
-
-        if compared == 0:
-            return _error(
-                f"Every template is larger than this frame "
-                f"({gray_frame.shape[1]}x{gray_frame.shape[0]}) — "
-                f"re-teach the part at this resolution, or use a larger test image"
-            )
-
         threshold = model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
-        elapsed = int((time.time() - start) * 1000)
 
-        if best_score >= threshold:
+        # Each piece is searched for on its own, exactly as a whole part used
+        # to be: the best of its templates anywhere in the frame.
+        results = []
+        for piece in pieces:
+            templates = piece["templates"]
+            best_score = -1.0
+            best_box = None
+            compared = 0
+            for template in templates:
+                if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
+                    continue
+                res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                if max_val > best_score:
+                    best_score = max_val
+                    best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
+                compared += 1
+
+            print(f"[VISION DEBUG] pno={part_number} piece={piece['name']!r} "
+                  f"frame={gray_frame.shape[1]}x{gray_frame.shape[0]} "
+                  f"brightness={gray_frame.mean():.1f} templates={[(t.shape[1], t.shape[0]) for t in templates]} "
+                  f"compared={compared} best_score={best_score:.3f}")
+
+            if compared == 0:
+                return _error(
+                    f"Every template{' of ' + piece['name'] if len(pieces) > 1 else ''} "
+                    f"is larger than this frame "
+                    f"({gray_frame.shape[1]}x{gray_frame.shape[0]}) — "
+                    f"re-teach the part at this resolution, or use a larger test image"
+                )
+            results.append(PieceResult(name=piece["name"], ok=best_score >= threshold,
+                                       score=best_score, box=best_box))
+
+        elapsed = int((time.time() - start) * 1000)
+        weakest = min(results, key=lambda r: r.score)
+
+        if all(r.ok for r in results):
             return VisionResult(
                 ok=True, judgement="OK", part_number=part_number,
-                match_score=best_score, threshold=threshold,
+                match_score=weakest.score, threshold=threshold,
                 processing_time_ms=elapsed,
-                match_box=best_box, frame=frame,
+                match_box=weakest.box, frame=frame, pieces=results,
             )
+        if len(results) == 1:
+            error = f"No match found (score {weakest.score:.2f} < {threshold})"
+        else:
+            error = "Not found: " + ", ".join(
+                f"{r.name} ({r.score:.2f})" for r in results if not r.ok)
         return VisionResult(
             ok=False, judgement="NG", part_number=part_number,
-            match_score=best_score, threshold=threshold,
+            match_score=weakest.score, threshold=threshold,
             processing_time_ms=elapsed,
-            error=f"No match found (score {best_score:.2f} < {threshold})",
-            match_box=best_box, frame=frame,
+            error=error,
+            match_box=weakest.box, frame=frame, pieces=results,
         )
 
     # ── Model Building ──────────────────────────────────────────────────────
 
     def build_and_save_model(
         self, part_number: str, images: List[np.ndarray],
-        roi: Union[dict, List[dict]],
+        roi: Union[dict, List[dict], List[List[dict]]],
         match_threshold: float = DEFAULT_MATCH_THRESHOLD,
+        piece_names: Optional[List[str]] = None,
     ) -> str:
-        """Crop one template per reference image and save them as the part's model.
+        """Crop the templates for every piece of a part and save them as its model.
 
-        `roi` is either a single box applied to every image, or one box per image.
-        Per-image boxes matter whenever the part is not rigidly fixtured: a shared
-        box lands on background in any reference where the part sat elsewhere, and
-        a background template matches the live background at a high score — which
+        `roi` is a single box applied to every image, one box per image, or --
+        for a part checked as several pieces -- one list of boxes per image,
+        holding each piece's box in the same order on every image. Per-image
+        boxes matter whenever the part is not rigidly fixtured: a shared box
+        lands on background in any reference where the part sat elsewhere, and a
+        background template matches the live background at a high score — which
         would pass an empty fixture.
         """
         rois = list(roi) if isinstance(roi, (list, tuple)) else [roi] * len(images)
@@ -255,28 +303,42 @@ class VisionController:
             raise ValueError(
                 f"Got {len(rois)} regions for {len(images)} reference images."
             )
+        # Normalise to one list of boxes per image.
+        rois = [list(r) if isinstance(r, (list, tuple)) else [r] for r in rois]
+        n_pieces = len(rois[0]) if rois else 0
+        if not 1 <= n_pieces <= MAX_PIECES:
+            raise ValueError(f"A part needs 1 to {MAX_PIECES} pieces, got {n_pieces}.")
+        if any(len(r) != n_pieces for r in rois):
+            raise ValueError("Every reference image needs a box for every piece.")
+        names = [(n or "").strip() for n in list(piece_names or [])[:n_pieces]]
+        names += [""] * (n_pieces - len(names))
+        names = [n or f"Piece {k + 1}" for k, n in enumerate(names)]
 
-        templates = []
-        for n, (img, r) in enumerate(zip(images, rois), start=1):
-            if r is None:
-                raise ValueError(f"Reference image {n} has no region marked.")
-            x, y, w, h = r["x"], r["y"], r["width"], r["height"]
-            if w < 10 or h < 10:
-                raise ValueError(f"Region on reference image {n} is too small.")
+        def _where(n, k):
+            return f"reference image {n}" + (f", {names[k]}" if n_pieces > 1 else "")
+
+        templates = [[] for _ in range(n_pieces)]
+        for n, (img, boxes) in enumerate(zip(images, rois), start=1):
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-            if y + h > gray.shape[0] or x + w > gray.shape[1]:
-                raise ValueError(
-                    f"Region on reference image {n} falls outside it."
-                )
-            templates.append(gray[y:y + h, x:x + w])
+            for k, r in enumerate(boxes):
+                if r is None:
+                    raise ValueError(f"No region marked on {_where(n, k)}.")
+                x, y, w, h = r["x"], r["y"], r["width"], r["height"]
+                if w < 10 or h < 10:
+                    raise ValueError(f"Region on {_where(n, k)} is too small.")
+                if y + h > gray.shape[0] or x + w > gray.shape[1]:
+                    raise ValueError(f"Region on {_where(n, k)} falls outside it.")
+                templates[k].append(gray[y:y + h, x:x + w])
 
         model_cfg = {
             "part_number": part_number,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "rois": rois,
-            "roi": rois[0],          # older readers expect a single region
+            "pieces": [{"name": names[k], "rois": [b[k] for b in rois]}
+                       for k in range(n_pieces)],
+            "rois": [b[0] for b in rois],   # piece 1, for readers from before pieces
+            "roi": rois[0][0],              # older readers expect a single region
             "match_threshold": match_threshold,
-            "num_references": len(templates),
+            "num_references": len(images),
         }
 
         os.makedirs(_MODELS_DIR, exist_ok=True)
@@ -284,8 +346,10 @@ class VisionController:
         model_path = os.path.join(_MODELS_DIR, filename)
 
         save_dict = {"config": json.dumps(model_cfg)}
-        for i, t in enumerate(templates):
-            save_dict[f"template_{i}"] = t
+        for k, piece_templates in enumerate(templates):
+            prefix = "template_" if k == 0 else f"piece{k}_template_"
+            for i, t in enumerate(piece_templates):
+                save_dict[f"{prefix}{i}"] = t
         np.savez_compressed(model_path, **save_dict)
 
         self.config.setdefault("part_mapping", {})[part_number] = filename
@@ -312,7 +376,13 @@ class VisionController:
         rois = model.get("rois") or ([roi] if roi else [])
         sizes = ([(t.shape[1], t.shape[0]) for t in templates] if templates else
                  [(r.get("width", 0), r.get("height", 0)) for r in rois])
+        pieces = model.get("pieces", [])
         return {
+            "pieces": len(pieces),
+            "piece_names": [p["name"] for p in pieces],
+            "piece_template_sizes": [
+                (p["templates"][0].shape[1], p["templates"][0].shape[0])
+                if p["templates"] else (0, 0) for p in pieces],
             "references": model.get("num_references", len(templates)),
             "created": model.get("created", "—"),
             "threshold": model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD)),
@@ -338,11 +408,11 @@ class VisionController:
         model_cfg = json.loads(str(data["config"]))
         model_cfg["match_threshold"] = float(threshold)
 
-        save_dict = {"config": json.dumps(model_cfg)}
-        i = 0
-        while f"template_{i}" in data:
-            save_dict[f"template_{i}"] = data[f"template_{i}"]
-            i += 1
+        # Every array rides along untouched -- all pieces' templates, not just
+        # the first piece's.
+        save_dict = {k: data[k] for k in data.files if k != "config"}
+        save_dict["config"] = json.dumps(model_cfg)
+        data.close()
         np.savez_compressed(path, **save_dict)
         self._model_cache.pop(part_number, None)
 

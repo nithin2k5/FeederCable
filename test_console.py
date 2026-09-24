@@ -3967,10 +3967,13 @@ def render(parent):
                         _log(f"Vision CAM{cid} ERROR: {r.error}")
                         vision_failed.append(cid)
                     elif not r.ok:
-                        _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}")
+                        _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}"
+                             + (f" — {r.error}" if len(r.pieces) > 1 else ""))
                         vision_failed.append(cid)
                     else:
-                        _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms")
+                        _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms"
+                             + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.pieces) + ")"
+                                if len(r.pieces) > 1 else ""))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -4587,7 +4590,18 @@ def render(parent):
         colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
         color = colors.get(result.judgement, (0, 165, 255))
         frame = result.frame.copy()
-        if result.match_box:
+        if len(result.pieces) > 1:
+            # A part checked as several pieces: box each where it was found,
+            # coloured by its own verdict, so a NG shows which piece is missing.
+            for p in result.pieces:
+                if not p.box:
+                    continue
+                pc = colors["OK"] if p.ok else colors["NG"]
+                x, y, w, h = p.box
+                cv2.rectangle(frame, (x, y), (x + w, y + h), pc, 3)
+                cv2.putText(frame, f"{p.name} {p.score:.2f}",
+                            (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, pc, 2, cv2.LINE_AA)
+        elif result.match_box:
             x, y, w, h = result.match_box
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
             cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",

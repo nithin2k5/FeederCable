@@ -324,6 +324,7 @@ class RoiView(tk.Canvas):
         self._hint = None
         self._accent = OK_GREEN
         self._locked_size = None    # (w, h) in image px, or None for free drawing
+        self._overlays = []         # [(roi, color, label)] drawn read-only
 
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<ButtonPress-1>", self._on_press)
@@ -364,6 +365,13 @@ class RoiView(tk.Canvas):
 
     def set_accent(self, color):
         self._accent = color
+        self._redraw()
+
+    def set_overlays(self, overlays):
+        """Read-only labelled boxes drawn alongside the editable one, as
+        [(roi, color, label), ...] -- the other pieces of a part while one is
+        being boxed, or every piece's match in a test result."""
+        self._overlays = [o for o in (overlays or []) if o[0]]
         self._redraw()
 
     def lock_size(self, wh):
@@ -449,6 +457,19 @@ class RoiView(tk.Canvas):
             x0, y0 = self._to_screen(*self._drag["anchor"])
             x1, y1 = self._to_screen(*self._drag["cursor"])
             self.create_rectangle(x0, y0, x1, y1, outline=ACCENT, width=1, dash=(4, 3))
+
+        for roi, color, label in self._overlays:
+            x0, y0 = self._to_screen(roi["x"], roi["y"])
+            x1, y1 = self._to_screen(roi["x"] + roi["width"], roi["y"] + roi["height"])
+            self.create_rectangle(x0, y0, x1, y1, outline=color, width=2, dash=(6, 3))
+            if label:
+                ly = y0 - 10 if y0 - 10 > oy + 8 else y1 + 11
+                tid = self.create_text(x0 + 2, ly, text=label, fill="#07080b", anchor="w",
+                                       font=("Consolas", 10, "bold"))
+                bx0, by0, bx1, by1 = self.bbox(tid)
+                rid = self.create_rectangle(bx0 - 3, by0 - 1, bx1 + 3, by1 + 1,
+                                            fill=color, outline="")
+                self.tag_raise(tid, rid)
 
         if self._hint:
             self.create_text(cw // 2, ch - 12, text=self._hint, fill=TXT_FAINT,
@@ -684,8 +705,9 @@ def render(parent):
     table_wrap = tk.Frame(pb, bg=LINE)
     table_wrap.pack(fill="both", expand=True)
 
-    cols = ("part", "file", "refs", "roi", "thresh", "taught", "status")
+    cols = ("part", "file", "pieces", "refs", "roi", "thresh", "taught", "status")
     heads = {"part": ("PART NUMBER", 150, "w"), "file": ("MODEL FILE", 150, "w"),
+             "pieces": ("PIECES", 60, "center"),
              "refs": ("REFS", 55, "center"), "roi": ("TEMPLATE", 100, "center"),
              "thresh": ("THRESHOLD", 90, "center"),
              "taught": ("TAUGHT", 145, "center"), "status": ("STATUS", 120, "w")}
@@ -730,7 +752,7 @@ def render(parent):
             info = ctrl.model_info(pno)
             if info is None:
                 tree.insert("", "end", iid=pno, tags=("problem",),
-                            values=(pno, filename, "—", "—", "—", "—", "FILE MISSING"))
+                            values=(pno, filename, "—", "—", "—", "—", "—", "FILE MISSING"))
             else:
                 tw, th = info["template_size"]
                 sizes = ("%d x %d" % (tw, th) if info["uniform_templates"]
@@ -739,7 +761,7 @@ def render(parent):
                 # guarded while nothing is really being checked. Say so.
                 weak = info["threshold"] < 0.55
                 tree.insert("", "end", iid=pno, tags=("problem" if weak else "ready",),
-                            values=(pno, filename, info["references"],
+                            values=(pno, filename, info["pieces"], info["references"],
                                     sizes,
                                     "%.2f" % info["threshold"],
                                     str(info["created"]).replace("T", "  "),
@@ -751,11 +773,11 @@ def render(parent):
             for f in sorted(os.listdir(_MODELS_DIR)):
                 if f.endswith(".npz") and f not in mapped_files:
                     tree.insert("", "end", iid=_ORPHAN + f, tags=("problem",),
-                                values=("—", f, "—", "—", "—", "—", "NOT MAPPED"))
+                                values=("—", f, "—", "—", "—", "—", "—", "NOT MAPPED"))
 
         if not tree.get_children():
             tree.insert("", "end", iid="!none", tags=("empty",),
-                        values=("—", "No parts taught yet", "", "", "", "",
+                        values=("—", "No parts taught yet", "", "", "", "", "",
                                 "Start with “Teach New Part”"))
 
         if remembered and tree.exists(remembered):
@@ -1127,6 +1149,8 @@ def render(parent):
 
 MIN_REFS = 3
 MAX_REFS = 12
+# One colour per piece, used for its box in the wizard and in test results.
+PIECE_COLORS = (OK_GREEN, "#40c4ff", "#ff80ab")
 
 
 def _dialog(parent, title, width, height):
@@ -1182,7 +1206,8 @@ def _open_teach_wizard(parent, cam, part_number=None):
                              parent=parent)
         return None
 
-    from vision_engine.vision_controller import VisionController, DEFAULT_MATCH_THRESHOLD
+    from vision_engine.vision_controller import (
+        VisionController, DEFAULT_MATCH_THRESHOLD, MAX_PIECES)
     from vision_engine import camera
 
     ctrl = VisionController()
@@ -1201,8 +1226,19 @@ def _open_teach_wizard(parent, cam, part_number=None):
         "Capture the good part a few times, then box it on every reference.")
 
     alive = {"v": True}
-    refs = []                       # [{"img", "label", "thumb", "widget"}]
+    refs = []                       # [{"img", "label", "thumb", "rois"}]
     sel = {"i": None}
+    # A part is checked as 1..MAX_PIECES pieces. Every reference carries one
+    # box slot per possible piece; only the first `n` count. `k` is the piece
+    # being boxed right now.
+    piece = {"n": max(1, (info or {}).get("pieces", 1)), "k": 0}
+    old_names = (info or {}).get("piece_names", [])
+    piece_names = [tk.StringVar(value=old_names[k] if k < len(old_names)
+                                and old_names[k] != "Piece %d" % (k + 1) else "")
+                   for k in range(MAX_PIECES)]
+
+    def _piece_name(k):
+        return piece_names[k].get().strip() or "Piece %d" % (k + 1)
     live = {"on": False}
     stream = {"s": None}
     ref_size = {"wh": None}
@@ -1322,11 +1358,33 @@ def _open_teach_wizard(parent, cam, part_number=None):
     thumbs = tk.Frame(s2, bg=BG)
     thumbs.pack(fill="x", pady=(6, 0))
 
-    s3, b3 = _step(rail, 3, "Target box")
-    tk.Label(s3, text="Box the part on every reference. The box carries over to the "
-                      "next image — click to drop it on the part there.",
+    s_p, b_p = _step(rail, 3, "Pieces to check")
+    tk.Label(s_p, text="Check up to %d separate pieces of this part — every one must "
+                       "be found for an OK. Each is matched exactly as a whole part "
+                       "is, at the same threshold." % MAX_PIECES,
              bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 8))
+    count_row = tk.Frame(s_p, bg=BG)
+    count_row.pack(fill="x")
+    tk.Label(count_row, text="Pieces", bg=BG, fg=TXT_DIM,
+             font=("Arial", 11, "bold")).pack(side="left", padx=(0, 10))
+    count_btns = []
+    for n in range(1, MAX_PIECES + 1):
+        b = _btn(count_row, str(n), BTN_NEUTRAL, pady=3, font_size=11, width=3,
+                 command=lambda n=n: _set_piece_count(n))
+        b.pack(side="left", padx=(0, 4))
+        count_btns.append(b)
+    piece_rows = tk.Frame(s_p, bg=BG)
+    piece_rows.pack(fill="x", pady=(8, 0))
+
+    s3, b3 = _step(rail, 4, "Target box")
+    tk.Label(s3, text="Box the piece on every reference. The box carries over to the "
+                      "next image — click to drop it on the piece there.",
+             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
+             justify="left", anchor="w").pack(fill="x", pady=(0, 8))
+    boxing_lbl = tk.Label(s3, text="", bg=BG, fg=TXT, font=("Arial", 11, "bold"),
+                          anchor="w")
+    boxing_lbl.pack(fill="x", pady=(0, 4))
     roi_row = tk.Frame(s3, bg=BG)
     roi_row.pack(fill="x")
     roi_lbl = tk.Label(roi_row, text="Not drawn", bg=BG, fg=WARN,
@@ -1361,15 +1419,17 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
     # ── Behaviour ──────────────────────────────────────────────────────────
 
-    def _boxed():
-        return [r for r in refs if r["roi"]]
+    def _complete(ref):
+        """Every piece in use is boxed on this reference."""
+        return all(ref["rois"][k] for k in range(piece["n"]))
 
     def _gates():
         pno = ent_pno.get().strip().upper()
         return {
             "Part number": bool(pno),
             "%d+ references" % MIN_REFS: len(refs) >= MIN_REFS,
-            "Box on every reference": bool(refs) and len(_boxed()) == len(refs),
+            ("Box on every reference" if piece["n"] == 1 else
+             "Every piece boxed"): bool(refs) and all(_complete(r) for r in refs),
         }
 
     def _refresh_gates(*_a):
@@ -1378,9 +1438,11 @@ def _open_teach_wizard(parent, cam, part_number=None):
             ("✓ " if ok else "○ ") + name for name, ok in gates.items()))
         _set_btn_enabled(btn_save, all(gates.values()))
 
-        for badge, ok in zip((b1, b2, b3), gates.values()):
+        ok1, ok2, ok3 = gates.values()
+        for badge, ok in ((b1, ok1), (b2, ok2), (b_p, True), (b3, ok3)):
             badge.config(bg=OK_GREEN if ok else LINE,
                          fg="#07080b" if ok else TXT)
+        _paint_piece_rows()
 
         n = len(refs)
         refs_count.config(
@@ -1397,17 +1459,101 @@ def _open_teach_wizard(parent, cam, part_number=None):
                 pno_note.config(text="", fg=TXT_FAINT)
 
     def _apply_lock():
-        """Pin the box size to the first box drawn, unless the operator opts out."""
-        first = next((r["roi"] for r in refs if r["roi"]), None)
+        """Pin the box size to this piece's first box drawn, unless the operator
+        opts out. Each piece has its own size -- a connector and a label are
+        rarely the same shape."""
+        k = piece["k"]
+        first = next((r["rois"][k] for r in refs if r["rois"][k]), None)
         if lock_var.get() and first:
             view.lock_size((first["width"], first["height"]))
         else:
             view.lock_size(None)
 
+    def _paint_overlays():
+        """The other pieces' boxes on this reference, so the operator can see
+        what is already boxed while working on one piece."""
+        i = sel["i"]
+        if i is None or not (0 <= i < len(refs)) or piece["n"] == 1:
+            view.set_overlays([])
+            return
+        view.set_overlays([(refs[i]["rois"][k], PIECE_COLORS[k], _piece_name(k))
+                           for k in range(piece["n"]) if k != piece["k"]])
+
+    def _set_piece(k):
+        """Switch which piece the view is boxing."""
+        piece["k"] = k
+        view.set_accent(PIECE_COLORS[k])
+        i = sel["i"]
+        if i is not None and 0 <= i < len(refs):
+            _apply_lock()
+            view.set_roi(refs[i]["rois"][k], notify=False)
+            _roi_changed(refs[i]["rois"][k])
+        else:
+            _paint_piece_rows()
+            _paint_crops()
+
+    def _set_piece_count(n):
+        piece["n"] = n
+        if piece["k"] >= n:
+            _set_piece(n - 1)
+        # Seed any newly added piece onto the current reference the same way
+        # a new reference is seeded, so its box is ready to be dragged over.
+        if sel["i"] is not None:
+            _show_ref(sel["i"])
+        else:
+            _paint_thumbs()
+            _paint_crops()
+            _refresh_gates()
+
+    # One row per possible piece, built once and shown or hidden by the count:
+    # rebuilding them on every refresh would pull a name box out from under
+    # the operator mid-word.
+    piece_row_widgets = []
+    for k in range(MAX_PIECES):
+        row = tk.Frame(piece_rows, bg=BG, cursor="hand2")
+        inner = tk.Frame(row, bg=BG)
+        inner.pack(fill="x", padx=1, pady=1)
+        dot = tk.Label(inner, text="●", bg=BG, fg=PIECE_COLORS[k],
+                       font=("Arial", 13), cursor="hand2")
+        dot.pack(side="left", padx=(6, 4))
+        ent = tk.Entry(inner, textvariable=piece_names[k], bg=FIELD, fg=TXT,
+                       font=("Arial", 11), insertbackground=TXT, relief="flat",
+                       width=14, highlightthickness=1, highlightbackground=LINE,
+                       highlightcolor=PIECE_COLORS[k])
+        ent.pack(side="left", pady=4, ipady=2)
+        count = tk.Label(inner, text="", bg=BG, font=("Arial", 10, "bold"))
+        count.pack(side="right", padx=6)
+        for w in (row, inner, dot, count):
+            w.bind("<Button-1>", lambda e, k=k: _set_piece(k))
+        ent.bind("<FocusIn>", lambda e, k=k: _set_piece(k) if piece["k"] != k else None)
+        piece_names[k].trace_add("write", lambda *_a: (_paint_piece_rows(),
+                                                        _paint_overlays()))
+        piece_row_widgets.append((row, inner, dot, count))
+
+    def _paint_piece_rows():
+        n, active = piece["n"], piece["k"]
+        for idx, b in enumerate(count_btns):
+            b._colors = BTN_PRIMARY if idx + 1 == n else BTN_NEUTRAL
+            b.config(bg=b._colors[0])
+        boxing_lbl.config(text=("Boxing: %s" % _piece_name(active)) if n > 1 else "",
+                          fg=PIECE_COLORS[active])
+        for k, (row, inner, dot, count) in enumerate(piece_row_widgets):
+            if k >= n or n == 1:
+                row.pack_forget()
+                continue
+            row.pack(fill="x", pady=(0, 4))
+            selected = k == active
+            row.config(bg=PIECE_COLORS[k] if selected else LINE)
+            for w in (inner, dot, count):
+                w.config(bg=PANEL if selected else BG)
+            done = sum(1 for r in refs if r["rois"][k])
+            count.config(text="%d/%d boxed" % (done, len(refs)),
+                         fg=OK_GREEN if refs and done == len(refs) else WARN)
+
     def _roi_changed(roi, final=True):
         i = sel["i"]
         if i is not None and 0 <= i < len(refs):
-            refs[i]["roi"] = roi
+            refs[i]["rois"][piece["k"]] = roi
         if roi:
             roi_lbl.config(text="%d × %d px" % (roi["width"], roi["height"]),
                            fg=OK_GREEN)
@@ -1417,6 +1563,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         if not final:
             return          # mid-drag: the readout is live, the strips are not
         _apply_lock()
+        _paint_overlays()
         _paint_thumbs()
         _paint_crops()
         _refresh_gates()
@@ -1426,6 +1573,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         if live["on"]:
             sel["i"] = None
             view.set_roi(None, notify=False)
+            view.set_overlays([])
             view.set_editable(False)
             view.set_hint("Live view — capture a frame to draw the target box")
             frame_lbl.config(text="LIVE  ·  camera %d" % cam["index"])
@@ -1439,23 +1587,26 @@ def _open_teach_wizard(parent, cam, part_number=None):
             return
         live["on"] = False
         sel["i"] = i
-        # Seed from the nearest reference that already has a box, in either
-        # direction, so the operator nudges an existing box onto the part instead
-        # of redrawing it — whatever order they work through the images in.
-        if refs[i]["roi"] is None:
-            near = min((j for j in range(len(refs)) if refs[j]["roi"]),
-                       key=lambda j: abs(j - i), default=None)
-            if near is not None:
-                refs[i]["roi"] = dict(refs[near]["roi"])
+        # Seed each piece from the nearest reference that already has it boxed,
+        # in either direction, so the operator nudges an existing box onto the
+        # piece instead of redrawing it — whatever order they work through the
+        # images in.
+        for k in range(piece["n"]):
+            if refs[i]["rois"][k] is None:
+                near = min((j for j in range(len(refs)) if refs[j]["rois"][k]),
+                           key=lambda j: abs(j - i), default=None)
+                if near is not None:
+                    refs[i]["rois"][k] = dict(refs[near]["rois"][k])
+        k = piece["k"]
         view.set_image(refs[i]["img"])
         _apply_lock()
-        view.set_roi(refs[i]["roi"], notify=False)
+        view.set_roi(refs[i]["rois"][k], notify=False)
         view.set_editable(True)
         view.set_hint("Click to place the box on the part"
                       if view._locked_size else "Drag to box the part")
         frame_lbl.config(text="REFERENCE %d of %d  ·  %s"
                               % (i + 1, len(refs), refs[i]["label"]))
-        _roi_changed(refs[i]["roi"])
+        _roi_changed(refs[i]["rois"][k])
         _paint_thumbs()
         _paint_buttons()
 
@@ -1478,7 +1629,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
             selected = (i == sel["i"])
             # An unboxed reference is the one thing that blocks saving, so it is
             # marked on the strip rather than only in the checklist.
-            edge = OK_GREEN if selected else (LINE if ref["roi"] else WARN)
+            edge = OK_GREEN if selected else (LINE if _complete(ref) else WARN)
             cell = tk.Frame(thumbs, bg=edge, cursor="hand2")
             cell.grid(row=r, column=c, padx=(0, 6), pady=(0, 6))
             holder = tk.Frame(cell, bg="#07080b")
@@ -1493,8 +1644,9 @@ def _open_teach_wizard(parent, cam, part_number=None):
             x.place(relx=1.0, rely=0.0, anchor="ne")
             x.bind("<Button-1>", lambda e, i=i: _remove_ref(i))
 
-    def _crop(ref):
-        r = ref["roi"]
+    def _crop(ref, k=None):
+        """The pixels piece k (default: the one being boxed) takes from ref."""
+        r = ref["rois"][piece["k"] if k is None else k]
         if not r:
             return None
         return ref["img"][r["y"]:r["y"] + r["height"], r["x"]:r["x"] + r["width"]]
@@ -1509,7 +1661,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
                 continue
             r, c = divmod(drawn, 4)
             drawn += 1
-            cell = tk.Frame(crops, bg=OK_GREEN if i == sel["i"] else LINE,
+            cell = tk.Frame(crops, bg=PIECE_COLORS[piece["k"]] if i == sel["i"] else LINE,
                             cursor="hand2")
             cell.grid(row=r, column=c, padx=(0, 6), pady=(0, 6))
             holder = tk.Frame(cell, bg="#07080b", width=66, height=50)
@@ -1534,7 +1686,8 @@ def _open_teach_wizard(parent, cam, part_number=None):
         elif (w, h) != ref_size["wh"]:
             return False
         thumb, _ = _to_photo(img, 66, 50)
-        refs.append({"img": img, "label": label, "thumb": thumb, "roi": None})
+        refs.append({"img": img, "label": label, "thumb": thumb,
+                     "rois": [None] * MAX_PIECES})
         return True
 
     def _remove_ref(i):
@@ -1591,7 +1744,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         if refs:
             # Land on the first reference still needing a box, so the operator
             # works forward through them rather than starting at the end.
-            _show_ref(next((i for i, r in enumerate(refs) if not r["roi"]), 0))
+            _show_ref(next((i for i, r in enumerate(refs) if not _complete(r)), 0))
         _refresh_gates()
         if skipped:
             need = "%d×%d" % ref_size["wh"] if ref_size["wh"] else "the camera resolution"
@@ -1613,27 +1766,52 @@ def _open_teach_wizard(parent, cam, part_number=None):
         fixture. Correlating every crop against the first one catches that before
         it reaches the line.
         """
-        patches = [_crop(r) for r in refs]
-        if any(p is None or p.size == 0 for p in patches):
-            return []
-        grays = [cv2.cvtColor(p, cv2.COLOR_BGR2GRAY) if len(p.shape) == 3 else p
-                 for p in patches]
-        h, w = grays[0].shape[:2]
         odd = []
-        for i, g in enumerate(grays[1:], start=1):
-            probe = cv2.resize(g, (w, h)) if g.shape[:2] != (h, w) else g
-            score = cv2.matchTemplate(grays[0], probe, cv2.TM_CCOEFF_NORMED)[0][0]
-            if score < 0.35:
-                odd.append((i, score))
+        for k in range(piece["n"]):
+            patches = [_crop(r, k) for r in refs]
+            if any(p is None or p.size == 0 for p in patches):
+                continue
+            grays = [cv2.cvtColor(p, cv2.COLOR_BGR2GRAY) if len(p.shape) == 3 else p
+                     for p in patches]
+            h, w = grays[0].shape[:2]
+            for i, g in enumerate(grays[1:], start=1):
+                probe = cv2.resize(g, (w, h)) if g.shape[:2] != (h, w) else g
+                score = cv2.matchTemplate(grays[0], probe, cv2.TM_CCOEFF_NORMED)[0][0]
+                if score < 0.35:
+                    odd.append((i, k, score))
         return odd
+
+    def _stand_ins():
+        """Pieces that would still be 'found' with the piece itself gone.
+
+        Every piece is searched for across the whole frame, so a piece that
+        looks like another one -- two identical connectors, say -- can be
+        matched on its twin, and the part passes with one of them missing.
+        Blank each piece out of the first reference and search for it there:
+        a score at the threshold means something else stands in for it.
+        """
+        if piece["n"] == 1 or not refs:
+            return []
+        img = cv2.cvtColor(refs[0]["img"], cv2.COLOR_BGR2GRAY)
+        found = []
+        for k in range(piece["n"]):
+            r = refs[0]["rois"][k]
+            t = img[r["y"]:r["y"] + r["height"], r["x"]:r["x"] + r["width"]]
+            blanked = img.copy()
+            blanked[r["y"]:r["y"] + r["height"], r["x"]:r["x"] + r["width"]] = int(img.mean())
+            score = cv2.minMaxLoc(cv2.matchTemplate(blanked, t, cv2.TM_CCOEFF_NORMED))[1]
+            if score >= threshold:
+                found.append((k, score))
+        return found
 
     def _save():
         pno = ent_pno.get().strip().upper()
-        rois = [r["roi"] for r in refs]
-        if not (pno and len(refs) >= MIN_REFS and all(rois)):
+        n = piece["n"]
+        rois = [r["rois"][:n] for r in refs]
+        if not (pno and len(refs) >= MIN_REFS and all(all(b) for b in rois)):
             return
         if any(r["width"] < RoiView.MIN_ROI or r["height"] < RoiView.MIN_ROI
-               for r in rois):
+               for b in rois for r in b):
             messagebox.showerror("Target Box",
                                  "One of the boxes is too small to match reliably.",
                                  parent=win)
@@ -1641,14 +1819,30 @@ def _open_teach_wizard(parent, cam, part_number=None):
 
         odd = _odd_crops()
         if odd:
-            listing = "\n".join("  •  Reference %d  (similarity %.2f)" % (i + 1, s)
-                                for i, s in odd)
+            listing = "\n".join(
+                "  •  Reference %d%s  (similarity %.2f)"
+                % (i + 1, ", " + _piece_name(k) if n > 1 else "", s)
+                for i, k, s in odd)
             if not messagebox.askyesno(
                     "Check the Boxes",
                     "These crops do not resemble the first one:\n\n%s\n\n"
                     "That usually means the box missed the part on those images. "
                     "A template of plain background will match the empty fixture "
                     "and pass it.\n\nSave anyway?" % listing, parent=win):
+                return
+
+        twins = _stand_ins()
+        if twins:
+            listing = "\n".join("  •  %s  (found elsewhere at %.2f)" % (_piece_name(k), s)
+                                for k, s in twins)
+            if not messagebox.askyesno(
+                    "Pieces Look Alike",
+                    "With these pieces removed from the first reference, something "
+                    "else in the frame still matches them:\n\n%s\n\n"
+                    "Most often two pieces are identical. Each can then be matched "
+                    "on the other, so the part could pass with one missing. Box "
+                    "something that tells them apart, or check them as one piece."
+                    "\n\nSave anyway?" % listing, parent=win):
                 return
 
         if not reteach and pno in existing_parts and not messagebox.askyesno(
@@ -1667,7 +1861,8 @@ def _open_teach_wizard(parent, cam, part_number=None):
         try:
             ctrl.build_and_save_model(
                 part_number=pno, images=[r["img"] for r in refs],
-                roi=rois, match_threshold=float(threshold))
+                roi=rois, match_threshold=float(threshold),
+                piece_names=[_piece_name(k) for k in range(n)])
         except Exception as e:
             messagebox.showerror("Save Failed", str(e), parent=win)
             return
@@ -1808,6 +2003,10 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     meter = tk.Canvas(mb, bg=PANEL, height=34, highlightthickness=0, bd=0)
     meter.pack(fill="x", pady=(10, 0))
 
+    # Per-piece scores; only shown for a part taught as more than one piece.
+    pieces_card = _card(rail, "Pieces")
+    piece_list = pieces_card.body
+
     hint = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10),
                     wraplength=240, justify="left", anchor="w")
     hint.pack(fill="x", pady=(12, 0))
@@ -1867,14 +2066,37 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         m_time.config(text="%d ms" % result.processing_time_ms, fg=TXT)
         m_refs.config(text=str(info.get("references", "—")), fg=TXT)
         tw, th = info.get("template_size", (0, 0))
-        m_tmpl.config(text="%d x %d" % (tw, th) if tw else "—", fg=TXT)
+        multi = len(result.pieces) > 1
+        m_tmpl.config(text=("%d pieces" % len(result.pieces)) if multi else
+                      "%d x %d" % (tw, th) if tw else "—", fg=TXT)
+
+        for w_ in piece_list.winfo_children():
+            w_.destroy()
+        if multi:
+            pieces_card.pack(fill="x", pady=(12, 0), before=hint)
+            for p in result.pieces:
+                _kv_row(piece_list, p.name, "%.4f  %s" % (p.score, "✓" if p.ok else "✗"),
+                        value_fg=OK_GREEN if p.ok else NG_RED, mono=True)
+        else:
+            pieces_card.pack_forget()
+
+        def _box(b):
+            return {"x": b[0], "y": b[1], "width": b[2], "height": b[3]} if b else None
 
         if result.frame is not None:
             view.set_image(result.frame)
             view.set_accent(color)
-            if result.match_box:
-                x, y, bw, bh = result.match_box
-                view.set_roi({"x": x, "y": y, "width": bw, "height": bh}, notify=False)
+            if multi:
+                # Every piece's match, each coloured by its own verdict, rather
+                # than one box that could only speak for the weakest piece.
+                view.set_roi(None, notify=False)
+                view.set_overlays([(_box(p.box), OK_GREEN if p.ok else NG_RED,
+                                    "%s %.2f" % (p.name, p.score))
+                                   for p in result.pieces])
+            else:
+                view.set_overlays([])
+                if result.match_box:
+                    view.set_roi(_box(result.match_box), notify=False)
             view.set_hint("Best match found in this " +
                           ("image" if source["kind"] == "image" else "frame"))
         else:
@@ -1884,7 +2106,14 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         thr = result.threshold or info.get("threshold", 0.0)
         _draw_score_meter(meter, result.match_score, thr, color)
 
-        if result.judgement == "NG":
+        if result.judgement == "NG" and multi:
+            hint.config(
+                text="Every piece must reach the %.2f threshold. %s — if it is genuinely "
+                     "present and correct, re-teach the part with more reference images "
+                     "or lower this part's threshold."
+                     % (thr, ", ".join("%s scored %.2f" % (p.name, p.score)
+                                       for p in result.pieces if not p.ok)), fg=WARN)
+        elif result.judgement == "NG":
             hint.config(
                 text="The best match scored %.2f against a %.2f threshold. If the part "
                      "is genuinely present and correct, either re-teach it with more "
