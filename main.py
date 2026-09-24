@@ -1,3 +1,39 @@
+import sys
+
+# One copy of the tester per machine. A second copy would fight the first for
+# the COM ports and the camera, so a second launch just says the app is already
+# open and exits. The check runs before the screen modules are imported so the
+# message comes up at once, not after the camera/vision stack has loaded.
+# A named mutex is used rather than a lock file because Windows releases it
+# when the owning process dies, so a crash never leaves the app locked out.
+_instance_mutex = None
+
+def _exit_if_already_running():
+    global _instance_mutex
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    ERROR_ALREADY_EXISTS = 183
+    # Held in a module global for the life of the process; the handle closing
+    # is what frees the name for the next launch.
+    _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\FeederCableEOLTester")
+    if _instance_mutex and ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        MB_OK, MB_ICONWARNING, MB_TOPMOST = 0x0, 0x30, 0x40000
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "Feeder Cable EOL Tester is already running.",
+            "Already Running",
+            MB_OK | MB_ICONWARNING | MB_TOPMOST,
+        )
+        sys.exit(0)
+
+if __name__ == "__main__":
+    _exit_if_already_running()
+
 import tkinter as tk
 from tkinter import ttk
 import datetime
