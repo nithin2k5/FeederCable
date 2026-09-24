@@ -3968,12 +3968,12 @@ def render(parent):
                         vision_failed.append(cid)
                     elif not r.ok:
                         _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}"
-                             + (f" — {r.error}" if len(r.pieces) > 1 else ""))
+                             + (f" — {r.error}" if len(r.objects) > 1 else ""))
                         vision_failed.append(cid)
                     else:
                         _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms"
-                             + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.pieces) + ")"
-                                if len(r.pieces) > 1 else ""))
+                             + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
+                                if len(r.objects) > 1 else ""))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -4590,10 +4590,10 @@ def render(parent):
         colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
         color = colors.get(result.judgement, (0, 165, 255))
         frame = result.frame.copy()
-        if len(result.pieces) > 1:
-            # A part checked as several pieces: box each where it was found,
-            # coloured by its own verdict, so a NG shows which piece is missing.
-            for p in result.pieces:
+        if len(result.objects) > 1:
+            # A part checked as several objects: box each where it was found,
+            # coloured by its own verdict, so a NG shows which object is missing.
+            for p in result.objects:
                 if not p.box:
                     continue
                 pc = colors["OK"] if p.ok else colors["NG"]
