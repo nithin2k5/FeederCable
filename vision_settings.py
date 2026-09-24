@@ -1172,15 +1172,19 @@ def _dialog(parent, title, width, height):
     return win
 
 
-def _dialog_header(win, title, subtitle):
+def _dialog_header(win, title, subtitle, compact=False):
+    """Title strip. `compact` puts the subtitle beside the title on one slim
+    line, for a dialog whose every spare pixel of height goes to an image."""
     bar = tk.Frame(win, bg=PANEL)
     bar.pack(fill="x")
     inner = tk.Frame(bar, bg=PANEL)
-    inner.pack(fill="x", padx=18, pady=12)
+    inner.pack(fill="x", padx=18, pady=6 if compact else 12)
+    side = "left" if compact else "top"
     tk.Label(inner, text=title, bg=PANEL, fg=TXT,
-             font=("Arial", 15, "bold")).pack(anchor="w")
+             font=("Arial", 14 if compact else 15, "bold")).pack(side=side, anchor="w")
     tk.Label(inner, text=subtitle, bg=PANEL, fg=TXT_FAINT,
-             font=("Arial", 11)).pack(anchor="w")
+             font=("Arial", 11)).pack(side=side, anchor="w",
+                                      padx=(14, 0) if compact else 0)
     tk.Frame(win, bg=LINE, height=1).pack(fill="x")
     return bar
 
@@ -1223,10 +1227,19 @@ def _open_teach_wizard(parent, cam, part_number=None):
         "threshold", ctrl.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
 
     win = _dialog(parent, "Teach Part", 1120, 720)
+    # Open filling the screen: the image is where every box is drawn, and the
+    # more pixels it gets the more precisely a box lands on the same spot of
+    # the part in every reference -- which is what the match scores rest on.
+    # 1120x720 stays as the size it restores to.
+    try:
+        win.state("zoomed")
+    except tk.TclError:
+        pass
     _dialog_header(
         win,
         "Re-teach “%s”" % part_number if reteach else "Teach New Part",
-        "Capture the good part a few times, then box it on every reference.")
+        "Capture the good part a few times, then box it on every reference.",
+        compact=True)
 
     alive = {"v": True}
     refs = []                       # [{"img", "label", "thumb", "rois"}]
@@ -1268,7 +1281,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     btn_cancel.pack(side="right", padx=(0, 8))
 
     body = tk.Frame(win, bg=BG)
-    body.pack(fill="both", expand=True, padx=14, pady=12)
+    body.pack(fill="both", expand=True, padx=10, pady=8)
     body.columnconfigure(0, weight=1)
     body.rowconfigure(0, weight=1)
 
@@ -1284,7 +1297,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     view.pack(fill="both", expand=True, padx=1, pady=1)
 
     view_bar = tk.Frame(left, bg=BG)
-    view_bar.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    view_bar.grid(row=1, column=0, sticky="ew", pady=(6, 0))
     frame_lbl = tk.Label(view_bar, text="", bg=BG, fg=TXT_DIM, font=("Consolas", 11))
     frame_lbl.pack(side="right")
     btn_live = _btn(view_bar, "Live View", BTN_NEUTRAL)
