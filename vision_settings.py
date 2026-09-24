@@ -1960,7 +1960,10 @@ def _draw_score_meter(canvas, score, threshold, verdict_color):
 
 def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     """Run the production inspect() path against the live camera, or a still image."""
-    win = _dialog(parent, "Inspection Test", 900, 660)
+    from vision_engine.vision_controller import VisionResult
+    from vision_engine import camera
+
+    win = _dialog(parent, "Inspection Test", 900, 740)
     _dialog_header(win, "Inspection Test — %s" % part_number,
                    "Runs the same match path the test cycle uses — against the "
                    "live camera, or a still image you supply.")
@@ -2003,9 +2006,9 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     meter = tk.Canvas(mb, bg=PANEL, height=34, highlightthickness=0, bd=0)
     meter.pack(fill="x", pady=(10, 0))
 
-    # Per-piece scores; only shown for a part taught as more than one piece.
-    pieces_card = _card(rail, "Pieces")
-    piece_list = pieces_card.body
+    # Per-piece scores, inside the result card so the hint below stays in
+    # view; only shown for a part taught as more than one piece.
+    piece_list = tk.Frame(mb, bg=PANEL)
 
     hint = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10),
                     wraplength=240, justify="left", anchor="w")
@@ -2026,27 +2029,76 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     btn_tune.pack(side="left")
 
     alive = {"v": True}
+    busy = {"v": False}
     last = {"result": None}
     source = {"kind": "camera", "image": None, "label": None}
 
+    # Hold the camera open for as long as the dialog is up. A cold device needs
+    # ~1s of frames before exposure settles (camera.read's settle count), and
+    # opening it can take seconds more; paying that on every "Run Again"
+    # made each run slow. Held here, only the first run waits.
+    cam_index, cam_w, cam_h = ctrl.cam_settings()
+    stream = {"s": camera.acquire(cam_index, cam_w, cam_h) if _cv2_ok else None}
+
     def _run():
-        if not alive["v"]:
+        """Start one inspection. Capture and matching run on a worker thread:
+        done on the Tk thread they froze the whole app for the seconds a cold
+        camera takes to open and settle, long enough for Windows to mark it
+        Not Responding -- which read as the app crashing."""
+        if not alive["v"] or busy["v"]:
             return
+        busy["v"] = True
         verdict_lbl.config(text="RUNNING…", fg=TXT_DIM)
         verdict.config(bg="#1c1f25")
         for w_ in (verdict_lbl, verdict_note):
             w_.config(bg="#1c1f25")
-        _set_btn_enabled(btn_rerun, False)
-        win.update_idletasks()
+        verdict_note.config(text="Capturing from the camera…" if source["kind"] == "camera"
+                            else "Judging the image…", fg=TXT_DIM)
+        for b in (btn_rerun, btn_source, btn_tune):
+            _set_btn_enabled(b, False)
 
         ctrl.reload_config()
-        if source["kind"] == "image":
-            result = ctrl.inspect(part_number, frame=source["image"])
-        else:
-            result = ctrl.inspect(part_number)
-        last["result"] = result
+        kind, image, s = source["kind"], source["image"], stream["s"]
+        # The worker only fills this in; the Tk thread polls for it. Tk calls
+        # made from another thread are refused unless the main thread is
+        # sitting in mainloop, so the worker never touches a widget.
+        done = {}
+
+        def _poll():
+            if not alive["v"]:
+                busy["v"] = False
+                return
+            if "result" in done:
+                _show(done["result"])
+            else:
+                win.after(50, _poll)
+
+        def _work():
+            try:
+                if kind == "image":
+                    result = ctrl.inspect(part_number, frame=image)
+                else:
+                    frame = s.read(timeout=5.0) if s is not None else None
+                    if frame is None:
+                        result = VisionResult(ok=False, judgement="ERROR",
+                                              part_number=part_number,
+                                              error="Camera not available")
+                    else:
+                        result = ctrl.inspect(part_number, frame=frame)
+            except Exception as e:
+                result = VisionResult(ok=False, judgement="ERROR",
+                                      part_number=part_number, error=str(e))
+            done["result"] = result
+
+        threading.Thread(target=_work, daemon=True).start()
+        win.after(50, _poll)
+
+    def _show(result):
+        busy["v"] = False
         if not alive["v"]:
             return
+        last["result"] = result
+        _set_btn_enabled(btn_source, True)
 
         colors = {"OK": OK_GREEN, "NG": NG_RED, "ERROR": WARN}
         bgs = {"OK": "#0a2a16", "NG": "#2e1113", "ERROR": "#2e2409"}
@@ -2073,12 +2125,13 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         for w_ in piece_list.winfo_children():
             w_.destroy()
         if multi:
-            pieces_card.pack(fill="x", pady=(12, 0), before=hint)
+            piece_list.pack(fill="x", pady=(10, 0))
+            tk.Frame(piece_list, bg=LINE, height=1).pack(fill="x", pady=(0, 6))
             for p in result.pieces:
                 _kv_row(piece_list, p.name, "%.4f  %s" % (p.score, "✓" if p.ok else "✗"),
                         value_fg=OK_GREEN if p.ok else NG_RED, mono=True)
         else:
-            pieces_card.pack_forget()
+            piece_list.pack_forget()
 
         def _box(b):
             return {"x": b[0], "y": b[1], "width": b[2], "height": b[3]} if b else None
@@ -2108,11 +2161,10 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
 
         if result.judgement == "NG" and multi:
             hint.config(
-                text="Every piece must reach the %.2f threshold. %s — if it is genuinely "
-                     "present and correct, re-teach the part with more reference images "
-                     "or lower this part's threshold."
-                     % (thr, ", ".join("%s scored %.2f" % (p.name, p.score)
-                                       for p in result.pieces if not p.ok)), fg=WARN)
+                text="Every piece must reach %.2f. If %s is genuinely present and "
+                     "correct, re-teach with more reference images or lower this "
+                     "part's threshold."
+                     % (thr, ", ".join(p.name for p in result.pieces if not p.ok)), fg=WARN)
         elif result.judgement == "NG":
             hint.config(
                 text="The best match scored %.2f against a %.2f threshold. If the part "
@@ -2161,6 +2213,12 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
 
     def _close():
         alive["v"] = False
+        if stream["s"] is not None:
+            try:
+                stream["s"].release()
+            except Exception:
+                pass
+            stream["s"] = None
         try:
             win.grab_release()
         except Exception:
