@@ -155,11 +155,12 @@ def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
                        direction: str, colors: List[str]) -> List[str]:
     """The wire colours seen across `zone`, in order along `direction`.
 
-    `direction` is "lr" (wires run top-bottom, read left to right) or "tb"
-    (wires run left-right, read top to bottom). Only the colours in `colors`
-    are looked for, so background in any other colour is ignored. Each line
-    across the wires is labelled with the colour most of it shows; runs of one
-    colour become one wire, and slivers too thin to be a wire are dropped.
+    `direction` is "lr" (wires run top-bottom, read left to right), "tb"
+    (wires run left-right, read top to bottom) or "auto" (whichever way the
+    wires lie, see _wire_direction). Only the colours in `colors` are looked
+    for, so background in any other colour is ignored. Each line across the
+    wires is labelled with the colour most of it shows; runs of one colour
+    become one wire, and bands much thinner than the wires are dropped.
     """
     x, y, w, h = zone
     roi = frame[y:y + h, x:x + w]
@@ -167,6 +168,8 @@ def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
     if roi.size == 0 or not wanted:
         return []
     labels = _classify_pixels(roi)
+    if direction == "auto":
+        direction = _wire_direction(labels, wanted)
     if direction == "tb":
         labels = labels.T                   # now each column is one line across
     thickness, length = labels.shape
@@ -188,12 +191,19 @@ def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
                 runs.append([lab, 1])
         return runs
 
-    # Drop runs too thin to be a wire, then fold what is left: neighbouring
-    # runs of one colour split only by a sliver are one wire.
+    # Drop bands too thin to be a wire: specks first, then anything under
+    # 40% of the typical band's width -- the dark shadow between two wires
+    # reads as a thin black band, and must not count as a black wire.
     min_run = max(2, length // 40)
+    widths = [n for lab, n in _runs(line) if lab is not None and n >= min_run]
+    if widths:
+        min_run = max(min_run, int(np.median(widths) * 0.4))
     cleaned = []
     for lab, n in _runs(line):
         cleaned += [lab if n >= min_run else None] * n
+
+    # Fold what is left: neighbouring bands of one colour split only by a
+    # dropped sliver are one wire.
     found = []
     gap = 0
     for lab, n in _runs(cleaned):
@@ -204,6 +214,26 @@ def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
             found.append(lab)
         gap = 0
     return found
+
+
+def _wire_direction(labels: np.ndarray, wanted: List[str]) -> str:
+    """"lr" or "tb": the way to read across the wires in a labelled area.
+
+    A line drawn along a wire shows mostly one colour; a line drawn across the
+    wires shows all of them. So whichever of rows or columns is purer -- more
+    of its wire-coloured pixels in a single colour -- runs along the wires,
+    and the wires are read the other way.
+    """
+    def _purity(lines):
+        scores = []
+        for line in lines:
+            counts = [int(np.sum(line == c)) for c in wanted]
+            if sum(counts) >= max(3, line.size // 10):
+                scores.append(max(counts) / sum(counts))
+        return float(np.mean(scores)) if scores else 0.0
+
+    # Rows pure: the wires lie side to side, so read top to bottom.
+    return "tb" if _purity(labels) >= _purity(labels.T) else "lr"
 
 
 def color_breakdown(frame: np.ndarray, zone: Tuple[int, int, int, int],
@@ -245,7 +275,8 @@ def wire_zone_in_frame(box: Tuple[int, int, int, int], zone: dict,
 def wire_position_names(count: int, direction: str) -> List[str]:
     """What an operator calls each wire position: Left / Middle / Right, and
     so on, falling back to numbers where words run out."""
-    a, m, b = ("Left", "Middle", "Right") if direction == "lr" else ("Top", "Middle", "Bottom")
+    a, m, b = {"lr": ("Left", "Middle", "Right"), "tb": ("Top", "Middle", "Bottom")}.get(
+        direction, ("Left / top", "Middle", "Right / bottom"))
     if count == 1:
         return ["Wire"]
     if count == 2:

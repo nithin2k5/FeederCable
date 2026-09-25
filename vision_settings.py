@@ -2341,7 +2341,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         c = existing.get(k)
         drafts.append({
             "enabled": c is not None,
-            "direction": (c or {}).get("direction", "lr"),
+            "direction": (c or {}).get("direction", "auto"),
             "colors": list((c or {}).get("colors", ["red", "blue"])),
             "zone": dict(c["zone"]) if c else None,
             # "object": the area follows the object's box; "frame": it stays at
@@ -2391,16 +2391,16 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     tk.Label(settings, text="Wires read", bg=BG, fg=TXT_DIM,
              font=("Arial", 11)).pack(anchor="w")
-    dir_var = tk.StringVar(value="lr")
+    dir_var = tk.StringVar(value="auto")
     dir_row = tk.Frame(settings, bg=BG)
     dir_row.pack(fill="x", pady=(2, 8))
-    for text, val in (("Left → Right", "lr"), ("Top → Bottom", "tb")):
+    for text, val in (("Automatic", "auto"), ("Left → Right", "lr"),
+                      ("Top → Bottom", "tb")):
         tk.Radiobutton(dir_row, text=text, variable=dir_var, value=val,
                        bg=BG, fg=TXT, selectcolor=FIELD, activebackground=BG,
                        activeforeground=TXT, font=("Arial", 11), bd=0,
                        highlightthickness=0,
-                       command=lambda: _on_edit(rebuild=True)).pack(side="left",
-                                                                    padx=(0, 12))
+                       command=lambda: _on_edit(rebuild=True)).pack(anchor="w")
 
     tk.Label(settings, text="Wire area", bg=BG, fg=TXT_DIM,
              font=("Arial", 11)).pack(anchor="w")
@@ -2731,7 +2731,11 @@ def _open_wire_dialog(parent, ctrl, part_number):
             lines.append("Not seen at all: %s. Check the colour names, and that "
                          "the box is on the wires." % ", ".join(missing))
         other = "tb" if d["direction"] == "lr" else "lr"
-        if detect_wire_colors(still["img"], z, other, d["colors"]) == d["colors"]:
+        if d["direction"] == "auto":
+            pass        # it already picked the way the wires lie
+        elif detect_wire_colors(still["img"], z, "auto", d["colors"]) == d["colors"]:
+            lines.append("“Automatic” reads it correctly — set “Wires read” to that.")
+        elif detect_wire_colors(still["img"], z, other, d["colors"]) == d["colors"]:
             lines.append("Reading %s matches — the wires run the other way. "
                          "Switch “Wires read” to that."
                          % ("Top → Bottom" if other == "tb" else "Left → Right"))
