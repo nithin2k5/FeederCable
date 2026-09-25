@@ -235,6 +235,24 @@ def wire_position_names(count: int, direction: str) -> List[str]:
             for i in range(count)]
 
 
+def _best_match(gray_frame: np.ndarray, templates: List[np.ndarray]):
+    """(score, box, compared): the best of `templates` anywhere in the frame.
+    Templates larger than the frame are skipped and not counted."""
+    best_score = -1.0
+    best_box = None
+    compared = 0
+    for template in templates:
+        if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
+            continue
+        res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        if max_val > best_score:
+            best_score = max_val
+            best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
+        compared += 1
+    return best_score, best_box, compared
+
+
 def get_vision_controller() -> "VisionController":
     return VisionController()
 
@@ -331,6 +349,27 @@ class VisionController:
 
     # ── Wire checks ─────────────────────────────────────────────────────────
 
+    def locate_objects(self, part_number: str, frame: np.ndarray) -> List[ObjectResult]:
+        """Where each object of a part matches best in `frame`, found or not.
+
+        For placing wire areas: unlike inspect() this works with vision
+        switched off, and hands back the best box even below the threshold
+        (ok says whether it reached it) so the operator can still see where
+        the object landed. Empty when the part has no usable model.
+        """
+        model = self._load_model(part_number)
+        if model is None:
+            return []
+        threshold = model.get("match_threshold",
+                              self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        out = []
+        for obj in model.get("objects", []):
+            score, box, _ = _best_match(gray, obj["templates"])
+            out.append(ObjectResult(name=obj["name"], ok=score >= threshold,
+                                    score=max(score, 0.0), box=box))
+        return out
+
     def wire_checks(self, part_number: str) -> Dict[int, dict]:
         """{object index: {"colors", "direction", "zone"}} for a part."""
         raw = self.config.get("wire_checks", {}).get(part_number, {})
@@ -393,18 +432,7 @@ class VisionController:
         results = []
         for obj in objects:
             templates = obj["templates"]
-            best_score = -1.0
-            best_box = None
-            compared = 0
-            for template in templates:
-                if template.shape[0] > gray_frame.shape[0] or template.shape[1] > gray_frame.shape[1]:
-                    continue
-                res = cv2.matchTemplate(gray_frame, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                if max_val > best_score:
-                    best_score = max_val
-                    best_box = (max_loc[0], max_loc[1], template.shape[1], template.shape[0])
-                compared += 1
+            best_score, best_box, compared = _best_match(gray_frame, templates)
 
             print(f"[VISION DEBUG] pno={part_number} object={obj['name']!r} "
                   f"frame={gray_frame.shape[1]}x{gray_frame.shape[0]} "

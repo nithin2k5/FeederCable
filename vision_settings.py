@@ -2331,7 +2331,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
     alive = {"v": True}
     saved = {"v": False}
     live = {"on": False}
-    still = {"img": None, "boxes": [None] * n_objects}   # object boxes found in it
+    # A still image, each object's best-match box in it, and that match.
+    still = {"img": None, "boxes": [None] * n_objects, "found": [None] * n_objects}
     cur = {"k": 0}
 
     existing = ctrl.wire_checks(part_number)
@@ -2441,6 +2442,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     view = RoiView(view_wrap, on_change=_zone_changed)
     view.pack(fill="both", expand=True, padx=1, pady=1)
+    # A click on the live picture freezes it to draw on, as Capture does.
+    view.bind("<ButtonPress-1>", lambda e: _capture() if live["on"] else None, add="+")
 
     # ── Footer ─────────────────────────────────────────────────────────────
     tk.Frame(win, bg=LINE, height=1).pack(fill="x")
@@ -2544,15 +2547,22 @@ def _open_wire_dialog(parent, ctrl, part_number):
         spin.config(state="readonly" if d["enabled"] else "disabled")
 
         if live["on"]:
-            zone_lbl.config(text="Put a good part in view and press Capture, "
+            zone_lbl.config(text="Put a good part in view, then click the picture "
+                                 "(or press Capture) to freeze it, "
                                  "or load an image of one.", fg=TXT_DIM)
         elif still["img"] is None:
             zone_lbl.config(text="Capture a frame or load an image of a good part "
                                  "to draw the wire area.", fg=TXT_DIM)
         elif still["boxes"][cur["k"]] is None:
-            zone_lbl.config(text="%s was not found in this image, so the wire area "
-                                 "can't be placed. Capture a frame where it is found."
+            zone_lbl.config(text="%s could not be searched for in this image (it is "
+                                 "smaller than the taught boxes). Use a camera frame."
                                  % names[cur["k"]], fg=WARN)
+        elif not still["found"][cur["k"]].ok and d["zone"] is None:
+            zone_lbl.config(text="%s only matched %.2f here, below the part's "
+                                 "threshold. Check its box sits on it before drawing "
+                                 "the wire area — the area is placed from that box."
+                                 % (names[cur["k"]], still["found"][cur["k"]].score),
+                            fg=WARN)
         elif d["zone"] is None:
             zone_lbl.config(text="Drag a box over the wire ends, just where they "
                                  "leave the connector. Keep it tight to the wires.",
@@ -2588,18 +2598,20 @@ def _open_wire_dialog(parent, ctrl, part_number):
         live["on"] = False
         still["img"] = img
         still["boxes"] = [None] * n_objects
+        still["found"] = [None] * n_objects
         win.config(cursor="watch")
         win.update_idletasks()
         try:
-            result = ctrl.inspect(part_number, frame=img)
+            located = ctrl.locate_objects(part_number, img)
         finally:
             win.config(cursor="")
-        if result.judgement == "ERROR":
-            messagebox.showwarning("Wire Colours", result.error or "Could not judge "
-                                   "this image.", parent=win)
-        for k, r in enumerate(result.objects[:n_objects]):
-            if r.box and r.score >= result.threshold:
+        # Anchor on each object's best match even when it scores under the
+        # threshold: the operator sees its box on the image and can judge it,
+        # rather than finding the wire box silently refused.
+        for k, r in enumerate(located[:n_objects]):
+            if r.box:
                 still["boxes"][k] = r.box
+                still["found"][k] = r
         view.set_image(img, keep_roi=False)
         view.set_editable(True)
         view.set_accent(ACCENT)
@@ -2636,7 +2648,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         view.set_roi(None, notify=False)
         view.set_overlays([])
         view.set_editable(False)
-        view.set_hint("Live view — Capture a frame to draw the wire area")
+        view.set_hint("Live view — click the picture to freeze a frame and draw on it")
         check_lbl.config(text="")
         _paint()
 
