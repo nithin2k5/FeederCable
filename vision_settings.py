@@ -2310,7 +2310,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     """
     from vision_engine.vision_controller import (
         WIRE_COLORS, MAX_WIRES, detect_wire_colors, wire_zone_in_frame,
-        wire_position_names, color_breakdown)
+        wire_position_names, color_breakdown, wire_anchor)
     from vision_engine import camera
 
     info = ctrl.model_info(part_number)
@@ -2344,6 +2344,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
             "direction": (c or {}).get("direction", "lr"),
             "colors": list((c or {}).get("colors", ["red", "blue"])),
             "zone": dict(c["zone"]) if c else None,
+            # "object": the area follows the object's box; "frame": it stays at
+            # one spot in the picture, for a part held in a fixture.
+            "anchor": (c or {}).get("anchor", "object"),
         })
 
     body = tk.Frame(win, bg=BG)
@@ -2399,6 +2402,19 @@ def _open_wire_dialog(parent, ctrl, part_number):
                        command=lambda: _on_edit(rebuild=True)).pack(side="left",
                                                                     padx=(0, 12))
 
+    tk.Label(settings, text="Wire area", bg=BG, fg=TXT_DIM,
+             font=("Arial", 11)).pack(anchor="w")
+    anchor_var = tk.StringVar(value="object")
+    anchor_rbs = {}
+    for val in ("object", "frame"):
+        anchor_rbs[val] = tk.Radiobutton(
+            settings, text="", variable=anchor_var, value=val,
+            bg=BG, fg=TXT, selectcolor=FIELD, activebackground=BG,
+            activeforeground=TXT, font=("Arial", 11), bd=0, highlightthickness=0,
+            anchor="w", command=lambda: _set_anchor(anchor_var.get()))
+        anchor_rbs[val].pack(fill="x")
+    tk.Frame(settings, bg=BG, height=8).pack(fill="x")
+
     count_row = tk.Frame(settings, bg=BG)
     count_row.pack(fill="x", pady=(0, 8))
     tk.Label(count_row, text="Number of wires", bg=BG, fg=TXT_DIM,
@@ -2430,7 +2446,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         if not final or live["on"]:
             return
         k = cur["k"]
-        box = still["boxes"][k]
+        box = _anchor(k)
         if roi and box:
             drafts[k]["zone"] = {"dx": roi["x"] - box[0], "dy": roi["y"] - box[1],
                                  "width": roi["width"], "height": roi["height"]}
@@ -2525,6 +2541,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
         obj_var.set(k)
         enabled_var.set(d["enabled"])
         dir_var.set(d["direction"])
+        anchor_var.set(d["anchor"])
+        anchor_rbs["object"].config(text="Follows %s wherever it is found" % names[k])
+        anchor_rbs["frame"].config(text="Stays at a fixed spot in the picture")
         count_var.set(len(d["colors"]))
         chk.config(text="  Check wire colours on %s" % names[k] if n_objects > 1
                    else "  Check wire colours")
@@ -2533,8 +2552,27 @@ def _open_wire_dialog(parent, ctrl, part_number):
         _build_color_rows()
         _paint()
 
+    def _anchor(k):
+        """What object k's wire area is placed from in the still, or None."""
+        if still["img"] is None:
+            return None
+        return wire_anchor(drafts[k], still["boxes"][k])
+
+    def _set_anchor(val):
+        """Switch what the area follows, keeping it where it is on screen."""
+        k = cur["k"]
+        z = _abs_zone(k)
+        drafts[k]["anchor"] = val
+        box = _anchor(k)
+        if z and box:
+            drafts[k]["zone"] = {"dx": z[0] - box[0], "dy": z[1] - box[1],
+                                 "width": z[2], "height": z[3]}
+        check_lbl.config(text="")
+        check_why.config(text="")
+        _paint()
+
     def _abs_zone(k):
-        box = still["boxes"][k]
+        box = _anchor(k)
         z = drafts[k]["zone"]
         if box is None or z is None or still["img"] is None:
             return None
@@ -2562,18 +2600,18 @@ def _open_wire_dialog(parent, ctrl, part_number):
         elif still["img"] is None:
             zone_lbl.config(text="Capture a frame or load an image of a good part "
                                  "to draw the wire area.", fg=TXT_DIM)
-        elif still["boxes"][cur["k"]] is None:
+        elif _anchor(cur["k"]) is None:
             zone_lbl.config(text="%s could not be searched for in this image (it is "
                                  "smaller than the taught boxes). Use a camera frame."
                                  % names[cur["k"]], fg=WARN)
-        elif not still["found"][cur["k"]].ok:
+        elif d["anchor"] == "object" and not still["found"][cur["k"]].ok:
             # Shown even once an area is drawn: the area is stored relative to
             # this box, so if the box is not on the connector the area will
             # land somewhere else on the line.
             zone_lbl.config(text="⚠ %s only matched %.2f here (needs %.2f), so its "
                                  "box may not be on the connector. The wire area "
-                                 "follows that box — if it is off, pick the object "
-                                 "whose box sits on the connector, or re-teach %s."
+                                 "follows that box — if it is off, set the wire "
+                                 "area to stay at a fixed spot, or re-teach %s."
                                  % (names[cur["k"]], still["found"][cur["k"]].score,
                                     info["threshold"], names[cur["k"]]),
                             fg=WARN)

@@ -220,6 +220,14 @@ def color_breakdown(frame: np.ndarray, zone: Tuple[int, int, int, int],
     return [(str(n), float(s)) for n, s in shares if s >= min_share]
 
 
+def wire_anchor(check: dict, object_box) -> Optional[Tuple[int, int, int, int]]:
+    """The box a wire area's offsets count from: the frame's corner for a
+    fixed area, else the object's box (None when the object was not found)."""
+    if check.get("anchor") == "frame":
+        return (0, 0, 0, 0)
+    return object_box
+
+
 def wire_zone_in_frame(box: Tuple[int, int, int, int], zone: dict,
                        frame_shape) -> Optional[Tuple[int, int, int, int]]:
     """A wire area stored relative to its object, placed against where the
@@ -397,6 +405,7 @@ class VisionController:
             part[str(k)] = {
                 "colors": list(check["colors"]),
                 "direction": check.get("direction", "lr"),
+                "anchor": "frame" if check.get("anchor") == "frame" else "object",
                 "zone": {n: int(check["zone"][n]) for n in ("dx", "dy", "width", "height")},
             }
         else:
@@ -472,15 +481,18 @@ class VisionController:
                 continue
             r.wires_expected = list(check["colors"])
             r.wires_ok = False
-            if r.ok and r.box:
-                r.wire_zone = wire_zone_in_frame(r.box, check["zone"], frame.shape)
+            # A "frame" area sits at a fixed spot in the picture (for a part
+            # held in a fixture); otherwise it is placed from the object's box.
+            anchor = wire_anchor(check, r.box if r.ok else None)
+            if anchor:
+                r.wire_zone = wire_zone_in_frame(anchor, check["zone"], frame.shape)
                 if r.wire_zone:
                     r.wires_found = detect_wire_colors(
                         frame, r.wire_zone, check.get("direction", "lr"), r.wires_expected)
                     r.wires_ok = r.wires_found == r.wires_expected
                 print(f"[VISION DEBUG] pno={part_number} object={r.name!r} "
                       f"wires expected={r.wires_expected} found={r.wires_found}")
-                r.ok = r.wires_ok
+            r.ok = r.ok and r.wires_ok
 
         elapsed = int((time.time() - start) * 1000)
         weakest = min(results, key=lambda r: r.score)
