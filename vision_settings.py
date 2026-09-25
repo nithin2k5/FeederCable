@@ -2310,7 +2310,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     """
     from vision_engine.vision_controller import (
         WIRE_COLORS, MAX_WIRES, detect_wire_colors, wire_zone_in_frame,
-        wire_position_names)
+        wire_position_names, color_breakdown)
     from vision_engine import camera
 
     info = ctrl.model_info(part_number)
@@ -2422,6 +2422,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
     check_lbl = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 11, "bold"),
                          wraplength=320, justify="left", anchor="w")
     check_lbl.pack(fill="x", pady=(10, 0))
+    check_why = tk.Label(rail, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10),
+                         wraplength=320, justify="left", anchor="w")
+    check_why.pack(fill="x", pady=(6, 0))
 
     def _zone_changed(roi, final=True):
         if not final or live["on"]:
@@ -2498,6 +2501,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 drafts[cur["k"]]["colors"][i] = var.get()
                 swatch.config(bg=WIRE_COLORS[var.get()])
                 check_lbl.config(text="")
+                check_why.config(text="")
                 _paint()
 
             var.trace_add("write", _picked)
@@ -2510,6 +2514,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         n = int(count_var.get())
         d["colors"] = (d["colors"] + [d["colors"][-1] if d["colors"] else "red"] * n)[:n]
         check_lbl.config(text="")
+        check_why.config(text="")
         if rebuild:
             _build_color_rows()
         _paint()
@@ -2524,6 +2529,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         chk.config(text="  Check wire colours on %s" % names[k] if n_objects > 1
                    else "  Check wire colours")
         check_lbl.config(text="")
+        check_why.config(text="")
         _build_color_rows()
         _paint()
 
@@ -2537,7 +2543,10 @@ def _open_wire_dialog(parent, ctrl, part_number):
     def _paint():
         """Refresh everything that depends on the drafts or the still."""
         for k, rb in enumerate(obj_rows):
-            rb.config(text="  %s  —  %s" % (names[k], _describe(k)))
+            f = still["found"][k] if not live["on"] else None
+            rb.config(text="  %s  —  %s%s" % (
+                names[k], _describe(k),
+                "   ⚠ match %.2f" % f.score if f is not None and not f.ok else ""))
         d = drafts[cur["k"]]
         for w_ in _all_children(settings):
             try:
@@ -2557,11 +2566,16 @@ def _open_wire_dialog(parent, ctrl, part_number):
             zone_lbl.config(text="%s could not be searched for in this image (it is "
                                  "smaller than the taught boxes). Use a camera frame."
                                  % names[cur["k"]], fg=WARN)
-        elif not still["found"][cur["k"]].ok and d["zone"] is None:
-            zone_lbl.config(text="%s only matched %.2f here, below the part's "
-                                 "threshold. Check its box sits on it before drawing "
-                                 "the wire area — the area is placed from that box."
-                                 % (names[cur["k"]], still["found"][cur["k"]].score),
+        elif not still["found"][cur["k"]].ok:
+            # Shown even once an area is drawn: the area is stored relative to
+            # this box, so if the box is not on the connector the area will
+            # land somewhere else on the line.
+            zone_lbl.config(text="⚠ %s only matched %.2f here (needs %.2f), so its "
+                                 "box may not be on the connector. The wire area "
+                                 "follows that box — if it is off, pick the object "
+                                 "whose box sits on the connector, or re-teach %s."
+                                 % (names[cur["k"]], still["found"][cur["k"]].score,
+                                    info["threshold"], names[cur["k"]]),
                             fg=WARN)
         elif d["zone"] is None:
             zone_lbl.config(text="Drag a box over the wire ends, just where they "
@@ -2617,6 +2631,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         view.set_accent(ACCENT)
         view.set_hint("Drag a box over the wire ends of %s" % names[cur["k"]])
         check_lbl.config(text="")
+        check_why.config(text="")
         _paint()
 
     def _capture():
@@ -2650,6 +2665,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         view.set_editable(False)
         view.set_hint("Live view — click the picture to freeze a frame and draw on it")
         check_lbl.config(text="")
+        check_why.config(text="")
         _paint()
 
     def _check():
@@ -2663,6 +2679,31 @@ def _open_wire_dialog(parent, ctrl, part_number):
             text="%s  Found: %s" % ("✓ OK" if ok else "✗ NG",
                                     " – ".join(found) if found else "no wires"),
             fg=OK_GREEN if ok else NG_RED)
+        if ok:
+            check_why.config(text="")
+            return
+
+        # Say why, in terms the operator can act on: the colours actually in
+        # the box, and whether reading the other way would have matched.
+        seen = color_breakdown(still["img"], z)
+        lines = ["Colours in the wire area: " +
+                 ", ".join("%s %d%%" % (n, round(s * 100)) for n, s in seen)]
+        missing = [c for c in dict.fromkeys(d["colors"]) if c not in dict(seen)]
+        if missing:
+            lines.append("Not seen at all: %s. Check the colour names, and that "
+                         "the box is on the wires." % ", ".join(missing))
+        other = "tb" if d["direction"] == "lr" else "lr"
+        if detect_wire_colors(still["img"], z, other, d["colors"]) == d["colors"]:
+            lines.append("Reading %s matches — the wires run the other way. "
+                         "Switch “Wires read” to that."
+                         % ("Top → Bottom" if other == "tb" else "Left → Right"))
+        else:
+            lines.append("Wires lying %s need “%s”."
+                         % (("side to side", "Top → Bottom") if d["direction"] == "lr"
+                            else ("up and down", "Left → Right")))
+        lines.append("Keep the box tight on the wires, clear of the connector "
+                     "body and cap.")
+        check_why.config(text="\n\n".join(lines))
 
     def _save():
         for k, d in enumerate(drafts):

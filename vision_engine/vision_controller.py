@@ -206,6 +206,20 @@ def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
     return found
 
 
+def color_breakdown(frame: np.ndarray, zone: Tuple[int, int, int, int],
+                    min_share: float = 0.03) -> List[Tuple[str, float]]:
+    """[(colour, share of the area)] for every colour covering at least
+    `min_share` of `zone`, most first -- what the wire check has to work with,
+    for telling an operator why a check read what it did."""
+    x, y, w, h = zone
+    roi = frame[y:y + h, x:x + w]
+    if roi.size == 0:
+        return []
+    names, counts = np.unique(_classify_pixels(roi), return_counts=True)
+    shares = sorted(zip(names, counts / counts.sum()), key=lambda t: -t[1])
+    return [(str(n), float(s)) for n, s in shares if s >= min_share]
+
+
 def wire_zone_in_frame(box: Tuple[int, int, int, int], zone: dict,
                        frame_shape) -> Optional[Tuple[int, int, int, int]]:
     """A wire area stored relative to its object, placed against where the
