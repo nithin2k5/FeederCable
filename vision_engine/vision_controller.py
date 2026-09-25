@@ -20,6 +20,15 @@ Objects:
   is OK only when every object is. Combining the verdicts is the only new step,
   so an object is judged no more loosely than a whole part was. A model saved
   before objects existed reads as one object.
+
+Wire colours:
+  An object (a connector) can also carry a wire check: the colours its wires
+  must show, in order left to right (or top to bottom), inside a wire area
+  drawn once next to it. The area is stored relative to the object's box, so
+  it follows the connector wherever the match lands it. The check only runs
+  once the object itself is found, and the object is OK only when both pass.
+  Wire checks live in vision_config.json, not the model file, so re-teaching
+  a part keeps them.
 """
 import configparser
 import json
@@ -35,6 +44,16 @@ from . import camera
 
 DEFAULT_MATCH_THRESHOLD = 0.75
 MAX_OBJECTS = 3
+MAX_WIRES = 8
+
+# Colours a wire can be checked for, with a swatch (hex) for the UI. Every
+# pixel of a wire area is sorted into one of these by _classify_pixels().
+WIRE_COLORS = {
+    "red": "#e53935", "orange": "#fb8c00", "yellow": "#fdd835",
+    "green": "#43a047", "blue": "#1e88e5", "violet": "#8e24aa",
+    "pink": "#f06292", "brown": "#795548", "black": "#000000",
+    "grey": "#9e9e9e", "white": "#ffffff",
+}
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 _VISION_CFG_PATH = os.path.join(_ROOT_DIR, "vision_config.json")
@@ -49,6 +68,11 @@ class ObjectResult:
     ok: bool
     score: float = 0.0
     box: Optional[Tuple[int, int, int, int]] = None         # (x, y, w, h) in frame
+    # Wire check, when the object has one. wires_ok is None when it has none.
+    wires_ok: Optional[bool] = None
+    wires_expected: List[str] = field(default_factory=list)
+    wires_found: List[str] = field(default_factory=list)
+    wire_zone: Optional[Tuple[int, int, int, int]] = None   # (x, y, w, h) in frame
 
 
 @dataclass
@@ -97,6 +121,118 @@ def save_vision_config(cfg: dict):
     with open(_VISION_CFG_PATH, "w") as f:
         json.dump(cfg, f, indent=4)
         f.write("\n")
+
+
+# ── Wire colours ──────────────────────────────────────────────────────────────
+
+def _classify_pixels(bgr: np.ndarray) -> np.ndarray:
+    """Name every pixel's colour: an array of WIRE_COLORS keys, one per pixel.
+
+    Hue decides the chromatic colours; pixels too grey to have a hue fall to
+    black / grey / white by brightness. Dark orange and red read as brown.
+    OpenCV hue runs 0-180.
+    """
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    h = hsv[..., 0].astype(int)
+    s = hsv[..., 1].astype(int)
+    v = hsv[..., 2].astype(int)
+    out = np.full(h.shape, "grey", dtype=object)
+
+    chroma = (s >= 60) & (v >= 60)
+    for name, lo, hi in (("red", 0, 8), ("orange", 8, 20), ("yellow", 20, 36),
+                         ("green", 36, 85), ("blue", 85, 128), ("violet", 128, 148),
+                         ("pink", 148, 170), ("red", 170, 181)):
+        out[chroma & (h >= lo) & (h < hi)] = name
+    out[chroma & (h < 20) & (v < 130)] = "brown"
+
+    grey = ~chroma
+    out[grey & (v < 80)] = "black"
+    out[grey & (v >= 170) & (s < 60)] = "white"
+    return out
+
+
+def detect_wire_colors(frame: np.ndarray, zone: Tuple[int, int, int, int],
+                       direction: str, colors: List[str]) -> List[str]:
+    """The wire colours seen across `zone`, in order along `direction`.
+
+    `direction` is "lr" (wires run top-bottom, read left to right) or "tb"
+    (wires run left-right, read top to bottom). Only the colours in `colors`
+    are looked for, so background in any other colour is ignored. Each line
+    across the wires is labelled with the colour most of it shows; runs of one
+    colour become one wire, and slivers too thin to be a wire are dropped.
+    """
+    x, y, w, h = zone
+    roi = frame[y:y + h, x:x + w]
+    wanted = list(dict.fromkeys(colors))
+    if roi.size == 0 or not wanted:
+        return []
+    labels = _classify_pixels(roi)
+    if direction == "tb":
+        labels = labels.T                   # now each column is one line across
+    thickness, length = labels.shape
+
+    # One label per position along the axis: the wanted colour covering the
+    # most of that line, if it covers enough of it to be a wire and not a
+    # speck. None where no wanted colour does.
+    counts = np.stack([(labels == c).sum(axis=0) for c in wanted])   # (n, length)
+    best = counts.argmax(axis=0)
+    strong = counts.max(axis=0) >= max(1, int(thickness * 0.35))
+    line = [wanted[b] if ok else None for b, ok in zip(best, strong)]
+
+    def _runs(seq):
+        runs = []
+        for lab in seq:
+            if runs and runs[-1][0] == lab:
+                runs[-1][1] += 1
+            else:
+                runs.append([lab, 1])
+        return runs
+
+    # Drop runs too thin to be a wire, then fold what is left: neighbouring
+    # runs of one colour split only by a sliver are one wire.
+    min_run = max(2, length // 40)
+    cleaned = []
+    for lab, n in _runs(line):
+        cleaned += [lab if n >= min_run else None] * n
+    found = []
+    gap = 0
+    for lab, n in _runs(cleaned):
+        if lab is None:
+            gap = n
+            continue
+        if not (found and found[-1] == lab and gap < min_run):
+            found.append(lab)
+        gap = 0
+    return found
+
+
+def wire_zone_in_frame(box: Tuple[int, int, int, int], zone: dict,
+                       frame_shape) -> Optional[Tuple[int, int, int, int]]:
+    """A wire area stored relative to its object, placed against where the
+    object was found in this frame and clipped to the frame."""
+    fh, fw = frame_shape[:2]
+    x0 = max(0, box[0] + int(zone["dx"]))
+    y0 = max(0, box[1] + int(zone["dy"]))
+    x1 = min(fw, box[0] + int(zone["dx"]) + int(zone["width"]))
+    y1 = min(fh, box[1] + int(zone["dy"]) + int(zone["height"]))
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        return None
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
+def wire_position_names(count: int, direction: str) -> List[str]:
+    """What an operator calls each wire position: Left / Middle / Right, and
+    so on, falling back to numbers where words run out."""
+    a, m, b = ("Left", "Middle", "Right") if direction == "lr" else ("Top", "Middle", "Bottom")
+    if count == 1:
+        return ["Wire"]
+    if count == 2:
+        return [a, b]
+    if count == 3:
+        return [a, m, b]
+    return ["%d%s" % (i + 1, " (%s)" % a.lower() if i == 0 else
+                      " (%s)" % b.lower() if i == count - 1 else "")
+            for i in range(count)]
 
 
 def get_vision_controller() -> "VisionController":
@@ -193,6 +329,29 @@ class VisionController:
     def get_mapped_parts(self) -> dict:
         return dict(self.config.get("part_mapping", {}))
 
+    # ── Wire checks ─────────────────────────────────────────────────────────
+
+    def wire_checks(self, part_number: str) -> Dict[int, dict]:
+        """{object index: {"colors", "direction", "zone"}} for a part."""
+        raw = self.config.get("wire_checks", {}).get(part_number, {})
+        return {int(k): v for k, v in raw.items() if v and v.get("colors")}
+
+    def set_wire_check(self, part_number: str, k: int, check: Optional[dict]):
+        """Save (or with None, remove) the wire check of object `k`."""
+        all_checks = self.config.setdefault("wire_checks", {})
+        part = all_checks.setdefault(part_number, {})
+        if check:
+            part[str(k)] = {
+                "colors": list(check["colors"]),
+                "direction": check.get("direction", "lr"),
+                "zone": {n: int(check["zone"][n]) for n in ("dx", "dy", "width", "height")},
+            }
+        else:
+            part.pop(str(k), None)
+        if not part:
+            all_checks.pop(part_number, None)
+        save_vision_config(self.config)
+
     # ── Production Inspection ───────────────────────────────────────────────
 
     def inspect(self, part_number: str, frame: Optional[np.ndarray] = None) -> VisionResult:
@@ -262,6 +421,25 @@ class VisionController:
             results.append(ObjectResult(name=obj["name"], ok=best_score >= threshold,
                                        score=best_score, box=best_box))
 
+        # Wire colours, for each object that has a check -- judged only where
+        # the object was actually found, since its box places the wire area.
+        wires = self.wire_checks(part_number)
+        for k, r in enumerate(results):
+            check = wires.get(k)
+            if not check:
+                continue
+            r.wires_expected = list(check["colors"])
+            r.wires_ok = False
+            if r.ok and r.box:
+                r.wire_zone = wire_zone_in_frame(r.box, check["zone"], frame.shape)
+                if r.wire_zone:
+                    r.wires_found = detect_wire_colors(
+                        frame, r.wire_zone, check.get("direction", "lr"), r.wires_expected)
+                    r.wires_ok = r.wires_found == r.wires_expected
+                print(f"[VISION DEBUG] pno={part_number} object={r.name!r} "
+                      f"wires expected={r.wires_expected} found={r.wires_found}")
+                r.ok = r.wires_ok
+
         elapsed = int((time.time() - start) * 1000)
         weakest = min(results, key=lambda r: r.score)
 
@@ -272,11 +450,20 @@ class VisionController:
                 processing_time_ms=elapsed,
                 match_box=weakest.box, frame=frame, objects=results,
             )
-        if len(results) == 1:
-            error = f"No match found (score {weakest.score:.2f} < {threshold})"
-        else:
-            error = "Not found: " + ", ".join(
-                f"{r.name} ({r.score:.2f})" for r in results if not r.ok)
+        missing = [r for r in results if r.score < threshold]
+        errors = []
+        if missing and len(results) == 1:
+            errors.append(f"No match found (score {weakest.score:.2f} < {threshold})")
+        elif missing:
+            errors.append("Not found: " + ", ".join(
+                f"{r.name} ({r.score:.2f})" for r in missing))
+        for r in results:
+            if r.score >= threshold and r.wires_ok is False:
+                errors.append(
+                    ("Wire colours" if len(results) == 1 else f"{r.name} wires") +
+                    f" wrong: expected {'-'.join(r.wires_expected)}, "
+                    f"found {'-'.join(r.wires_found) or 'none'}")
+        error = "; ".join(errors)
         return VisionResult(
             ok=False, judgement="NG", part_number=part_number,
             match_score=weakest.score, threshold=threshold,
@@ -368,6 +555,7 @@ class VisionController:
         if path and os.path.exists(path):
             os.remove(path)
         self.config.get("part_mapping", {}).pop(part_number, None)
+        self.config.get("wire_checks", {}).pop(part_number, None)
         save_vision_config(self.config)
         self._model_cache.pop(part_number, None)
 

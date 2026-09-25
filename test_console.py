@@ -4616,6 +4616,14 @@ def render(parent):
         colors = {"OK": (0, 200, 0), "NG": (0, 0, 255), "ERROR": (0, 165, 255)}  # BGR
         color = colors.get(result.judgement, (0, 165, 255))
         frame = result.frame.copy()
+        # Wire areas first, so the object boxes and labels draw over them.
+        for p in result.objects:
+            if p.wire_zone:
+                wc = colors["OK"] if p.wires_ok else colors["NG"]
+                x, y, w, h = p.wire_zone
+                cv2.rectangle(frame, (x, y), (x + w, y + h), wc, 2)
+                cv2.putText(frame, "-".join(p.wires_found) or "no wires",
+                            (x, y + h + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, wc, 2, cv2.LINE_AA)
         if len(result.objects) > 1:
             # A part checked as several objects: box each where it was found,
             # coloured by its own verdict, so a NG shows which object is missing.
