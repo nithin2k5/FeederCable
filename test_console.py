@@ -4531,13 +4531,15 @@ def render(parent):
         top.wait_window(dlg)
         return answer["go"]
 
-    def _next_part():
-        """Switch to a different part without ending the operator's session.
+    def _next_part(reset_emp=False):
+        """Switch to a different part.
 
-        Only the part is released: the employee stays validated, so the
-        operator just types the new part number and rescans its JIG. The
-        records panel widens back to the whole day until the new part loads,
-        at which point it narrows to that part.
+        The part is always released. The NEXT PART button also clears the
+        employee ID (reset_emp), so whoever runs the next part signs in as
+        themselves rather than testing under the last operator's ID; a
+        mistyped part number keeps it, since the same operator is retyping.
+        The records panel widens back to the whole day until the new part
+        loads, at which point it narrows to that part.
         """
         if state["test_running"]:
             _log("Test in progress — finish it before changing part."); return
@@ -4558,15 +4560,18 @@ def render(parent):
         done, qty, batch = short_of
         if qty > 0 and 0 < done < qty:
             _log(f"Batch {batch} closed short — {done} of {qty}, no lot label.")
+        if reset_emp:
+            ent_emp.config(state="normal"); ent_emp.delete(0, "end")
         emp = ent_emp.get().strip()
         if not emp:
             ent_emp.config(state="normal", bg="black"); ent_emp.focus_set()
-            _log("Enter Employee ID first."); return
+            _load_today_pass()
+            _log("Enter Employee ID, then the new Part Number."); return
         ent_pno.config(state="normal", bg="black"); ent_pno.focus_set()
         _load_today_pass()
         _log("Ready for the next part — enter the new Part Number.")
 
-    btn_next_part.config(command=_next_part)
+    btn_next_part.config(command=lambda: _next_part(reset_emp=True))
 
     def _on_emp_enter(event=None):
         emp = ent_emp.get().strip()
