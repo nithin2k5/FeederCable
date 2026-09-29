@@ -85,12 +85,12 @@ _ACK_TA = "நான் இந்த வழிமுறைகளைப் பட
 def show_disclaimer(parent_root):
     """The startup safety notice: modal, and dismissable only by acknowledging.
 
-    Monochrome like the rest of the app -- black ground, white type -- and it
-    spends color only where the color carries meaning: red for the hazard,
-    amber for the thing being asked of you, green once the button is live.
+    White ground, black type, so it reads like a printed notice. Color is
+    spent only where it carries meaning: red for the hazard mark, green once
+    the button is live.
     """
-    BG, CARD, RULE = "black", "#0d0d0d", "#262626"
-    DANGER, ACCENT, TEXT, MUTED = "#ff5252", "#e8a000", "#ffffff", "#b0b0b0"
+    BG, CARD, RULE, BADGE = "white", "white", "#cccccc", "#e6e6e6"
+    DANGER, TEXT = "#d32f2f", "black"
     ta = _tamil_family()
 
     # Modal dialog that blocks the main window
@@ -112,9 +112,9 @@ def show_disclaimer(parent_root):
     card.pack(fill="both", expand=True)
 
     tk.Label(card, text="⚠", bg=CARD, fg=DANGER, font=("Arial", 34)).pack()
-    tk.Label(card, text="IMPORTANT SAFETY INSTRUCTIONS", bg=CARD, fg=DANGER,
+    tk.Label(card, text="IMPORTANT SAFETY INSTRUCTIONS", bg=CARD, fg=TEXT,
              font=("Arial", 22, "bold")).pack(pady=(4, 0))
-    tk.Label(card, text="முக்கியப் பாதுகாப்பு வழிமுறைகள்", bg=CARD, fg=ACCENT,
+    tk.Label(card, text="முக்கியப் பாதுகாப்பு வழிமுறைகள்", bg=CARD, fg=TEXT,
              font=(ta, 17, "bold")).pack(pady=(2, 0))
 
     tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=12)
@@ -122,26 +122,26 @@ def show_disclaimer(parent_root):
     intro_en, intro_ta = _SAFETY_INTRO
     tk.Label(card, text=intro_en, bg=CARD, fg=TEXT, font=("Arial", 14),
              justify="center").pack()
-    tk.Label(card, text=intro_ta, bg=CARD, fg=MUTED, font=(ta, 13),
+    tk.Label(card, text=intro_ta, bg=CARD, fg=TEXT, font=(ta, 13),
              justify="center").pack(pady=(4, 0))
 
     tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=12)
 
-    # Each rule is numbered in an amber badge down the left, the English and
+    # Each rule is numbered in a grey badge down the left, the English and
     # the Tamil sharing one text column so a rule reads as one item in a list
     # of three rather than as two lists of three.
     rules = tk.Frame(card, bg=CARD)
     rules.pack(fill="x")
     rules.columnconfigure(1, weight=1)
     for i, (en, tam) in enumerate(_SAFETY_RULES):
-        tk.Label(rules, text=str(i + 1), bg="#1a1a1a", fg=ACCENT,
+        tk.Label(rules, text=str(i + 1), bg=BADGE, fg=TEXT,
                  font=("Arial", 13, "bold"), width=3, pady=2).grid(
             row=i, column=0, sticky="n", pady=(0, 10))
         body = tk.Frame(rules, bg=CARD)
         body.grid(row=i, column=1, sticky="ew", padx=(14, 0), pady=(0, 10))
         tk.Label(body, text=en, bg=CARD, fg=TEXT, font=("Arial", 14),
                  anchor="w", justify="left").pack(fill="x")
-        tk.Label(body, text=tam, bg=CARD, fg=MUTED, font=(ta, 13), anchor="w",
+        tk.Label(body, text=tam, bg=CARD, fg=TEXT, font=(ta, 13), anchor="w",
                  justify="left", wraplength=640).pack(fill="x", pady=(1, 0))
 
     tk.Frame(card, bg=RULE, height=1).pack(fill="x", pady=(2, 12))
@@ -153,19 +153,19 @@ def show_disclaimer(parent_root):
             btn_accept.config(state="normal", bg="#1b5e20", fg="white",
                               activebackground="#2e7d32", cursor="hand2")
         else:
-            btn_accept.config(state="disabled", bg="#1a1a1a", fg="#555",
+            btn_accept.config(state="disabled", bg=BADGE, fg="#888",
                               cursor="arrow")
 
     ack = tk.Frame(card, bg=CARD)
     ack.pack()
-    chk = tk.Checkbutton(ack, text=_ACK_EN, variable=chk_var, bg=CARD, fg=ACCENT,
-                         selectcolor="#1a1a1a", activebackground=CARD,
-                         activeforeground=ACCENT, font=("Arial", 14), bd=0,
+    chk = tk.Checkbutton(ack, text=_ACK_EN, variable=chk_var, bg=CARD, fg=TEXT,
+                         selectcolor="white", activebackground=CARD,
+                         activeforeground=TEXT, font=("Arial", 14), bd=0,
                          highlightthickness=0, cursor="hand2", command=on_check)
     chk.pack(anchor="w")
     # The Tamil line ticks the box too. It is the same sentence, and the
     # operator reading that line is the one being asked to tick it.
-    ack_ta = tk.Label(ack, text=_ACK_TA, bg=CARD, fg=MUTED, font=(ta, 13),
+    ack_ta = tk.Label(ack, text=_ACK_TA, bg=CARD, fg=TEXT, font=(ta, 13),
                       cursor="hand2")
     ack_ta.pack(anchor="w", padx=(26, 0))
     ack_ta.bind("<Button-1>", lambda _e: (chk.toggle(), on_check()))
@@ -174,7 +174,7 @@ def show_disclaimer(parent_root):
         dialog.destroy()
 
     btn_accept = tk.Button(card, text="ACCEPT  /  ஏற்கிறேன்", state="disabled",
-                           bg="#1a1a1a", fg="#555", font=(ta, 16, "bold"), bd=0,
+                           bg=BADGE, fg="#888", font=(ta, 16, "bold"), bd=0,
                            padx=54, pady=10, activeforeground="white",
                            command=on_accept)
     btn_accept.pack(pady=(14, 2))
