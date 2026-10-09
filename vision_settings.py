@@ -67,10 +67,12 @@ def _load_cam_cfg() -> dict:
         "height":  cfg.getint("CAMERA", "cam1_height", fallback=480),
         "enabled": cfg.getboolean("CAMERA", "cam1_enabled", fallback=False),
         "flip":    cfg.getboolean("CAMERA", "cam1_flip", fallback=False),
+        "mirror":  cfg.getboolean("CAMERA", "cam1_mirror", fallback=False),
     }
 
 
-def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool = False):
+def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool = False,
+                  mirror: bool = False):
     """Update cam1_* in place, leaving cam2_* and any other keys untouched."""
     import configparser
     cfg = configparser.ConfigParser()
@@ -82,6 +84,7 @@ def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool
     cfg.set("CAMERA", "cam1_height", str(height))
     cfg.set("CAMERA", "cam1_enabled", str(bool(enabled)))
     cfg.set("CAMERA", "cam1_flip", str(bool(flip)))
+    cfg.set("CAMERA", "cam1_mirror", str(bool(mirror)))
     with open(_CAM_CFG_PATH, "w") as f:
         cfg.write(f)
 
@@ -825,7 +828,8 @@ def render(parent):
         configured = cam["enabled"] and idx >= 0
         cam_device.config(text=("Camera %d" % idx) if configured else "Not configured",
                           fg=TXT if configured else TXT_FAINT)
-        cam_res.config(text=("%d x %d" % (w, h) + ("  ·  flipped" if cam["flip"] else ""))
+        flips = [t for t, on in (("flipped", cam["flip"]), ("mirrored", cam["mirror"])) if on]
+        cam_res.config(text="  ·  ".join(["%d x %d" % (w, h)] + flips)
                        if configured else "—",
                        fg=TXT if configured else TXT_FAINT)
 
@@ -1172,6 +1176,24 @@ def _dialog(parent, title, width, height):
     return win
 
 
+def _work_area(widget):
+    """(x, y, width, height) of the screen minus the taskbar. Falls back to the
+    whole screen less a taskbar's worth where Windows can't be asked."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        rect = wintypes.RECT()
+        # SPI_GETWORKAREA
+        if ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0):
+            # On this rig Windows reports the whole screen as the work area,
+            # taskbar included, so always keep a taskbar's height clear.
+            h = min(rect.bottom - rect.top, widget.winfo_screenheight() - 48)
+            return rect.left, rect.top, rect.right - rect.left, h
+    except Exception:
+        pass
+    return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight() - 48
+
+
 def _dialog_header(win, title, subtitle, compact=False):
     """Title strip. `compact` puts the subtitle beside the title on one slim
     line, for a dialog whose every spare pixel of height goes to an image."""
@@ -1226,15 +1248,14 @@ def _open_teach_wizard(parent, cam, part_number=None):
     threshold = (info or {}).get(
         "threshold", ctrl.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
 
-    win = _dialog(parent, "Teach Part", 1120, 720)
-    # Open filling the screen: the image is where every box is drawn, and the
-    # more pixels it gets the more precisely a box lands on the same spot of
-    # the part in every reference -- which is what the match scores rest on.
-    # 1120x720 stays as the size it restores to.
-    try:
-        win.state("zoomed")
-    except tk.TclError:
-        pass
+    # As large as fits comfortably: the image is where every box is drawn, and
+    # the more pixels it gets the more precisely a box lands on the same spot
+    # of the part in every reference. Not maximised -- that left Save Dataset
+    # under the taskbar -- but sized inside the work area with room to spare.
+    wx, wy, ww, wh = _work_area(parent)
+    tw, th = max(900, int(ww * 0.92)), max(600, wh - 90)
+    win = _dialog(parent, "Teach Part", tw, th)
+    win.geometry("%dx%d+%d+%d" % (tw, th, wx + (ww - tw) // 2, wy + 10))
     _dialog_header(
         win,
         "Re-teach “%s”" % part_number if reteach else "Teach New Part",
@@ -2465,8 +2486,15 @@ def _open_camera_dialog(parent):
                    activeforeground=TXT, font=("Arial", 11, "bold"), bd=0,
                    highlightthickness=0, anchor="w", cursor="hand2",
                    command=lambda: _apply_flip()).pack(fill="x", pady=(10, 0))
-    tk.Label(cb_body, text="For a camera mounted upside down. Parts taught before "
-                           "changing this must be re-taught.",
+    mirror_var = tk.BooleanVar(value=cam["mirror"])
+    tk.Checkbutton(cb_body, text="  Flip image left to right", variable=mirror_var,
+                   bg=PANEL, fg=TXT, selectcolor=FIELD, activebackground=PANEL,
+                   activeforeground=TXT, font=("Arial", 11, "bold"), bd=0,
+                   highlightthickness=0, anchor="w", cursor="hand2",
+                   command=lambda: _apply_flip()).pack(fill="x", pady=(4, 0))
+    tk.Label(cb_body, text="For a camera mounted upside down or seeing the part "
+                           "mirrored. Parts taught before changing these must be "
+                           "re-taught.",
              bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
              justify="left", anchor="w").pack(fill="x")
 
@@ -2500,7 +2528,7 @@ def _open_camera_dialog(parent):
         """Show the flip on the preview straight away. Only Save writes it; any
         other way out puts the saved orientation back (see _close)."""
         if stream["index"] is not None:
-            camera.preview_flip(stream["index"], flip_var.get())
+            camera.preview_flip(stream["index"], flip_var.get(), mirror_var.get())
 
     def _on_device_change(*_a):
         idx = _selected_index()
@@ -2592,7 +2620,7 @@ def _open_camera_dialog(parent):
                     "No frames have arrived from camera %d yet.\n\nSave anyway?" % idx,
                     parent=win):
                 return
-        _save_cam_cfg(idx, w, h, idx >= 0, flip_var.get())
+        _save_cam_cfg(idx, w, h, idx >= 0, flip_var.get(), mirror_var.get())
         changed["v"] = True
         _close()
 

@@ -1686,6 +1686,8 @@ def _load_cam_cfg() -> dict:
         "cam2_enabled": cfg.getboolean("CAMERA", "cam2_enabled", fallback=False),
         "cam1_flip":    cfg.getboolean("CAMERA", "cam1_flip",    fallback=False),
         "cam2_flip":    cfg.getboolean("CAMERA", "cam2_flip",    fallback=False),
+        "cam1_mirror":  cfg.getboolean("CAMERA", "cam1_mirror",  fallback=False),
+        "cam2_mirror":  cfg.getboolean("CAMERA", "cam2_mirror",  fallback=False),
     }
 
 class CameraFeed:
@@ -2035,7 +2037,7 @@ def render(parent):
         cmb_r.current(r_idx)
         cmb_r.grid(row=1, column=1, padx=5, pady=5)
 
-        # For a camera mounted upside down. Applied in vision_engine.camera, so
+        # For a camera mounted upside down or seeing the part mirrored. Applied in vision_engine.camera, so
         # the preview, both panels, teaching and the vision check all see it.
         flip_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_flip"])
         tk.Checkbutton(lf, text="Flip image top to bottom", variable=flip_var,
@@ -2043,9 +2045,15 @@ def render(parent):
                        activeforeground="white", font=("Arial", _fs(10)),
                        command=lambda: _apply_flip()).grid(row=2, column=0, columnspan=2,
                                                           padx=5, pady=(5, 0), sticky="w")
-        tk.Label(lf, text="Parts taught before changing this must be re-taught.",
+        mirror_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_mirror"])
+        tk.Checkbutton(lf, text="Flip image left to right", variable=mirror_var,
+                       bg="#222", fg="white", selectcolor="#111", activebackground="#222",
+                       activeforeground="white", font=("Arial", _fs(10)),
+                       command=lambda: _apply_flip()).grid(row=3, column=0, columnspan=2,
+                                                          padx=5, sticky="w")
+        tk.Label(lf, text="Parts taught before changing these must be re-taught.",
                  bg="#222", fg="#888", font=("Arial", _fs(9))).grid(
-                     row=3, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="w")
+                     row=4, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="w")
 
         # Live preview. Choosing between "Camera 0" and "Camera 1" from a
         # dropdown is guesswork on a rig with two identical USB cameras --
@@ -2071,7 +2079,7 @@ def render(parent):
             """Show the flip on the preview straight away; only Save keeps it."""
             d_sel = cmb_c.current()
             if _cv2_ok and d_sel > 0:
-                camera.preview_flip(cam_indices[d_sel], flip_var.get())
+                camera.preview_flip(cam_indices[d_sel], flip_var.get(), mirror_var.get())
 
         def _start_preview(*_a):
             """(Re)open the preview for whatever the two dropdowns now say."""
@@ -2128,6 +2136,7 @@ def render(parent):
             cfg[f"cam{cam_id}_width"] = resolutions[r_sel][1]
             cfg[f"cam{cam_id}_height"] = resolutions[r_sel][2]
             cfg[f"cam{cam_id}_flip"] = flip_var.get()
+            cfg[f"cam{cam_id}_mirror"] = mirror_var.get()
             
             import configparser
             new_cam = configparser.ConfigParser()

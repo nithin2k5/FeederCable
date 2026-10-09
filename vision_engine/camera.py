@@ -20,40 +20,46 @@ import numpy as np
 _REGISTRY_LOCK = threading.Lock()
 _STREAMS: dict = {}
 
-# Device index -> flip the picture top to bottom. Applied to every frame the
-# stream serves, so the live previews, teaching, Run Test and the line all see
-# the same orientation -- a taught template only matches frames flipped the
-# way its references were.
+# Device index -> (flip top to bottom, mirror left to right). Applied to every
+# frame the stream serves, so the live previews, teaching, Run Test and the line
+# all see the same orientation -- a taught template only matches frames flipped
+# the way its references were.
 _CAM_CFG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "camera_cfg.ini")
+_NO_FLIP = (False, False)
 _FLIP: dict = {}
 # Unsaved flips a settings dialog is previewing. Kept apart from _FLIP so that
 # a device opening (which re-reads the config) cannot undo them mid-preview.
 _FLIP_PREVIEW: dict = {}
 
+# (vertical, horizontal) -> cv2.flip code.
+_FLIP_CODES = {(True, False): 0, (False, True): 1, (True, True): -1}
 
-def _flipped(index: int) -> bool:
-    return _FLIP_PREVIEW.get(index, _FLIP.get(index, False))
+
+def _flipped(index: int) -> tuple:
+    return _FLIP_PREVIEW.get(index, _FLIP.get(index, _NO_FLIP))
 
 
 def reload_flips():
-    """Re-read each configured camera's flip setting from camera_cfg.ini.
-    Running streams consult it on every frame, so a saved change shows at once."""
+    """Re-read each configured camera's flip settings from camera_cfg.ini.
+    Running streams consult them on every frame, so a saved change shows at once."""
     cfg = configparser.ConfigParser()
     cfg.read(_CAM_CFG_PATH)
     flips = {}
     for cid in (1, 2):
         index = cfg.getint("CAMERA", f"cam{cid}_index", fallback=-1)
         if index >= 0 and cfg.getboolean("CAMERA", f"cam{cid}_enabled", fallback=False):
-            flips[index] = flips.get(index, False) or cfg.getboolean(
-                "CAMERA", f"cam{cid}_flip", fallback=False)
+            v, h = flips.get(index, _NO_FLIP)
+            flips[index] = (
+                v or cfg.getboolean("CAMERA", f"cam{cid}_flip", fallback=False),
+                h or cfg.getboolean("CAMERA", f"cam{cid}_mirror", fallback=False))
     _FLIP.clear()
     _FLIP.update(flips)
 
 
-def preview_flip(index: int, flip: bool):
+def preview_flip(index: int, flip: bool, mirror: bool = False):
     """Flip one device's frames without touching the config, for a settings
     dialog to show the choice live. end_flip_preview() drops it again."""
-    _FLIP_PREVIEW[index] = bool(flip)
+    _FLIP_PREVIEW[index] = (bool(flip), bool(mirror))
 
 
 def end_flip_preview():
@@ -109,8 +115,9 @@ class CameraStream:
         while self._running:
             ret, frame = self._cap.read()
             if ret:
-                if _flipped(self.index):
-                    frame = cv2.flip(frame, 0)
+                code = _FLIP_CODES.get(_flipped(self.index))
+                if code is not None:
+                    frame = cv2.flip(frame, code)
                 with self._frame_lock:
                     self._frame = frame
                     self._frames_read += 1
