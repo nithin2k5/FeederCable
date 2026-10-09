@@ -1160,18 +1160,26 @@ MAX_REFS = 12
 OBJECT_COLORS = (OK_GREEN, "#40c4ff", "#ff80ab")
 
 
-def _dialog(parent, title, width, height):
-    """Modal toplevel, centred on the app window, styled like the page."""
+def _dialog(parent, title, width, height, x=None, y=None):
+    """Modal toplevel, centred on the app window (or at x, y), styled like the
+    page."""
     win = tk.Toplevel(parent)
+    # Hidden until it has its size and place: the update_idletasks below would
+    # otherwise map it at Tk's default 200x200 first, a small window flashing
+    # up and vanishing before the real one appears.
+    win.withdraw()
     win.title(title)
     win.configure(bg=BG)
     win.transient(parent.winfo_toplevel())
     win.resizable(True, True)
     root = parent.winfo_toplevel()
     root.update_idletasks()
-    x = root.winfo_rootx() + (root.winfo_width() - width) // 2
-    y = root.winfo_rooty() + (root.winfo_height() - height) // 3
+    if x is None:
+        x = root.winfo_rootx() + (root.winfo_width() - width) // 2
+    if y is None:
+        y = root.winfo_rooty() + (root.winfo_height() - height) // 3
     win.geometry("%dx%d+%d+%d" % (width, height, max(x, 0), max(y, 0)))
+    win.deiconify()
     win.grab_set()
     return win
 
@@ -1254,8 +1262,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     # under the taskbar -- but sized inside the work area with room to spare.
     wx, wy, ww, wh = _work_area(parent)
     tw, th = max(900, int(ww * 0.92)), max(600, wh - 90)
-    win = _dialog(parent, "Teach Part", tw, th)
-    win.geometry("%dx%d+%d+%d" % (tw, th, wx + (ww - tw) // 2, wy + 10))
+    win = _dialog(parent, "Teach Part", tw, th, wx + (ww - tw) // 2, wy + 10)
     _dialog_header(
         win,
         "Re-teach “%s”" % part_number if reteach else "Teach New Part",
