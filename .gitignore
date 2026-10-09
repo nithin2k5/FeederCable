@@ -21,3 +21,6 @@ dist/
 FeederCable.spec
 .install.lock/
 .build.stamp
+
+# Native crash traces written by faulthandler (see main.py)
+crash.log

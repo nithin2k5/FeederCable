@@ -34,6 +34,19 @@ def _exit_if_already_running():
 if __name__ == "__main__":
     _exit_if_already_running()
 
+# A crash inside native code (OpenCV, the camera driver) kills the process with
+# no Python traceback, and the windowed build has no console to show one
+# anyway. faulthandler writes the stack of every thread to crash.log beside the
+# app at the moment of the crash, so "it just closed" leaves something to read.
+_crash_log = None
+try:
+    import faulthandler
+    import os
+    _crash_log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash.log"), "a")
+    faulthandler.enable(file=_crash_log, all_threads=True)
+except Exception:
+    pass
+
 import tkinter as tk
 from tkinter import ttk
 import datetime

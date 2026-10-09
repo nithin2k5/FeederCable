@@ -19,6 +19,12 @@ import numpy as np
 
 _REGISTRY_LOCK = threading.Lock()
 _STREAMS: dict = {}
+# Index -> the reader thread of the newest stream ever opened on it, live or
+# closing. A new stream waits for it before opening the device; see _loop.
+_LAST_READER: dict = {}
+
+# How long a new stream waits for the previous one on its device to let go.
+_HANDOVER_TIMEOUT = 10.0
 
 # Device index -> (flip top to bottom, mirror left to right). Applied to every
 # frame the stream serves, so the live previews, teaching, Run Test and the line
@@ -87,6 +93,7 @@ class CameraStream:
         self._opened = threading.Event()
         self._open_ok = False
         self._thread = None
+        self._prev_reader = None
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -96,6 +103,27 @@ class CameraStream:
         self._thread.start()
 
     def _loop(self):
+        # One cv2.VideoCapture per device at a time. release() only waits 2s
+        # for its reader, and a DirectShow open alone can take longer, so a
+        # stream released mid-open (a background camera check, say, just as
+        # Teach New Part opens) could still be holding the device when the
+        # next stream opened it -- two captures on one device, which crashes
+        # the process outright. Waiting here, on the reader thread, keeps
+        # the UI responsive while it happens.
+        prev = self._prev_reader
+        self._prev_reader = None
+        if prev is not None:
+            prev.join(_HANDOVER_TIMEOUT)
+            if prev.is_alive():
+                # Still stuck in the driver; opening now is the crash itself.
+                self._running = False
+                self._opened.set()
+                return
+        if not self._running:
+            # Released while waiting -- never open the device at all.
+            self._opened.set()
+            return
+
         cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
@@ -201,7 +229,10 @@ def acquire(index: int, width: int = 640, height: int = 480) -> Optional[CameraS
             stream = CameraStream(index, width, height)
             _STREAMS[index] = stream
             stream._refs = 1
+            prev = _LAST_READER.get(index)
+            stream._prev_reader = prev if prev is not None and prev.is_alive() else None
             stream._start()
+            _LAST_READER[index] = stream._thread
         else:
             stream._refs += 1
     return stream
