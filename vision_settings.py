@@ -1178,7 +1178,7 @@ def _dialog_header(win, title, subtitle, compact=False):
     bar = tk.Frame(win, bg=PANEL)
     bar.pack(fill="x")
     inner = tk.Frame(bar, bg=PANEL)
-    inner.pack(fill="x", padx=18, pady=6 if compact else 12)
+    inner.pack(fill="x", padx=18, pady=3 if compact else 12)
     side = "left" if compact else "top"
     tk.Label(inner, text=title, bg=PANEL, fg=TXT,
              font=("Arial", 14 if compact else 15, "bold")).pack(side=side, anchor="w")
@@ -1269,19 +1269,19 @@ def _open_teach_wizard(parent, cam, part_number=None):
     foot.pack(side="bottom", fill="x")
     tk.Frame(win, bg=LINE, height=1).pack(side="bottom", fill="x")
     foot_in = tk.Frame(foot, bg=PANEL)
-    foot_in.pack(fill="x", padx=18, pady=12)
+    foot_in.pack(fill="x", padx=18, pady=5)
 
     checklist = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Consolas", 11),
                          anchor="w", justify="left")
     checklist.pack(side="left")
 
-    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=12, pady=8)
+    btn_save = _btn(foot_in, "Save Dataset", BTN_SUCCESS, font_size=12, pady=4)
     btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=8)
+    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=4)
     btn_cancel.pack(side="right", padx=(0, 8))
 
     body = tk.Frame(win, bg=BG)
-    body.pack(fill="both", expand=True, padx=10, pady=8)
+    body.pack(fill="both", expand=True, padx=10, pady=4)
     body.columnconfigure(0, weight=1)
     body.rowconfigure(0, weight=1)
 
@@ -1297,7 +1297,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     view.pack(fill="both", expand=True, padx=1, pady=1)
 
     view_bar = tk.Frame(left, bg=BG)
-    view_bar.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+    view_bar.grid(row=1, column=0, sticky="ew", pady=(4, 0))
     frame_lbl = tk.Label(view_bar, text="", bg=BG, fg=TXT_DIM, font=("Consolas", 11))
     frame_lbl.pack(side="right")
     btn_live = _btn(view_bar, "Live View", BTN_NEUTRAL)
