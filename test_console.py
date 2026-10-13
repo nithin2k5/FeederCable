@@ -4022,12 +4022,13 @@ def render(parent):
                         vision_failed.append(cid)
                     elif not r.ok:
                         _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}"
-                             + (f" — {r.error}" if len(r.objects) > 1 else ""))
+                             + (f" — {r.error}" if len(r.objects) > 1 or r.wires else ""))
                         vision_failed.append(cid)
                     else:
                         _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms"
                              + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
-                                if len(r.objects) > 1 else ""))
+                                if len(r.objects) > 1 else "")
+                             + "".join(f"; {w.name}: {' > '.join(w.found)}" for w in r.wires))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -4779,6 +4780,19 @@ def render(parent):
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
             cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",
                         (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+        # Wire-colour checks: the wire box by its verdict, and the colours
+        # found in it in wire order, so a NG shows what was seen.
+        for w in result.wires:
+            if not w.box:
+                continue
+            wc = colors["OK"] if w.ok else colors["NG"]
+            x, y, bw, bh = w.box
+            cv2.rectangle(frame, (x, y), (x + bw, y + bh), wc, 2)
+            for _cname, (bx, by, bbw, bbh) in w.blobs:
+                cv2.rectangle(frame, (bx, by), (bx + bbw, by + bbh), (255, 255, 0), 1)
+            cv2.putText(frame, " > ".join(w.found) or "no wires",
+                        (x, min(frame.shape[0] - 4, y + bh + 14)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, wc, 1, cv2.LINE_AA)
         return frame
 
     def _show_vision_frame(result, cam_id=None):
