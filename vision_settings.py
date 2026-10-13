@@ -2269,6 +2269,15 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
                 text="Every object was found but a wire check failed. If the wires are "
                      "really in the right order, check that the wire box covers only "
                      "the wires with “Wire Colours…”.", fg=WARN)
+        elif result.judgement == "NG" and result.wires and all(w_r.ok for w_r in result.wires):
+            # Wires passing beside an NG reads as a wire problem unless the
+            # hint says plainly that the NG is the part's own objects.
+            hint.config(
+                text="The wire checks passed. The NG is the part's own objects: %s "
+                     "must each reach %.2f. Their red boxes show where the closest "
+                     "match landed — if that is not on the part, they were taught on "
+                     "something else, and the part needs re-teaching."
+                     % (", ".join(p.name for p in result.objects if not p.ok), thr), fg=WARN)
         elif result.judgement == "NG" and multi:
             hint.config(
                 text="Every object must reach %.2f. If %s is genuinely present and "
