@@ -58,6 +58,16 @@ DEFAULT_WIRE_MIN_AREA_PCT = 2.0
 # anything darker than this share of it, and not strongly coloured, is black.
 WIRE_BLACK_REL = 0.62
 WIRE_BLACK_MAX_SAT = 160
+# A check saved with a reference -- each wire as it looked on a good part --
+# also needs every wire within these limits of it. Position is the wire's
+# centre across the box (0 = first side, 1 = last side); colour is the
+# distance in OpenCV's 8-bit Lab, with lightness counted at half weight so a
+# brighter or dimmer frame is not mistaken for a different colour; size is the
+# wire's share of the box. Together they stop a shadow or a fixture edge that
+# merely has the right colour from passing for a wire.
+WIRE_REF_POS_TOL = 0.25
+WIRE_REF_COLOR_TOL = 32.0
+WIRE_REF_AREA_RATIO = 3.0
 
 # OpenCV HSV (H 0-179, S and V 0-255). Pixels are classed in this order and a
 # pixel takes the first colour it fits, so the classes never overlap: black
@@ -106,6 +116,10 @@ class WireResult:
     ok: bool
     expected: List[str] = field(default_factory=list)
     found: List[str] = field(default_factory=list)          # in wire order
+    # One measurement per wire picked, in wire order: {"color", "pos" (centre
+    # across the box, 0..1), "lab" (mean colour), "area" (share of the box)}
+    # -- what a reference is learned from and compared against.
+    stats: List[dict] = field(default_factory=list)
     # One (colour, (x, y, w, h)) per wire blob picked, in frame coordinates.
     blobs: List[Tuple[str, Tuple[int, int, int, int]]] = field(default_factory=list)
     box: Optional[Tuple[int, int, int, int]] = None         # the wire box in frame
@@ -164,6 +178,25 @@ def save_vision_config(cfg: dict):
 
 def get_vision_controller() -> "VisionController":
     return VisionController()
+
+
+def _against_reference(stats: List[dict], reference: Optional[List[dict]]) -> Optional[str]:
+    """Why these wires don't match the good part's, or None if they do (or
+    there is no usable reference to hold them to)."""
+    if not reference or len(reference) != len(stats):
+        return None
+    for st, ref in zip(stats, reference):
+        what = st["color"] + " wire"
+        if abs(st["pos"] - ref["pos"]) > WIRE_REF_POS_TOL:
+            return what + " is not where it was on the good part"
+        (l1, a1, b1), (l2, a2, b2) = st["lab"], ref["lab"]
+        dist = (((l1 - l2) * 0.5) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2) ** 0.5
+        if dist > WIRE_REF_COLOR_TOL:
+            return what + " is a different shade from the good part"
+        ratio = st["area"] / max(ref["area"], 1e-6)
+        if not 1.0 / WIRE_REF_AREA_RATIO <= ratio <= WIRE_REF_AREA_RATIO:
+            return what + " is a different size from the good part"
+    return None
 
 
 class VisionController:
@@ -344,14 +377,17 @@ class VisionController:
 
     def check_wires(self, frame: np.ndarray, box: Tuple[int, int, int, int],
                     expected: List[str], direction: str = "ltr",
-                    name: str = "Wires") -> WireResult:
+                    name: str = "Wires",
+                    reference: Optional[List[dict]] = None) -> WireResult:
         """Find each expected colour inside `box` and check their order.
 
         Every pixel is classed against the palette (first fitting colour wins).
         Each expected colour takes as many of its largest blobs as it appears in
         the sequence; the picked blobs, ordered along the wires' direction
         ("ltr" = left to right, "ttb" = top to bottom), must spell out the
-        expected sequence exactly.
+        expected sequence exactly. With a `reference` -- the stats of the same
+        check on a good part -- each wire must also sit, look and measure like
+        its counterpart there.
         """
         expected = [c.lower() for c in expected]
         x, y, w, h = box
@@ -367,7 +403,9 @@ class VisionController:
             result.error = "unknown colour " + ", ".join(unknown)
             return result
 
-        hsv = cv2.cvtColor(cv2.GaussianBlur(roi, (5, 5), 0), cv2.COLOR_BGR2HSV)
+        blurred = cv2.GaussianBlur(roi, (5, 5), 0)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(blurred, cv2.COLOR_BGR2LAB)
         # The background is most of a well-drawn box, so its upper-quartile
         # brightness stands for the board behind the wires.
         black_rel = None
@@ -392,29 +430,38 @@ class VisionController:
         min_area = max(12, int(w * h * pct / 100.0))
         kernel = np.ones((3, 3), np.uint8)
         axis = 1 if direction == "ttb" else 0
-        picked = []         # (position along the wires, colour, (x, y, w, h))
+        extent = float(h if direction == "ttb" else w)
+        picked = []         # (position along the wires, colour, (x, y, w, h), stats)
         missing = []
         for cname in dict.fromkeys(expected):
             need = expected.count(cname)
             m = cv2.morphologyEx(masks[cname], cv2.MORPH_OPEN, kernel)
-            n, _, stats, cents = cv2.connectedComponentsWithStats(m)
+            n, labels, stats, cents = cv2.connectedComponentsWithStats(m)
             blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area),
                            key=lambda i: -stats[i, cv2.CC_STAT_AREA])[:need]
             if len(blobs) < need:
                 missing.append(cname)
             for i in blobs:
                 bx, by, bw, bh = (int(v) for v in stats[i, :4])
-                picked.append((float(cents[i][axis]), cname, (x + bx, y + by, bw, bh)))
+                pos = float(cents[i][axis])
+                picked.append((pos, cname, (x + bx, y + by, bw, bh), {
+                    "color": cname,
+                    "pos": round(pos / extent, 4),
+                    "lab": [round(float(v), 1) for v in lab[labels == i].mean(axis=0)],
+                    "area": round(float(stats[i, cv2.CC_STAT_AREA]) / (w * h), 5),
+                }))
 
         picked.sort(key=lambda t: t[0])
-        result.found = [c for _, c, _ in picked]
-        result.blobs = [(c, b) for _, c, b in picked]
+        result.found = [c for _, c, _, _ in picked]
+        result.blobs = [(c, b) for _, c, b, _ in picked]
+        result.stats = [st for _, _, _, st in picked]
         if missing:
             result.error = "no " + ", ".join(missing) + " wire found"
         elif result.found != expected:
             result.error = "saw " + " → ".join(result.found)
         else:
-            result.ok = True
+            result.error = _against_reference(result.stats, reference)
+            result.ok = result.error is None
         return result
 
     def _run_wire_checks(self, checks: List[dict], objects: List[ObjectResult],
@@ -433,7 +480,8 @@ class VisionController:
                                       error="wire box falls outside the frame"))
                 continue
             out.append(self.check_wires(frame, box, c.get("colors", []),
-                                        c.get("direction", "ltr"), name))
+                                        c.get("direction", "ltr"), name,
+                                        reference=c.get("reference")))
         return out
 
     # ── Production Inspection ───────────────────────────────────────────────
@@ -678,6 +726,9 @@ class VisionController:
             off = c.get("offset")
             if not off:
                 raise ValueError(f"“{c.get('name')}” has no wire box drawn.")
+            ref = c.get("reference")
+            if ref is not None and len(ref) != len(colors):
+                raise ValueError(f"“{c.get('name')}” reference does not match its wires.")
             clean.append({
                 "name": (c.get("name") or "").strip() or f"Wires {len(clean) + 1}",
                 "object": int(c.get("object", 0)),
@@ -685,6 +736,7 @@ class VisionController:
                 "colors": colors,
                 "direction": "ttb" if c.get("direction") == "ttb" else "ltr",
                 "follow": bool(c.get("follow", True)),
+                "reference": ref,
             })
         # Wire checks are all or nothing across the connectors: a part checked
         # on one connector only would pass with the other one's wires swapped.

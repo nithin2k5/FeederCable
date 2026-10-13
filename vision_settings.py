@@ -2741,7 +2741,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
         if c is None or b is None:
             return None
         return ctrl.check_wires(shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
-                                c["colors"], c["direction"], c["name"])
+                                c["colors"], c["direction"], c["name"],
+                                reference=c.get("reference"))
 
     def _paint_seen(c, result):
         if c is None:
@@ -2771,7 +2772,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
         seen = " → ".join(result.found) or "nothing"
         seen_lbl.config(text=("✓  " if result.ok else "✗  ") + seen,
                         fg=OK_GREEN if result.ok else NG_RED)
-        note = "Matches the order set." if result.ok else \
+        note = ("Matches the good part saved for this check." if c.get("reference")
+                else "Order matches. Save records this frame as the good part: "
+                     "each wire's colour, place and size.") if result.ok else \
             "Expected %s — %s." % (" → ".join(result.expected), result.error)
         seen_note.config(text=note, fg=TXT_DIM if result.ok else WARN)
 
@@ -2814,6 +2817,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         while len(cols) < n:
             cols.append(palette_names[0])
         c["colors"] = cols
+        c["reference"] = None
         _refresh()
 
     def _on_edit(*_a):
@@ -2821,6 +2825,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         if loading["v"] or c is None:
             return
         c["name"] = name_var.get()
+        before = (list(c["colors"]), c["direction"])
         c["direction"] = dir_keys.get(dir_var.get(), "ltr")
         new_k = object_names.index(anchor_var.get()) if anchor_var.get() in object_names \
             else c["object"]
@@ -2834,6 +2839,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
         for i in range(len(c["colors"])):
             if color_vars[i].get():
                 c["colors"][i] = color_vars[i].get()
+        if (c["colors"], c["direction"]) != before:
+            c["reference"] = None
         _refresh()
 
     def _toggle_follow():
@@ -2866,6 +2873,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         _refresh()
 
     def _store_box(c, roi):
+        c["reference"] = None       # learned for the old box; Save learns anew
         anchor = _anchor_box(c)
         if roi is None or anchor is None:
             c["offset"] = None
@@ -3008,6 +3016,37 @@ def _open_wire_dialog(parent, ctrl, part_number):
             messagebox.showerror("Wire Colours", "Draw a box for: %s" % ", ".join(undrawn),
                                  parent=win)
             return
+        # Every check is recorded from the frame on screen as the good part --
+        # each wire's colour, place and size -- so the line can tell a real wire
+        # from a shadow or fixture edge that only has the right colour. That
+        # frame has to show every check passing, or a box drawn on background
+        # would be learned as "good".
+        if checks and shot["frame"] is None:
+            messagebox.showerror("Wire Colours",
+                                 "Capture a frame of a good part first — Save records "
+                                 "each wire from it.", parent=win)
+            return
+        failing = []
+        learned = []
+        for i, c in enumerate(checks):
+            b = _box_of(c)
+            r = ctrl.check_wires(shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
+                                 c["colors"], c["direction"], c["name"]) if b else None
+            if r is None or not r.ok:
+                failing.append("  •  %s — %s" % (c["name"].strip() or "Wires %d" % (i + 1),
+                                                  r.error if r else "box not placed"))
+            else:
+                learned.append(r.stats)
+        if failing:
+            messagebox.showerror(
+                "Wire Colours",
+                "Save records each wire from the part on screen as the good part, so "
+                "every check must read ✓ on it first:\n\n%s\n\nPut a good part in "
+                "and Capture Frame, or move the boxes onto its wires." % "\n".join(failing),
+                parent=win)
+            return
+        for c, ref in zip(checks, learned):
+            c["reference"] = ref
         try:
             ctrl.set_model_wire_checks(part_number, checks)
         except Exception as e:
