@@ -3989,8 +3989,10 @@ def render(parent):
                 # part before the electrical tests even ran -- so the switch
                 # read as "fail everything" instead of "skip".
                 _log("Vision disabled in settings — skipping vision verification.")
-            elif not vision_ctrl.has_model(state["pno"]):
-                _log(f"Vision WARNING: No vision model configured for part '{state['pno']}'. Skipping vision.")
+            elif not vision_ctrl.has_vision(state["pno"]):
+                # Object detection and wire checks are separate setups; a part
+                # with either one is inspected.
+                _log(f"Vision WARNING: No vision model or wire checks configured for part '{state['pno']}'. Skipping vision.")
             else:
                 _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
                 # Each enabled camera is inspected in turn against the part's
@@ -4021,14 +4023,18 @@ def render(parent):
                         _log(f"Vision CAM{cid} ERROR: {r.error}")
                         vision_failed.append(cid)
                     elif not r.ok:
-                        _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}"
-                             + (f" — {r.error}" if len(r.objects) > 1 or r.wires else ""))
+                        _log(f"Vision CAM{cid} NG — {r.error}")
                         vision_failed.append(cid)
                     else:
-                        _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms"
-                             + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
-                                if len(r.objects) > 1 else "")
-                             + "".join(f"; {w.name}: {' > '.join(w.found)}" for w in r.wires))
+                        # One part per detection the part has, each with its own result.
+                        parts = []
+                        if r.objects:
+                            parts.append("objects OK (" + ", ".join(
+                                f"{p.name} {p.score:.2f}" for p in r.objects) + ")")
+                        if r.wires:
+                            parts.append("wires OK (" + ", ".join(
+                                f"{w.name}: {' > '.join(w.found)}" for w in r.wires) + ")")
+                        _log(f"Vision CAM{cid} OK in {r.processing_time_ms}ms — " + "; ".join(parts))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -4851,8 +4857,8 @@ def render(parent):
             # Nothing to warn about while vision is switched off -- the cycle
             # will not run it, taught model or not.
             _paint("Ready", "#4caf50"); return
-        if not vision_ctrl.has_model(pno):
-            _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
+        if not vision_ctrl.has_vision(pno):
+            _log(f"Vision WARNING: No vision model or wire checks configured for part '{pno}'.")
             _paint("NO VISION MODEL", "#e8a000"); return
 
         _paint("Ready", "#4caf50")
