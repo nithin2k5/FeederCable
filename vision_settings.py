@@ -2410,6 +2410,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
     btn_capture.pack(side="left")
     btn_import = _btn(view_bar, "Import Image…", BTN_NEUTRAL)
     btn_import.pack(side="left", padx=(8, 0))
+    btn_test_img = _btn(view_bar, "Test Image…", BTN_PRIMARY)
+    btn_test_img.pack(side="left", padx=(8, 0))
 
     rail = tk.Frame(body, bg=BG, width=330)
     rail.grid(row=0, column=1, sticky="ns")
@@ -2746,9 +2748,10 @@ def _open_wire_dialog(parent, ctrl, part_number):
     cam_index, cam_w, cam_h = ctrl.cam_settings()
     stream = {"s": camera.acquire(cam_index, cam_w, cam_h) if cam_index >= 0 else None}
 
-    def _use_frame(frame, label):
+    def _use_frame(frame, label, then=None):
         """Locate the connectors on a worker thread -- matching a large frame
-        can take long enough to stall the window -- then show it."""
+        can take long enough to stall the window -- then show it, and run
+        `then` once it is up."""
         done = {}
 
         def _work():
@@ -2777,6 +2780,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 fg=WARN)
             _set_btn_enabled(btn_capture, stream["s"] is not None)
             _refresh()
+            if then:
+                then()
 
         threading.Thread(target=_work, daemon=True).start()
         win.after(50, _poll)
@@ -2807,27 +2812,51 @@ def _open_wire_dialog(parent, ctrl, part_number):
         threading.Thread(target=_work, daemon=True).start()
         win.after(50, _poll)
 
-    def _import():
+    def _pick_image(title):
         path = filedialog.askopenfilename(
-            parent=win, title="Select Image",
+            parent=win, title=title,
             filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
         if not path:
-            return
+            return None
         img = cv2.imread(path)
         if img is None:
             messagebox.showerror("Image", "Could not read that image file.", parent=win)
-            return
-        _use_frame(img, os.path.basename(path))
+            return None
+        return img, os.path.basename(path)
+
+    def _import():
+        picked = _pick_image("Select Image")
+        if picked:
+            _use_frame(*picked)
+
+    def _test_image():
+        """Judge a saved image -- a known good part, or one with its wires
+        swapped -- against the checks as drawn, without the part on the rig."""
+        picked = _pick_image("Select Test Image")
+        if picked:
+            img, name = picked
+            _use_frame(img, "TEST IMAGE  ·  %s" % name, then=_check_all)
 
     def _check_all():
         """Run the whole inspection on this frame with the checks as drawn --
-        the path the test cycle takes."""
+        the path the test cycle takes -- and show every check's result on it."""
         if shot["frame"] is None:
             return
         drawn = [c for c in checks if c.get("offset")]
         r = ctrl.inspect(part_number, frame=shot["frame"], wire_checks=drawn)
-        status_lbl.config(text="%s — %s" % (r.judgement, r.error or "every object and wire check passed"),
-                          fg={"OK": OK_GREEN, "NG": NG_RED}.get(r.judgement, WARN))
+        per_check = "   ".join("%s %s %s" % ("✓" if w.ok else "✗", w.name,
+                                            " → ".join(w.found) or "no wires")
+                                for w in r.wires)
+        status_lbl.config(
+            text="%s — %s" % (r.judgement, per_check or r.error or "no wire checks drawn")
+            if r.judgement == "OK" else "%s — %s" % (r.judgement, r.error),
+            fg={"OK": OK_GREEN, "NG": NG_RED}.get(r.judgement, WARN))
+        if r.objects:
+            view.set_overlays(
+                [({"x": o.box[0], "y": o.box[1], "width": o.box[2], "height": o.box[3]},
+                  OK_GREEN if o.ok else NG_RED, "%s %.2f" % (o.name, o.score))
+                 for o in r.objects if o.box]
+                + _wire_overlays(r.wires, WIRE_DRAW_BGR))
 
     def _save():
         undrawn = [c["name"].strip() or "Wires %d" % (i + 1)
@@ -2862,6 +2891,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     btn_remove.config(command=_remove)
     btn_capture.config(command=_capture)
     btn_import.config(command=_import)
+    btn_test_img.config(command=_test_image)
     btn_check.config(command=_check_all)
     btn_save.config(command=_save)
     btn_cancel.config(command=_close)
