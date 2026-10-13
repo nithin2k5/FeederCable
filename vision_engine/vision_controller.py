@@ -50,6 +50,12 @@ MAX_WIRES = 6
 # A colour's blob must cover at least this share of the wire box to count as a
 # wire rather than a speck of glare or a stray shadow.
 DEFAULT_WIRE_MIN_AREA_PCT = 2.0
+# Black insulation under the station lights reads as a dim grey-blue, not as
+# black -- often 60-120 brightness against a ~195 board -- so a fixed "dark"
+# cut-off misses it. Black is judged against the box's own background instead:
+# anything darker than this share of it, and not strongly coloured, is black.
+WIRE_BLACK_REL = 0.62
+WIRE_BLACK_MAX_SAT = 160
 
 # OpenCV HSV (H 0-179, S and V 0-255). Pixels are classed in this order and a
 # pixel takes the first colour it fits, so the classes never overlap: black
@@ -360,12 +366,22 @@ class VisionController:
             return result
 
         hsv = cv2.cvtColor(cv2.GaussianBlur(roi, (5, 5), 0), cv2.COLOR_BGR2HSV)
+        # The background is most of a well-drawn box, so its upper-quartile
+        # brightness stands for the board behind the wires.
+        black_rel = None
+        if "black" not in (self.config.get("wire_colors") or {}):
+            bg = float(np.percentile(hsv[..., 2], 75))
+            v_max = int(np.clip(bg * WIRE_BLACK_REL, 55, 140))
+            black_rel = ((hsv[..., 2] <= v_max) &
+                         (hsv[..., 1] < WIRE_BLACK_MAX_SAT)).astype(np.uint8) * 255
         taken = np.zeros(hsv.shape[:2], np.uint8)
         masks = {}
         for cname, ranges in palette.items():
             m = np.zeros(hsv.shape[:2], np.uint8)
             for lo, hi in ranges:
                 m |= cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
+            if cname == "black" and black_rel is not None:
+                m |= black_rel
             m &= cv2.bitwise_not(taken)
             taken |= m
             masks[cname] = m

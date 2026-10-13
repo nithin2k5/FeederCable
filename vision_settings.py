@@ -2613,7 +2613,10 @@ def _open_wire_dialog(parent, ctrl, part_number):
             view.set_roi(_box_of(c), notify=False)
         finally:
             loading["v"] = False
-        view.set_editable(c is not None)
+        # A box is only measured off a connector that was really found: off a
+        # stray best-guess match it would sit somewhere else on every real
+        # frame, and the wire check would judge the wrong pixels.
+        view.set_editable(c is not None and _anchor_ok(c))
         overlays = []
         if c is not None:
             anchor = _anchor_box(c)
@@ -2634,11 +2637,20 @@ def _open_wire_dialog(parent, ctrl, part_number):
             overlays += [o for o in _wire_overlays([result], WIRE_DRAW_BGR)
                          if o[2] != result.name]
         view.set_overlays(overlays)
-        view.set_hint("Drag a box over the wires just past %s" % object_names[c["object"]]
+        view.set_hint("%s not found in this frame — the box can't be placed" % _anchor_name(c)
+                      if c and not _anchor_ok(c) else
+                      "Drag a box over the wires just past %s" % object_names[c["object"]]
                       if c and not c.get("offset") else
                       "Drag the box to move it, or its handles to resize" if c else
                       "Add a wire check to start")
         _paint_seen(c, result)
+
+    def _anchor_ok(c):
+        a = shot["anchors"]
+        return 0 <= c["object"] < len(a) and a[c["object"]].ok
+
+    def _anchor_name(c):
+        return object_names[c["object"]] if c["object"] < len(object_names) else "Connector"
 
     def _judge(c):
         b = _box_of(c)
@@ -2658,7 +2670,17 @@ def _open_wire_dialog(parent, ctrl, part_number):
             return
         a = shot["anchors"]
         k = c["object"]
-        weak = (0 <= k < len(a) and not a[k].ok)
+        if not _anchor_ok(c):
+            score = a[k].score if 0 <= k < len(a) else 0.0
+            seen_lbl.config(text="%s not found" % _anchor_name(c), fg=WARN)
+            seen_note.config(
+                text="Best match %.2f, needs %.2f. The wire box hangs off this "
+                     "connector, so it can't be drawn or judged until the connector "
+                     "is found.\n\nCheck the part is seated, then Capture Frame "
+                     "again. If it still isn't found (for instance the camera's "
+                     "flip or mirror was changed after teaching), re-teach the "
+                     "part first." % (score, info["threshold"]), fg=WARN)
+            return
         if result is None:
             seen_lbl.config(text="No box drawn", fg=WARN)
             seen_note.config(text="Drag a box over the wires on the image.")
@@ -2668,10 +2690,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                         fg=OK_GREEN if result.ok else NG_RED)
         note = "Matches the order set." if result.ok else \
             "Expected %s — %s." % (" → ".join(result.expected), result.error)
-        if weak:
-            note += ("\n%s is not found in this frame (%.2f), so this box may be "
-                     "in the wrong place." % (a[k].name, a[k].score))
-        seen_note.config(text=note, fg=TXT_DIM if result.ok and not weak else WARN)
+        seen_note.config(text=note, fg=TXT_DIM if result.ok else WARN)
 
     def _refresh():
         _paint_rows()
@@ -2726,7 +2745,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
             # connector rather than letting it jump.
             b = _box_of(c)
             c["object"] = new_k
-            if b is not None:
+            if b is not None and _anchor_ok(c):
                 _store_box(c, b)
         for i in range(len(c["colors"])):
             if color_vars[i].get():
@@ -2743,7 +2762,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     def _roi_changed(roi, final=True):
         c = _cur()
-        if loading["v"] or c is None:
+        if loading["v"] or c is None or not _anchor_ok(c):
             return
         _store_box(c, roi)
         if final:
