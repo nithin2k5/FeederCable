@@ -663,6 +663,16 @@ class VisionController:
                 "colors": colors,
                 "direction": "ttb" if c.get("direction") == "ttb" else "ltr",
             })
+        # Wire checks are all or nothing across the connectors: a part checked
+        # on one connector only would pass with the other one's wires swapped.
+        if clean:
+            model = self._load_model(part_number)
+            names = [o["name"] for o in (model or {}).get("objects", [])]
+            unchecked = [n for k, n in enumerate(names)
+                         if not any(c["object"] == k for c in clean)]
+            if unchecked:
+                raise ValueError("Every connector needs a wire check — none on: "
+                                 + ", ".join(unchecked) + ".")
         self._rewrite_model_cfg(part_number, lambda cfg: cfg.__setitem__("wire_checks", clean))
 
     def map_model_file(self, part_number: str, filename: str):

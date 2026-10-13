@@ -2418,8 +2418,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
     rail.pack_propagate(False)
 
     s1, _b1 = _step(rail, 1, "Wire checks")
-    tk.Label(s1, text="One per connector whose wire order matters. Each must "
-                      "show its colours in order for an OK.",
+    tk.Label(s1, text="One for every connector. Each must show its colours "
+                      "in order for an OK.",
              bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
              justify="left", anchor="w").pack(fill="x", pady=(0, 6))
     rows = tk.Frame(s1, bg=BG)
@@ -2536,6 +2536,15 @@ def _open_wire_dialog(parent, ctrl, part_number):
             sub.pack(side="right", padx=6)
             for w in (row, inner, name, sub):
                 w.bind("<Button-1>", lambda e, i=i: _select(i))
+        # Saving is refused while any connector is left out, so say which
+        # ones before the operator gets that far.
+        unchecked = [n for k, n in enumerate(object_names)
+                     if not any(c["object"] == k for c in checks)]
+        if checks and unchecked:
+            tk.Label(rows, text="Every connector needs a check — add one for: "
+                                + ", ".join(unchecked),
+                     bg=BG, fg=WARN, font=("Arial", 10, "bold"), anchor="w",
+                     justify="left", wraplength=270).pack(fill="x", pady=(2, 0))
         _set_btn_enabled(btn_add, len(checks) < MAX_WIRE_CHECKS)
         _set_btn_enabled(btn_remove, _cur() is not None)
 
