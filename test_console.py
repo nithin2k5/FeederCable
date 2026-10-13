@@ -366,13 +366,13 @@ _PLC_CH_INPUTS = {
     8: 0x0417,  # X27
 }
 
-# X0-X27 and M20-M37 are each one unbroken run of addresses. That is what lets
+# X0-X27 and M10-M37 are each one unbroken run of addresses. That is what lets
 # the polling loop read every input the panel shows in a single transaction and
 # every coil in a second one, instead of five reads for the same picture.
 _PLC_X_BASE  = 0x0400   # X0  — X0-X7, then the unused X10-X17, then X20-X27
 _PLC_X_COUNT = 24
-_PLC_M_BASE  = 0x0814   # M20 — M20-M27, M28, the unused M29, then M30-M37
-_PLC_M_COUNT = 18
+_PLC_M_BASE  = 0x080A   # M10 — M10-M11, the unused M12-M19, M20-M27, M28, the unused M29, then M30-M37
+_PLC_M_COUNT = 28
 
 # How long M28 is given to physically change over before X4 is read for its
 # acknowledgement. Paid only when the relay actually has to move: a phase that
@@ -392,9 +392,12 @@ _PLC_SAFETY_RELAY = 0x081C   # M28 — Contact Test ↔ IR/ACW mode switch
 _PLC_SAFETY_ACK   = 0x0404   # X4 — Acknowledge input for safety relay (M28)
 _PLC_ACK_BASE     = 0x0410   # X20 — start of 8 consecutive acknowledge inputs
 
-# Physical PLC Inputs (X0-X3)
-_PLC_START_INPUT      = 0x0400   # X0  — physical START button
-_PLC_NG_RESET_INPUT   = 0x0401   # X1  — NG Reset
+# Cycle Start and NG Reset arrive as memory coils the PLC program sets, not as
+# raw X inputs. They sit at the head of the _PLC_M_BASE run.
+_PLC_START_COIL       = 0x080A   # M10 — Cycle Start
+_PLC_NG_RESET_COIL    = 0x080B   # M11 — NG Reset
+
+# Physical PLC Inputs (X2-X3)
 _PLC_CONTACT_OK_INPUT = 0x0402   # X2  — Contact OK
 _PLC_REWORK_ON_INPUT  = 0x0403   # X3  — Rework on
 
@@ -693,15 +696,15 @@ class DeltaPLC:
         self._is_hv_mode = False
         return self.write_coil(_PLC_SAFETY_RELAY, True)
 
-    # ── Physical PLC Inputs (X0-X3) ──────────────────────────────────────
+    # ── Cycle Start / NG Reset (M10-M11) and PLC Inputs (X2-X3) ──────────
 
     def is_start_pressed(self) -> bool:
-        """Check if physical START button is pressed (X0)."""
-        return self.read_input(_PLC_START_INPUT)
+        """Check if Cycle Start is signalled (M10)."""
+        return self.read_coil(_PLC_START_COIL)
 
     def is_ng_reset_pressed(self) -> bool:
-        """Check if NG Reset button is pressed (X1)."""
-        return self.read_input(_PLC_NG_RESET_INPUT)
+        """Check if NG Reset is signalled (M11)."""
+        return self.read_coil(_PLC_NG_RESET_COIL)
 
     def is_contact_ok(self) -> bool:
         """Check if Contact OK is signaled (X2)."""
@@ -2864,17 +2867,17 @@ def render(parent):
     # because that is where the row has room, so they are ordered to read as a
     # panel rather than to pair with whichever M coil is above each one.
     #
-    #   X0  physical START button -- the idle poll reads it to launch a test
-    #   X1  physical NG Reset button
+    #   M10 Cycle Start -- the idle poll reads it to launch a test
+    #   M11 NG Reset -- clears an NG result for the next cable
     #   X2  contact OK (one global signal, not per-channel)
     #   X3  rework select -- drives the REWORK badge and which barcode
     #       template gets printed, so it belongs on the panel with the rest of
     #       the inputs rather than only behind a blinking label
-    x0_lbl = tk.Label(in_row, text="X0", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
-    x0_lbl.pack(side="left", padx=1)
+    m10_lbl = tk.Label(in_row, text="M10", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    m10_lbl.pack(side="left", padx=1)
 
-    x1_lbl = tk.Label(in_row, text="X1", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
-    x1_lbl.pack(side="left", padx=1)
+    m11_lbl = tk.Label(in_row, text="M11", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
+    m11_lbl.pack(side="left", padx=1)
 
     x2_lbl = tk.Label(in_row, text="X2", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x2_lbl.pack(side="left", padx=1)
@@ -2882,8 +2885,11 @@ def render(parent):
     x3_lbl = tk.Label(in_row, text="X3", bg=_IO_ACK_OFF_BG, fg=_IO_ACK_OFF_FG, font=("Arial", _fs(7), "bold"), bd=1, relief="solid", width=_IO_CELL_W)
     x3_lbl.pack(side="left", padx=1)
 
-    # X4 and X0-X3 are machine-wide signals that happen to sit under channel
-    # columns 1-4, which reads as "X0 is channel 1" and is the one place the
+    # M10/M11 are coils, not X pins, but they are the operator's two buttons
+    # and stay in the cells the buttons always had.
+    #
+    # X4, M10-M11 and X2-X3 are machine-wide signals that happen to sit under
+    # channel columns 1-4, which reads as "M10 is channel 1" and is the one place the
     # CH # header lies. The dead cells under M34-M37 are the natural place to
     # say so, and cost nothing: they were empty padding.
     tk.Label(in_row, text="← not per-channel", bg="black", fg="#888",
@@ -2929,14 +2935,14 @@ def render(parent):
             if safety_lbl.winfo_exists(): safety_lbl.config(bg=_IO_ON_BG if active else _IO_OFF_BG, fg=_IO_ON_FG if active else _IO_OFF_FG)
         except Exception: pass
 
-    def _set_x0_indicator(active):
+    def _set_m10_indicator(active):
         try:
-            if x0_lbl.winfo_exists(): x0_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
+            if m10_lbl.winfo_exists(): m10_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
-    def _set_x1_indicator(active):
+    def _set_m11_indicator(active):
         try:
-            if x1_lbl.winfo_exists(): x1_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
+            if m11_lbl.winfo_exists(): m11_lbl.config(bg=_IO_ACK_ON_BG if active else _IO_ACK_OFF_BG, fg=_IO_ACK_ON_FG if active else _IO_ACK_OFF_FG)
         except Exception: pass
 
     def _set_x2_indicator(active):
@@ -4057,6 +4063,7 @@ def render(parent):
                 _log(f"Contact boundary check failed ({verdict}) — aborting")
                 _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
                 _clear_all_io_indicators()
+                state["ng_showing"] = True
                 state["test_running"] = False; state["ct_running"] = False; _after(0, _ct_tick_stop); _after(0, _update_counts); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
@@ -4117,6 +4124,7 @@ def render(parent):
                 _after(3000, _reset_for_next_part)
         else:
             _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+            state["ng_showing"] = True
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         # Queued after the restore above, so the gate has the last word.
@@ -4175,7 +4183,7 @@ def render(parent):
         if state["test_running"] or not state["pno"]: _after(500, _input_poll_once); return
         def _poll():
             pressed = _update_io_display()
-            if pressed: _log("START button pressed (PLC X0)"); _after(0, _trigger_test)
+            if pressed: _log("Cycle Start received (PLC M10)"); _after(0, _trigger_test)
             else: _after(_IO_POLL_MS, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
     def _input_poll_start():
@@ -4185,7 +4193,7 @@ def render(parent):
         """Stop reading the inputs, blank the two button cells and hand the
         port back.
 
-        X0/X1 are momentary: the poll tick that sees START pressed is the one
+        M10/M11 are momentary: the poll tick that sees Cycle Start is the one
         that stops itself to run the test, so leaving the cell as-read would
         show the button held down for the whole cycle.
 
@@ -4194,7 +4202,7 @@ def render(parent):
         for themselves straight after this returns.
         """
         state["input_polling"] = False
-        _after(0, lambda: (_set_x0_indicator(False), _set_x1_indicator(False)))
+        _after(0, lambda: (_set_m10_indicator(False), _set_m11_indicator(False)))
         try: plc.close()
         except Exception: pass
 
@@ -4221,19 +4229,20 @@ def render(parent):
             if not ok: _after(0, lambda: _log("PLC: could not open Modbus port"))
         return ok
     def _update_io_display() -> bool:
-        """Refresh every I/O indicator from the PLC and report whether the
-        physical START button (X0) is pressed.
+        """Refresh every I/O indicator from the PLC and report whether Cycle
+        Start (M10) is set.
 
         Two transactions, inputs first, on a port the loop keeps open.
 
-        X0-X27 are one unbroken run of discrete inputs and M20-M37 one
-        unbroken run of coils, so a single FC02 of 24 bits carries the START
-        button, X1-X4 and all eight channel acks, and a single FC01 of 18 bits
-        carries the HV relays, the safety relay and the contact relays. That
-        replaces five transactions wrapped in an open/close: at 9600 baud with
-        ASCII framing each transaction is ~35ms on the wire and the port
-        open/close cost as much again, so X2 -- read last of the five -- was
-        already a quarter-second stale before the poll gap was added to it.
+        X0-X27 are one unbroken run of discrete inputs and M10-M37 one
+        unbroken run of coils, so a single FC02 of 24 bits carries X2-X4 and
+        all eight channel acks, and a single FC01 of 28 bits carries Cycle
+        Start, NG Reset, the HV relays, the safety relay and the contact
+        relays. That replaces five transactions wrapped in an open/close: at
+        9600 baud with ASCII framing each transaction is ~35ms on the wire and
+        the port open/close cost as much again, so X2 -- read last of the five
+        -- was already a quarter-second stale before the poll gap was added
+        to it.
 
         The X indicators are painted before the coil read rather than after it,
         so the pins an operator actually watches are as fresh as the link
@@ -4249,31 +4258,46 @@ def render(parent):
                 # X10-X17 are not wired to anything, so the gap is padding.
                 x = (list(plc.read_inputs_bulk(_PLC_X_BASE, 8)) + [False] * 8 +
                      list(plc.read_inputs_bulk(_PLC_ACK_BASE, 8)))
-            pressed = x[0]
-            x1, x2, x3, x4 = x[1], x[2], x[3], x[4]
+            x2, x3, x4 = x[2], x[3], x[4]
             acks = x[16:24]
 
-            def _paint_inputs(p=pressed, a1=x1, a2=x2, a3=x3, a4=x4, ak=acks):
-                _set_x0_indicator(p); _set_x1_indicator(a1); _set_x2_indicator(a2)
-                _set_rework_active(a3); _set_x4_indicator(a4)
+            def _paint_inputs(a2=x2, a3=x3, a4=x4, ak=acks):
+                _set_x2_indicator(a2); _set_rework_active(a3); _set_x4_indicator(a4)
                 for i, bit in enumerate(ak): _set_io(io_in_labels, i, bit)
             _after(0, _paint_inputs)
 
-            # A test or a page change can land between the two reads. The coils
-            # only mirror what this program just commanded, so give the port up
-            # now rather than holding it for a picture nobody is waiting on.
-            if not state.get("input_polling"): return pressed
+            # A test or a page change can land between the two reads. Cycle
+            # Start is in the coil read, so a press seen after this point is
+            # left for the next tick rather than launching a second test.
+            if not state.get("input_polling"): return False
 
             m = plc.read_coils_bulk(_PLC_M_BASE, _PLC_M_COUNT, strict=True)
             if m is None:
-                m = (list(plc.read_coils_bulk(_PLC_M_BASE, 8)) + [False] * 2 +
+                # M12-M19 and M29 are not used, so their gaps are padding.
+                m = (list(plc.read_coils_bulk(_PLC_START_COIL, 2)) + [False] * 8 +
+                     list(plc.read_coils_bulk(_PLC_IR_ACW_COILS[1], 8)) + [False] * 2 +
                      list(plc.read_coils_bulk(_PLC_CONTACT_COILS[1], 8)))
+            pressed, ng_reset = m[0], m[1]
+            if pressed:
+                # Consume the press. If the PLC program latches M10 (SET), it
+                # would otherwise still be high when polling resumes after the
+                # test and start the next one on its own. If the ladder drives
+                # M10 straight from the button, this write is simply
+                # overwritten on its next scan.
+                plc.write_coil(_PLC_START_COIL, False)
+            if ng_reset:
+                # Consumed for the same reason, and whether or not an NG is
+                # showing: a latched M11 left high would otherwise clear the
+                # next NG the moment it appeared, before anyone had read it.
+                plc.write_coil(_PLC_NG_RESET_COIL, False)
+                if state.get("ng_showing"): _after(0, _ng_reset)
 
-            def _paint_coils(bits=m):
-                _set_safety_indicator(bits[8])                     # M28
+            def _paint_coils(bits=m, p=pressed, r=ng_reset):
+                _set_m10_indicator(p); _set_m11_indicator(r)       # M10-M11
+                _set_safety_indicator(bits[18])                    # M28
                 for i in range(8):
-                    _set_io(io_ir_acw_labels, i, bits[i])          # M20-M27
-                    _set_io(io_contact_labels, i, bits[10 + i])    # M30-M37
+                    _set_io(io_ir_acw_labels, i, bits[10 + i])     # M20-M27
+                    _set_io(io_contact_labels, i, bits[20 + i])    # M30-M37
             _after(0, _paint_coils)
         except Exception: pass
         return pressed
@@ -4371,8 +4395,26 @@ def render(parent):
         # Last gate before the run: the others are fields the operator can
         # fix on the spot, these are the station's database and clock.
         if not _station_checks_ok(): return
+        state["ng_showing"] = False
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
+
+    def _ng_reset():
+        """NG Reset (M11): clear an NG result and get ready for the next cable.
+
+        The same part, operator and lot stay loaded -- only the finished
+        cable's verdict, channel table and red banner are cleared, the way the
+        page clears itself after a PASS. The FAIL record is already written, so
+        nothing is lost. Ignored mid-test, and when no NG is showing.
+        """
+        if state["test_running"] or not state.get("ng_showing"): return
+        state["ng_showing"] = False
+        blink_stop(); _reset_for_next_part()
+        try:
+            if btn_start.winfo_exists():
+                btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")
+        except Exception: pass
+        _log("NG Reset received (PLC M11) — ready for the next cable.")
     # ENTER here moves to START, it does not press it. A test begins only on a
     # deliberate act -- clicking START, or the physical button pulling X0 high
     # -- so that typing the last digit of a quantity can never set the machine
@@ -4565,6 +4607,7 @@ def render(parent):
         # no part ever loaded -- there is nothing to close out there.
         if state["pno"]: _print_marker("END", state["pno"])
         _input_poll_stop()
+        state["ng_showing"] = False
         _clear_part_fields()
         done, qty, batch = short_of
         if qty > 0 and 0 < done < qty:

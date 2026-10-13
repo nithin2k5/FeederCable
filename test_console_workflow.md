@@ -11,7 +11,7 @@ Before any testing can begin, the system and operator must complete the setup lo
    - Part metadata (Model, ALC, Name).
    - Test specifications for IR (Insulation Resistance) and ACW (Withstand Voltage) for the required number of channels.
    - Historical pass/fail counts for the day.
-5. **Ready State**: The background polling thread (`_input_poll_once`) starts monitoring the PLC for the physical START button (X1) and continuously updates the live I/O UI indicators (X20-X27).
+5. **Ready State**: The background polling thread (`_input_poll_once`) starts monitoring the PLC for Cycle Start (M10) and NG Reset (M11) and continuously updates the live I/O UI indicators (X20-X27).
 
 ## 2. Test Execution Sequence
 Once the operator presses the physical **START button** (or clicks the UI button), the automated test sequence (`_run_test_sequence`) begins.

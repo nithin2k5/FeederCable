@@ -289,14 +289,14 @@ CHAPTERS = [
           "signal that is currently high."),
     ("h", "Outputs — M coils"),
     ("tbl", ["Coil", "Purpose"], [
+        ["M10", "Cycle Start — set by the PLC program; starts a test"],
+        ["M11", "NG reset — set by the PLC program; clears an NG result for the next cable"],
         ["M28", "Safety relay. ON = contact mode (low voltage); OFF = high-voltage mode"],
         ["M30 – M37", "Contact test relays, channels 1 to 8"],
         ["M20 – M27", "IR and ACW relays, channels 1 to 8"],
     ]),
     ("h", "Inputs — X pins"),
     ("tbl", ["Input", "Purpose"], [
-        ["X0", "Physical START button"],
-        ["X1", "NG reset"],
         ["X2", "Contact OK — high when the jig has continuity on the energised channel"],
         ["X3", "Rework select — high marks this cable as a rework part"],
         ["X4", "Safety relay acknowledge, the feedback for M28"],
