@@ -1655,6 +1655,11 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
 # part's run when the program exits; None when no Test Console page is live.
 _ACTIVE = {"close_out": None}
 
+# Set by an overall FAIL, cleared only by NG Reset (M11). Kept here rather than
+# in the page's state so leaving the Test Console and coming back -- which
+# rebuilds the page from nothing -- does not quietly release it.
+_NG_LOCK = {"on": False}
+
 def close_out_run() -> bool:
     """Print the END label for whatever part is still loaded, if any.
 
@@ -2263,7 +2268,15 @@ def render(parent):
             state["dev_polling"] = False
             try: plc.close()
             except Exception: pass
+            # The lock itself outlives the page; its popup cannot, or it
+            # would be left up with nothing on screen able to close it.
+            _close_ng_lock()
     content.bind("<Destroy>", _on_page_destroy)
+    # Back on the page with an NG still unreset: put the hold back up. M11 is
+    # read again once a part is loaded and the poll is running.
+    if _NG_LOCK["on"]:
+        state["ng_showing"] = True
+        _after(0, _show_ng_lock)
 
     def blink_start(): pass
     def blink_stop(): pass
@@ -4124,11 +4137,12 @@ def render(parent):
                 _after(3000, _reset_for_next_part)
         else:
             _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
-            state["ng_showing"] = True
+            state["ng_showing"] = True; _NG_LOCK["on"] = True
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
         # Queued after the restore above, so the gate has the last word.
         if state.get("awaiting_scan"): _after(0, lambda: _set_awaiting_scan(True))
+        if _NG_LOCK["on"]: _after(0, _show_ng_lock)
         if overall == "FAIL": _after(200, _input_poll_start)
 
     def _show_scan_entry():
@@ -4183,9 +4197,18 @@ def render(parent):
         if state["test_running"] or not state["pno"]: _after(500, _input_poll_once); return
         def _poll():
             pressed = _update_io_display()
-            if pressed: _log("Cycle Start received (PLC M10)"); _after(0, _trigger_test)
+            if pressed: _log("Cycle Start received (PLC M10)"); _after(0, _plc_start)
             else: _after(_IO_POLL_MS, _input_poll_once)
         threading.Thread(target=_poll, daemon=True).start()
+    def _plc_start():
+        """Cycle Start from the PLC. The tick that saw it stopped rescheduling
+        itself so a test could claim the port; when _trigger_test turns the
+        press down instead (NG lock, no employee ID, ...) the loop has to carry
+        on, or the page stops reading the PLC -- and with it NG Reset -- until
+        something else happens to restart it."""
+        _trigger_test()
+        if state.get("input_polling") and not state["test_running"]:
+            _after(_IO_POLL_MS, _input_poll_once)
     def _input_poll_start():
         if not _modbus_ok or state.get("input_polling"): return
         state["input_polling"] = True; _input_poll_once()
@@ -4378,6 +4401,9 @@ def render(parent):
 
     def _trigger_test():
         if state["test_running"]: return
+        if _NG_LOCK["on"]:
+            _log("NG result — press NG RESET on the machine before the next test.")
+            _show_ng_lock(); return
         if state.get("awaiting_scan"):
             _log("Scan the printed label before testing the next part.")
             messagebox.showwarning("Scan Required", "Scan the printed barcode label for the last part before starting the next test.")
@@ -4399,6 +4425,66 @@ def render(parent):
         _input_poll_stop(); _reset_test_display(); threading.Thread(target=_run_test_sequence, daemon=True).start()
     btn_start.config(command=lambda: _trigger_test())
 
+    # The NG lock popup, while it is up. One at a time: a second FAIL, or START
+    # pressed against the lock, raises this one rather than stacking another.
+    ng_popup = {"win": None}
+
+    def _show_ng_lock():
+        """Hold the station after an overall FAIL until NG Reset (M11).
+
+        Neither START -- the on-screen button or M10 -- nor NEXT PART will
+        act while this is up, and the popup has no close button: the only way
+        out is NG Reset on the machine, which closes it. It is not grabbed, so
+        the rest of the page (the log, the records) can still be read.
+        """
+        try:
+            if btn_start.winfo_exists():
+                btn_start.config(state="disabled", bg="#4a0000", fg="#ff8a80", text="⛔  NG RESET REQUIRED")
+        except Exception: pass
+        dlg = ng_popup["win"]
+        try:
+            if dlg is not None and dlg.winfo_exists():
+                dlg.deiconify(); dlg.lift(); return
+        except Exception: pass
+
+        top = parent.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.withdraw()
+        dlg.title("NG — Reset Required")
+        dlg.configure(bg="#111")
+        dlg.resizable(False, False)
+        dlg.transient(top)
+        dlg.attributes("-topmost", True)
+        tk.Frame(dlg, bg="#b71c1c", height=6).pack(fill="x")
+        body = tk.Frame(dlg, bg="#111", padx=44, pady=26)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="❌", bg="#111", fg="#ff5555",
+                 font=("Arial", _fs(40))).pack()
+        tk.Label(body, text="NG — Test Failed", bg="#111", fg="white",
+                 font=("Arial", _fs(20), "bold")).pack(pady=(8, 0))
+        tk.Label(body, text=f"Part {state['pno'] or '?'}\n"
+                            "Remove the NG cable, then press NG RESET\non the machine to continue.",
+                 bg="#111", fg="#ccc", font=("Arial", _fs(12)),
+                 justify="center").pack(pady=(10, 0))
+        # No way to dismiss it from the screen: the window X does nothing.
+        dlg.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        dlg.update_idletasks()
+        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        x = top.winfo_rootx() + (top.winfo_width() - w) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - h) // 3
+        x = max(0, min(x, dlg.winfo_screenwidth() - w))
+        y = max(0, min(y, dlg.winfo_screenheight() - h))
+        dlg.geometry(f"+{x}+{y}")
+        dlg.deiconify()
+        ng_popup["win"] = dlg
+
+    def _close_ng_lock():
+        dlg, ng_popup["win"] = ng_popup["win"], None
+        try:
+            if dlg is not None and dlg.winfo_exists(): dlg.destroy()
+        except Exception: pass
+
     def _ng_reset():
         """NG Reset (M11): clear an NG result and get ready for the next cable.
 
@@ -4408,7 +4494,8 @@ def render(parent):
         nothing is lost. Ignored mid-test, and when no NG is showing.
         """
         if state["test_running"] or not state.get("ng_showing"): return
-        state["ng_showing"] = False
+        state["ng_showing"] = False; _NG_LOCK["on"] = False
+        _close_ng_lock()
         blink_stop(); _reset_for_next_part()
         try:
             if btn_start.winfo_exists():
@@ -4594,6 +4681,9 @@ def render(parent):
         """
         if state["test_running"]:
             _log("Test in progress — finish it before changing part."); return
+        if _NG_LOCK["on"]:
+            _log("NG result — press NG RESET on the machine before changing part.")
+            _show_ng_lock(); return
         # Asked first, while everything is still recoverable: the END marker
         # below and _clear_part_fields are both one way.
         if not _confirm_short_box("Changing part closes this box without a lot label.",

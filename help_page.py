@@ -43,7 +43,7 @@ CHAPTERS = [
         "IR test — insulation resistance, measured in megohms (MΩ).",
         "ACW test — AC withstand voltage, leakage measured in milliamps (mA).",
         "Contact test — continuity, channel by channel.",
-        "Verdict — PASS prints a label to be scanned back; FAIL asks for the cable to be checked.",
+        "Verdict — PASS prints a label to be scanned back; FAIL holds the station: a popup stays up, and no test can start, until NG RESET is pressed on the machine.",
     ]),
     ("p", "A cycle takes only as long as the specs for that part demand. The "
           "Count box on the Test Console shows the last cycle time and the "
@@ -290,7 +290,7 @@ CHAPTERS = [
     ("h", "Outputs — M coils"),
     ("tbl", ["Coil", "Purpose"], [
         ["M10", "Cycle Start — set by the PLC program; starts a test"],
-        ["M11", "NG reset — set by the PLC program; clears an NG result for the next cable"],
+        ["M11", "NG reset — set by the PLC program; clears a FAIL and releases the NG hold"],
         ["M28", "Safety relay. ON = contact mode (low voltage); OFF = high-voltage mode"],
         ["M30 – M37", "Contact test relays, channels 1 to 8"],
         ["M20 – M27", "IR and ACW relays, channels 1 to 8"],
