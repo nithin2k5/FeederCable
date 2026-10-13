@@ -1149,20 +1149,31 @@ def render(parent):
                 messagebox.showerror("Delete", str(e), parent=parent)
                 return
         elif kind == "part":
-            # The two detections are kept apart, so say which ones go.
-            has_pics, has_wires = ctrl.has_model(value), ctrl.has_wire_checks(value)
-            what = " and ".join(t for t, on in (("its taught pictures (object detection)", has_pics),
-                                                ("its wire-colour checks", has_wires)) if on)
-            if not messagebox.askyesno(
-                    "Delete Vision",
-                    "Delete %s for part “%s”?\n\n"
-                    "The part will no longer be checked by vision on the line."
-                    % (what or "the vision setup", value), parent=parent):
-                return
-            if has_pics or value in ctrl.get_mapped_parts():
+            # The two detections are separate: Delete takes the taught
+            # pictures (object detection) and leaves the wire checks, which
+            # are removed in Wire Colours. A part with only wire checks has
+            # nothing else to delete, so there it takes those.
+            has_wires = ctrl.has_wire_checks(value)
+            if value in ctrl.get_mapped_parts():
+                if not messagebox.askyesno(
+                        "Delete Pictures",
+                        "Delete the taught pictures (object detection) for part “%s”?\n\n%s"
+                        % (value, "Its wire-colour checks are kept and still run on the line."
+                           if has_wires else
+                           "The part will no longer be checked by vision on the line."),
+                        parent=parent):
+                    return
                 ctrl.delete_model(value)
-            if has_wires:
+            elif has_wires:
+                if not messagebox.askyesno(
+                        "Delete Wire Checks",
+                        "Delete the wire-colour checks for part “%s”?\n\n"
+                        "The part will no longer be checked by vision on the line." % value,
+                        parent=parent):
+                    return
                 ctrl.delete_wire_checks(value)
+            else:
+                return
         else:
             return
         _refresh_table()
