@@ -2473,11 +2473,12 @@ def _open_wire_dialog(parent, ctrl, part_number):
         cell = tk.Frame(colors_box, bg=BG)
         swatch = tk.Label(cell, text="■", bg=BG, font=("Arial", 13))
         swatch.pack(side="left")
-        tk.Label(cell, text="%d" % (i + 1), bg=BG, fg=TXT_DIM, font=("Consolas", 10),
-                 width=2).pack(side="left")
+        side = tk.Label(cell, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10, "bold"),
+                        width=10, anchor="w")
+        side.pack(side="left", padx=(4, 0))
         ttk.Combobox(cell, textvariable=color_vars[i], state="readonly",
-                     values=palette_names, width=8, font=("Arial", 11)).pack(side="left")
-        color_cells.append((cell, swatch))
+                     values=palette_names, width=10, font=("Arial", 11)).pack(side="left")
+        color_cells.append((cell, swatch, side))
 
     s3, _b3 = _step(rail, 3, "Seen in this frame")
     seen_lbl = tk.Label(s3, text="—", bg=BG, fg=TXT, font=("Arial", 13, "bold"),
@@ -2546,7 +2547,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 name_var.set(""); anchor_var.set(""); dir_var.set("")
                 for v in color_vars:
                     v.set("")
-                for cell, _ in color_cells:
+                for cell, _, _ in color_cells:
                     cell.grid_forget()
                 return
             # Only when it differs: rewriting the entry on every keystroke
@@ -2559,11 +2560,18 @@ def _open_wire_dialog(parent, ctrl, part_number):
             for idx, b in enumerate(count_btns):
                 b._colors = BTN_PRIMARY if idx + 1 == n else BTN_NEUTRAL
                 b.config(bg=b._colors[0])
-            for i, (cell, swatch) in enumerate(color_cells):
+            # Name each slot by the side of the box it sits on, so "which wire
+            # goes where" reads straight off the editor rather than a number.
+            first, last = ("Top", "Bottom") if c["direction"] == "ttb" else ("Left", "Right")
+            for i, (cell, swatch, side) in enumerate(color_cells):
                 if i < n:
                     color_vars[i].set(c["colors"][i])
                     swatch.config(fg=_bgr_hex(WIRE_DRAW_BGR.get(c["colors"][i], (200, 200, 200))))
-                    cell.grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 10), pady=2)
+                    side.config(text="Only wire" if n == 1 else
+                                "%s side" % first if i == 0 else
+                                "%s side" % last if i == n - 1 else
+                                "%d of %d" % (i + 1, n))
+                    cell.grid(row=i, column=0, sticky="w", pady=2)
                 else:
                     cell.grid_forget()
         finally:
@@ -2667,7 +2675,11 @@ def _open_wire_dialog(parent, ctrl, part_number):
     def _add():
         if len(checks) >= MAX_WIRE_CHECKS:
             return
-        k = len(checks) % len(object_names)
+        # The first connector that has no check yet -- adding a second check
+        # is nearly always for the other connector.
+        used = {c["object"] for c in checks}
+        k = next((j for j in range(len(object_names)) if j not in used),
+                 len(checks) % len(object_names))
         checks.append({"name": "%s wires" % object_names[k], "object": k,
                        "offset": None, "colors": ["blue", "black"], "direction": "ltr"})
         _select(len(checks) - 1)
