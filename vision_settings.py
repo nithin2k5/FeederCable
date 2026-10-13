@@ -2243,7 +2243,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         if result.frame is not None:
             view.set_image(result.frame)
             view.set_accent(color)
-            wires = _wire_overlays(result.wires, WIRE_DRAW_BGR)
+            wires = _wire_overlays(result.wires, WIRE_DRAW_BGR, label_wires=False)
             if multi:
                 # Every object's match, each coloured by its own verdict, rather
                 # than one box that could only speak for the weakest object.
@@ -2361,19 +2361,23 @@ def _bgr_hex(bgr):
     return "#%02x%02x%02x" % (bgr[2], bgr[1], bgr[0])
 
 
-def _wire_overlays(wire_results, draw_bgr):
+def _wire_overlays(wire_results, draw_bgr, label_wires=True):
     """Overlays for judged wire checks: each wire box coloured by its verdict,
-    and every wire blob picked inside it labelled with its colour."""
+    and every wire blob picked inside it outlined in its colour -- and tagged
+    with it, unless `label_wires` is off: on a small, whole-frame view the tags
+    pile up over the box's own name, and the colours are listed beside it."""
     out = []
     for w in wire_results:
         if w.box:
             out.append(({"x": w.box[0], "y": w.box[1], "width": w.box[2],
-                         "height": w.box[3]}, OK_GREEN if w.ok else NG_RED, w.name))
+                         "height": w.box[3]}, OK_GREEN if w.ok else NG_RED,
+                        w.name if label_wires else "%s %s" % (w.name, "✓" if w.ok else "✗")))
         for cname, (bx, by, bw, bh) in w.blobs:
             # Black drawn black is invisible on a dark wire, so it gets grey.
             col = _bgr_hex(draw_bgr.get(cname, (200, 200, 200)))
             out.append(({"x": bx, "y": by, "width": bw, "height": bh},
-                        "#9e9e9e" if cname == "black" else col, cname))
+                        "#9e9e9e" if cname == "black" else col,
+                        cname if label_wires else ""))
     return out
 
 
