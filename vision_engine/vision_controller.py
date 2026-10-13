@@ -24,8 +24,10 @@ Objects:
 Wire colours:
   A part can also carry wire-colour checks: a box where a connector's wires
   leave it, and the colours expected there in order (say blue then black, left
-  to right). The box is stored relative to one of the part's objects, so it
-  follows that connector wherever it is found in the frame -- on either camera.
+  to right). The box is a fixed spot in the frame, or -- with "follow" -- is
+  stored relative to one of the part's objects, so it follows that connector
+  wherever it is found in the frame. Checks saved before "follow" existed
+  follow their connector.
   Inside the box every pixel is classed against a named colour palette, each
   expected colour takes its largest blobs, and the blobs' order along the
   wires' direction must equal the expected sequence. A swapped, missing or
@@ -420,8 +422,11 @@ class VisionController:
         out = []
         for c in checks:
             name = c.get("name") or "Wires"
-            k = int(c.get("object", 0))
-            anchor = objects[k].box if 0 <= k < len(objects) else None
+            if c.get("follow", True):
+                k = int(c.get("object", 0))
+                anchor = objects[k].box if 0 <= k < len(objects) else None
+            else:
+                anchor = (0, 0, 0, 0)       # a fixed spot: the offset is the box
             box = self.wire_box(c, anchor, frame.shape) if anchor else None
             if box is None:
                 out.append(WireResult(name=name, ok=False, expected=list(c.get("colors", [])),
@@ -477,11 +482,12 @@ class VisionController:
         weakest = min(results, key=lambda r: r.score)
         objects_ok = all(r.ok for r in results)
 
-        # Wire colours are judged only once every object is found: the boxes
-        # hang off the objects' matches, and off a wrong match they would be
-        # looking at the wrong place.
+        # A box that follows its connector is judged only once every object is
+        # found: off a wrong match it would be looking at the wrong place. A
+        # fixed box is judged regardless -- it does not depend on the match.
         checks = model.get("wire_checks", []) if wire_checks is None else wire_checks
-        wires = self._run_wire_checks(checks, results, frame) if objects_ok else []
+        wires = self._run_wire_checks(
+            [c for c in checks if objects_ok or not c.get("follow", True)], results, frame)
         for wr in wires:
             print(f"[VISION DEBUG] pno={part_number} wires={wr.name!r} "
                   f"expected={wr.expected} found={wr.found} ok={wr.ok}")
@@ -678,6 +684,7 @@ class VisionController:
                 "offset": {k: int(off[k]) for k in ("dx", "dy", "width", "height")},
                 "colors": colors,
                 "direction": "ttb" if c.get("direction") == "ttb" else "ltr",
+                "follow": bool(c.get("follow", True)),
             })
         # Wire checks are all or nothing across the connectors: a part checked
         # on one connector only would pass with the other one's wires swapped.

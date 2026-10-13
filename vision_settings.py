@@ -2409,7 +2409,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     checks = [dict(c, offset=dict(c["offset"]), colors=list(c["colors"]))
               for c in info.get("wire_checks", [])]
     sel = {"i": 0 if checks else None}
-    shot = {"frame": None, "anchors": [], "label": ""}
+    shot = {"frame": None, "anchors": None, "label": ""}
     alive = {"v": True}
     loading = {"v": False}
     saved = {"v": False}
@@ -2521,6 +2521,13 @@ def _open_wire_dialog(parent, ctrl, part_number):
         b.config(padx=4)        # all six have to fit across the rail
         b.pack(side="left", padx=(0, 3))
         count_btns.append(b)
+    follow_var = tk.BooleanVar(value=False)
+    follow_chk = tk.Checkbutton(
+        editor, text="  Follow the connector if it moves", variable=follow_var,
+        command=lambda: _toggle_follow(), bg=BG, fg=TXT_DIM, selectcolor=FIELD,
+        activebackground=BG, activeforeground=TXT, font=("Arial", 10), bd=0,
+        highlightthickness=0, anchor="w", cursor="hand2")
+    follow_chk.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
     colors_box = tk.Frame(s2, bg=BG)
     colors_box.pack(fill="x", pady=(6, 0))
@@ -2556,10 +2563,28 @@ def _open_wire_dialog(parent, ctrl, part_number):
         i = sel["i"]
         return checks[i] if i is not None and 0 <= i < len(checks) else None
 
+    def _follows(c):
+        # Checks saved before the option existed were all measured off their
+        # connector, so they keep following it.
+        return c.get("follow", True)
+
     def _anchor_box(c):
-        a = shot["anchors"]
+        """What the check's box is measured from: the frame's corner for a
+        fixed box, its connector's match for one that follows it."""
+        if not _follows(c):
+            return (0, 0, 0, 0)
+        a = shot["anchors"] or []
         k = c["object"]
         return a[k].box if 0 <= k < len(a) else None
+
+    def _locate():
+        """Find the connectors in the shown frame -- only ever for a check that
+        follows one; a fixed box needs nothing found before it is drawn."""
+        if shot["anchors"] is None and shot["frame"] is not None:
+            try:
+                shot["anchors"] = ctrl.locate_objects(part_number, shot["frame"])
+            except Exception:
+                shot["anchors"] = []
 
     def _box_of(c):
         """The check's box in the shown frame, as a RoiView dict, or None."""
@@ -2611,6 +2636,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 _enable_tree(w, c is not None)
             if c is None:
                 name_var.set(""); anchor_var.set(""); dir_var.set("")
+                follow_var.set(False)
                 for v in color_vars:
                     v.set("")
                 for cell, _, _ in color_cells:
@@ -2622,6 +2648,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 name_var.set(c["name"])
             anchor_var.set(object_names[c["object"]] if c["object"] < len(object_names) else "")
             dir_var.set(dir_labels.get(c["direction"], dir_labels["ltr"]))
+            follow_var.set(_follows(c))
             n = len(c["colors"])
             for idx, b in enumerate(count_btns):
                 b._colors = BTN_PRIMARY if idx + 1 == n else BTN_NEUTRAL
@@ -2647,7 +2674,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         try:
             if isinstance(w, ttk.Combobox):
                 w.config(state="readonly" if on else "disabled")
-            elif isinstance(w, tk.Entry):
+            elif isinstance(w, (tk.Entry, tk.Checkbutton)):
                 w.config(state="normal" if on else "disabled")
             elif isinstance(w, tk.Button):
                 _set_btn_enabled(w, on)
@@ -2673,7 +2700,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         # frame, and the wire check would judge the wrong pixels.
         view.set_editable(c is not None and _anchor_ok(c))
         overlays = []
-        if c is not None:
+        if c is not None and _follows(c):
             anchor = _anchor_box(c)
             a = shot["anchors"][c["object"]] if anchor else None
             if a:
@@ -2694,14 +2721,16 @@ def _open_wire_dialog(parent, ctrl, part_number):
         view.set_overlays(overlays)
         view.set_hint("%s not found in this frame — the box can't be placed" % _anchor_name(c)
                       if c and not _anchor_ok(c) else
-                      "Drag a box over the wires just past %s" % object_names[c["object"]]
+                      "Drag a box over the wires"
                       if c and not c.get("offset") else
                       "Drag the box to move it, or its handles to resize" if c else
                       "Add a wire check to start")
         _paint_seen(c, result)
 
     def _anchor_ok(c):
-        a = shot["anchors"]
+        if not _follows(c):
+            return True
+        a = shot["anchors"] or []
         return 0 <= c["object"] < len(a) and a[c["object"]].ok
 
     def _anchor_name(c):
@@ -2723,18 +2752,17 @@ def _open_wire_dialog(parent, ctrl, part_number):
             seen_lbl.config(text="No frame", fg=TXT_DIM)
             seen_note.config(text="Capture a frame or import an image.")
             return
-        a = shot["anchors"]
+        a = shot["anchors"] or []
         k = c["object"]
         if not _anchor_ok(c):
             score = a[k].score if 0 <= k < len(a) else 0.0
             seen_lbl.config(text="%s not found" % _anchor_name(c), fg=WARN)
             seen_note.config(
-                text="Best match %.2f, needs %.2f. The wire box hangs off this "
-                     "connector, so it can't be drawn or judged until the connector "
-                     "is found.\n\nCheck the part is seated, then Capture Frame "
-                     "again. If it still isn't found (for instance the camera's "
-                     "flip or mirror was changed after teaching), re-teach the "
-                     "part first." % (score, info["threshold"]), fg=WARN)
+                text="Best match %.2f, needs %.2f. This box follows the connector, "
+                     "so it can't be drawn or judged until the connector is found. "
+                     "Untick \u201cFollow the connector\u201d to draw it as a fixed "
+                     "spot instead, or capture again with the part seated." %
+                     (score, info["threshold"]), fg=WARN)
             return
         if result is None:
             seen_lbl.config(text="No box drawn", fg=WARN)
@@ -2766,7 +2794,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
         k = next((j for j in range(len(object_names)) if j not in used),
                  len(checks) % len(object_names))
         checks.append({"name": "%s wires" % object_names[k], "object": k,
-                       "offset": None, "colors": ["blue", "black"], "direction": "ltr"})
+                       "offset": None, "colors": ["blue", "black"], "direction": "ltr",
+                       "follow": False})
         _select(len(checks) - 1)
 
     def _remove():
@@ -2807,6 +2836,35 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 c["colors"][i] = color_vars[i].get()
         _refresh()
 
+    def _toggle_follow():
+        """Switch a check between a fixed spot and following its connector,
+        keeping its box where it is on screen."""
+        c = _cur()
+        if loading["v"] or c is None:
+            return
+        want = follow_var.get()
+        b = _box_of(c)
+        if want:
+            _locate()
+            c["follow"] = True
+            if not _anchor_ok(c):
+                c["follow"] = False
+                follow_var.set(False)
+                a = (shot["anchors"] or [])
+                score = a[c["object"]].score if 0 <= c["object"] < len(a) else 0.0
+                messagebox.showwarning(
+                    "Follow Connector",
+                    "%s is not found in this frame (%.2f, needs %.2f), so the box "
+                    "can't be measured from it.\n\nKeep it as a fixed spot, or "
+                    "capture a frame where the connector is found."
+                    % (_anchor_name(c), score, info["threshold"]), parent=win)
+                return
+        else:
+            c["follow"] = False
+        if b is not None:
+            _store_box(c, b)
+        _refresh()
+
     def _store_box(c, roi):
         anchor = _anchor_box(c)
         if roi is None or anchor is None:
@@ -2832,14 +2890,16 @@ def _open_wire_dialog(parent, ctrl, part_number):
     stream = {"s": camera.acquire(cam_index, cam_w, cam_h) if cam_index >= 0 else None}
 
     def _use_frame(frame, label, then=None):
-        """Locate the connectors on a worker thread -- matching a large frame
-        can take long enough to stall the window -- then show it, and run
-        `then` once it is up."""
+        """Show a frame, and run `then` once it is up. Nothing is detected
+        here: wire colours are judged only inside a drawn box. The connectors
+        are searched for -- on a worker thread, as matching a large frame can
+        stall the window -- only when some check follows one."""
         done = {}
+        need = any(_follows(c) for c in checks)
 
         def _work():
             try:
-                done["anchors"] = ctrl.locate_objects(part_number, frame)
+                done["anchors"] = ctrl.locate_objects(part_number, frame) if need else None
             except Exception:
                 done["anchors"] = []
 
@@ -2856,7 +2916,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
             finally:
                 loading["v"] = False
             frame_lbl.config(text=label)
-            missing = [a for a in shot["anchors"] if not a.ok]
+            missing = [a for a in (shot["anchors"] or []) if not a.ok]
             status_lbl.config(
                 text=("Not found in this frame: " + ", ".join(
                     "%s (%.2f)" % (a.name, a.score) for a in missing)) if missing else "",
