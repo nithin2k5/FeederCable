@@ -267,6 +267,21 @@ def _to_photo(img_bgr, box_w, box_h):
     return ImageTk.PhotoImage(im), scale
 
 
+def _enhance_for_display(img_bgr):
+    """A clearer picture for the operator to draw on: local contrast lifted
+    (CLAHE on lightness), colour strengthened and edges sharpened, so thin
+    wires stand out from a washed-out frame. Display only -- detection always
+    judges the raw frame, exactly as the test cycle does."""
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    l = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(l)
+    out = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
+    hsv[..., 1] = cv2.multiply(hsv[..., 1], 1.35)
+    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    return cv2.addWeighted(out, 1.6, cv2.GaussianBlur(out, (0, 0), 2.0), -0.6, 0)
+
+
 def _threshold_caption(value: float) -> tuple:
     """Plain-language reading of a correlation threshold."""
     if value < 0.55:
@@ -330,6 +345,9 @@ class RoiView(tk.Canvas):
         self._accent = OK_GREEN
         self._locked_size = None    # (w, h) in image px, or None for free drawing
         self._overlays = []         # [(roi, color, label)] drawn read-only
+        self._dim_outside = True    # shade everything outside the box
+        self._display_filter = None # img -> img applied for display only
+        self._display = None        # the filtered image, cached per image
 
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<ButtonPress-1>", self._on_press)
@@ -343,6 +361,7 @@ class RoiView(tk.Canvas):
     def set_image(self, img, keep_roi=True):
         prev_shape = None if self._image is None else self._image.shape[:2]
         self._image = img
+        self._display = None
         if img is not None:
             if not keep_roi:
                 self._roi = None
@@ -367,6 +386,28 @@ class RoiView(tk.Canvas):
         self._editable = editable
         self.config(cursor="crosshair" if editable else "arrow")
         self._redraw()
+
+    def set_dim_outside(self, on):
+        self._dim_outside = on
+        self._redraw()
+
+    def set_display_filter(self, fn):
+        """Show the image through `fn` (or as it is, for None). The box,
+        overlays and coordinates are untouched -- only the picture changes."""
+        self._display_filter = fn
+        self._display = None
+        self._redraw()
+
+    def _shown_image(self):
+        if self._display_filter is None:
+            return self._image
+        if self._display is None:
+            # Cached: a drag redraws many times a second.
+            try:
+                self._display = self._display_filter(self._image)
+            except Exception:
+                self._display = self._image
+        return self._display
 
     def set_accent(self, color):
         self._accent = color
@@ -452,7 +493,7 @@ class RoiView(tk.Canvas):
             return
 
         s, ox, oy, dw, dh = self._view
-        self._photo, _ = _to_photo(self._image, dw, dh)
+        self._photo, _ = _to_photo(self._shown_image(), dw, dh)
         self.create_image(ox, oy, image=self._photo, anchor="nw")
         self.create_rectangle(ox, oy, ox + dw, oy + dh, outline=LINE)
 
@@ -485,7 +526,7 @@ class RoiView(tk.Canvas):
         x0, y0, x1, y1 = self._roi_screen()
 
         # Dim everything outside the ROI so the taught region reads at a glance.
-        for box in ((ox, oy, ox + dw, y0), (ox, y1, ox + dw, oy + dh),
+        for box in () if not self._dim_outside else ((ox, oy, ox + dw, y0), (ox, y1, ox + dw, oy + dh),
                     (ox, y0, x0, y1), (x1, y0, ox + dw, y1)):
             if box[2] > box[0] and box[3] > box[1]:
                 self.create_rectangle(*box, fill="#000000", outline="",
@@ -2412,6 +2453,20 @@ def _open_wire_dialog(parent, ctrl, part_number):
     btn_import.pack(side="left", padx=(8, 0))
     btn_test_img = _btn(view_bar, "Test Image…", BTN_PRIMARY)
     btn_test_img.pack(side="left", padx=(8, 0))
+    # The wires are a few pixels across in a washed-out frame: show them
+    # clearer, and without the shading the teach view puts outside the box,
+    # which hid the very wires being boxed.
+    enhance_var = tk.BooleanVar(value=True)
+    view.set_dim_outside(False)
+    view.set_display_filter(_enhance_for_display)
+
+    def _toggle_enhance():
+        view.set_display_filter(_enhance_for_display if enhance_var.get() else None)
+
+    tk.Checkbutton(view_bar, text="  Enhance view", variable=enhance_var,
+                   command=_toggle_enhance, bg=BG, fg=TXT_DIM, selectcolor=FIELD,
+                   activebackground=BG, activeforeground=TXT, font=("Arial", 10),
+                   bd=0, highlightthickness=0, cursor="hand2").pack(side="left", padx=(14, 0))
 
     rail = tk.Frame(body, bg=BG, width=330)
     rail.grid(row=0, column=1, sticky="ns")
