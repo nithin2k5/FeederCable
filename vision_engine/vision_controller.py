@@ -65,6 +65,16 @@ WIRE_BLACK_MAX_SAT = 160
 # brighter or dimmer frame is not mistaken for a different colour; size is the
 # wire's share of the box. Together they stop a shadow or a fixture edge that
 # merely has the right colour from passing for a wire.
+# Wires ordered left to right run up and down through the box (top to bottom:
+# side to side). A patch lying across that direction -- this many times wider
+# than it is long -- is a shadow line, a board edge or a fixture block, not a
+# wire, however right its colour.
+WIRE_MAX_CROSSWISE = 1.5
+# A connector's wires leave it together: neighbouring wires may be at most
+# this share of the box apart (gap between them, across the box). Colours
+# scattered far apart are unrelated things -- a blue fixture part at one end
+# of the box and a shadow at the other.
+WIRE_MAX_GAP = 0.35
 WIRE_REF_POS_TOL = 0.25
 WIRE_REF_COLOR_TOL = 32.0
 WIRE_REF_AREA_RATIO = 3.0
@@ -178,6 +188,24 @@ def save_vision_config(cfg: dict):
 
 def get_vision_controller() -> "VisionController":
     return VisionController()
+
+
+def _runs_along(stat, direction: str) -> bool:
+    """Whether a patch is not lying across the wires' direction."""
+    bw, bh = stat[cv2.CC_STAT_WIDTH], stat[cv2.CC_STAT_HEIGHT]
+    across, along = (bh, bw) if direction == "ttb" else (bw, bh)
+    return across <= WIRE_MAX_CROSSWISE * along
+
+
+def _largest_gap(boxes, direction: str) -> int:
+    """The widest empty stretch between neighbouring wires, across the box."""
+    k = 1 if direction == "ttb" else 0
+    spans = sorted((b[k], b[k] + b[k + 2]) for b in boxes)
+    gap, reach = 0, spans[0][1] if spans else 0
+    for lo, hi in spans[1:]:
+        gap = max(gap, lo - reach)
+        reach = max(reach, hi)
+    return gap
 
 
 def _against_reference(stats: List[dict], reference: Optional[List[dict]]) -> Optional[str]:
@@ -437,7 +465,8 @@ class VisionController:
             need = expected.count(cname)
             m = cv2.morphologyEx(masks[cname], cv2.MORPH_OPEN, kernel)
             n, labels, stats, cents = cv2.connectedComponentsWithStats(m)
-            blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area),
+            blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area
+                            and _runs_along(stats[i], direction)),
                            key=lambda i: -stats[i, cv2.CC_STAT_AREA])[:need]
             if len(blobs) < need:
                 missing.append(cname)
@@ -452,11 +481,19 @@ class VisionController:
                 }))
 
         picked.sort(key=lambda t: t[0])
+        if missing:
+            # Not a full set of wires: whatever single colours turned up are
+            # more likely shadows or fixture than wires, so none is reported
+            # as one -- only what is missing.
+            result.error = ("no wires found" if len(missing) == len(set(expected))
+                            else "no " + ", ".join(missing) + " wire found")
+            return result
         result.found = [c for _, c, _, _ in picked]
         result.blobs = [(c, b) for _, c, b, _ in picked]
         result.stats = [st for _, _, _, st in picked]
-        if missing:
-            result.error = "no " + ", ".join(missing) + " wire found"
+        gap = _largest_gap([b for _, _, b, _ in picked], direction)
+        if gap > WIRE_MAX_GAP * extent:
+            result.error = "colours are not side by side like wires"
         elif result.found != expected:
             result.error = "saw " + " → ".join(result.found)
         else:

@@ -2769,7 +2769,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
             seen_lbl.config(text="No box drawn", fg=WARN)
             seen_note.config(text="Drag a box over the wires on the image.")
             return
-        seen = " → ".join(result.found) or "nothing"
+        seen = " → ".join(result.found) or "no wires"
         seen_lbl.config(text=("✓  " if result.ok else "✗  ") + seen,
                         fg=OK_GREEN if result.ok else NG_RED)
         note = ("Matches the good part saved for this check." if c.get("reference")
