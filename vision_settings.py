@@ -1091,6 +1091,12 @@ def render(parent):
         if _open_threshold_dialog(parent, ctrl, value, info["threshold"]):
             _refresh_table(select=value)
 
+    def _rename():
+        kind, value = _selection()
+        if kind == "part" and ctrl.model_info(value) is not None:
+            if _open_rename_dialog(parent, ctrl, value):
+                _refresh_table(select=value)
+
     def _set_wires():
         kind, value = _selection()
         if kind == "part" and ctrl.model_info(value) is not None:
@@ -1148,6 +1154,8 @@ def render(parent):
     btn_test.pack(side="left", padx=(8, 0))
     btn_thresh = _btn(toolbar, "Threshold…", BTN_NEUTRAL, command=_set_threshold, pady=7)
     btn_thresh.pack(side="left", padx=(8, 0))
+    btn_rename = _btn(toolbar, "Rename…", BTN_NEUTRAL, command=_rename, pady=7)
+    btn_rename.pack(side="left", padx=(8, 0))
     btn_wires = _btn(toolbar, "Wire Colours…", BTN_NEUTRAL, command=_set_wires, pady=7)
     btn_wires.pack(side="left", padx=(8, 0))
     btn_del = _btn(toolbar, "Delete", BTN_DANGER, command=_delete, pady=7)
@@ -1160,7 +1168,7 @@ def render(parent):
         info = ctrl.model_info(value) if is_part else None
         usable = info is not None
         for b, on in ((btn_reteach, is_part), (btn_test, usable),
-                      (btn_thresh, usable), (btn_wires, usable),
+                      (btn_thresh, usable), (btn_wires, usable), (btn_rename, usable),
                       (btn_del, kind is not None)):
             _set_btn_enabled(b, on)
 
@@ -3108,6 +3116,67 @@ def _open_wire_dialog(parent, ctrl, part_number):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Small dialogs
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _open_rename_dialog(parent, ctrl, part_number):
+    """Rename a taught part's objects. Returns True if renamed."""
+    from vision_engine.vision_controller import MAX_OBJECTS
+
+    info = ctrl.model_info(part_number)
+    if info is None:
+        return False
+    old = info["object_names"]
+    win = _dialog(parent, "Rename Objects", 430, 170 + 44 * len(old))
+    _dialog_header(win, "Rename objects — %s" % part_number,
+                   "Wire checks named after an object follow its new name.")
+
+    body = tk.Frame(win, bg=BG)
+    body.pack(fill="both", expand=True, padx=20, pady=16)
+    vars_ = []
+    for k, name in enumerate(old):
+        row = tk.Frame(body, bg=BG)
+        row.pack(fill="x", pady=4)
+        tk.Label(row, text="●", bg=BG, fg=OBJECT_COLORS[k % len(OBJECT_COLORS)],
+                 font=("Arial", 13)).pack(side="left", padx=(0, 6))
+        tk.Label(row, text=name, bg=BG, fg=TXT_DIM, font=("Arial", 11), width=10,
+                 anchor="w").pack(side="left")
+        tk.Label(row, text="→", bg=BG, fg=TXT_FAINT, font=("Arial", 11)).pack(side="left",
+                                                                               padx=6)
+        v = tk.StringVar(value=name)
+        e = tk.Entry(row, textvariable=v, bg=FIELD, fg=TXT, font=("Arial", 12),
+                     insertbackground=TXT, relief="flat", highlightthickness=1,
+                     highlightbackground=LINE, highlightcolor=ACCENT)
+        e.pack(side="left", fill="x", expand=True, ipady=3)
+        if k == 0:
+            e.focus_set()
+            e.select_range(0, "end")
+        vars_.append(v)
+
+    saved = {"v": False}
+
+    def _save(event=None):
+        try:
+            ctrl.rename_objects(part_number, [v.get() for v in vars_])
+        except Exception as e:
+            messagebox.showerror("Rename", str(e), parent=win)
+            return
+        saved["v"] = True
+        win.destroy()
+
+    tk.Frame(win, bg=LINE, height=1).pack(fill="x")
+    foot = tk.Frame(win, bg=PANEL)
+    foot.pack(fill="x")
+    foot_in = tk.Frame(foot, bg=PANEL)
+    foot_in.pack(fill="x", padx=18, pady=12)
+    _btn(foot_in, "Save", BTN_PRIMARY, command=_save, font_size=10,
+         pady=8).pack(side="right")
+    _btn(foot_in, "Cancel", BTN_NEUTRAL, command=win.destroy, font_size=10,
+         pady=8).pack(side="right", padx=(0, 8))
+    win.bind("<Return>", _save)
+    win.bind("<Escape>", lambda e: win.destroy())
+
+    parent.wait_window(win)
+    return saved["v"]
+
 
 def _open_threshold_dialog(parent, ctrl, part_number, current, anchor=None):
     """Edit one taught part's own threshold. Returns True if it was saved."""

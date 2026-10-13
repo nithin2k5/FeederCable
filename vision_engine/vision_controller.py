@@ -749,6 +749,32 @@ class VisionController:
         self._rewrite_model_cfg(
             part_number, lambda cfg: cfg.__setitem__("match_threshold", float(threshold)))
 
+    def rename_objects(self, part_number: str, names: List[str]):
+        """Rename a taught part's objects, in order. A wire check still carrying
+        its object's default name ("<object> wires") is renamed along with it;
+        one the operator named themselves is left alone."""
+        model = self._load_model(part_number)
+        if model is None:
+            raise ValueError(f"No model file mapped to '{part_number}'.")
+        old = [o["name"] for o in model.get("objects", [])]
+        if len(names) != len(old):
+            raise ValueError(f"Expected {len(old)} names, got {len(names)}.")
+        new = [(n or "").strip() or f"Object {k + 1}" for k, n in enumerate(names)]
+        if len(set(n.lower() for n in new)) != len(new):
+            raise ValueError("Each object needs a different name.")
+
+        def _edit(cfg):
+            pieces = cfg.get("pieces") or [{}]
+            for k, piece in enumerate(pieces[:len(new)]):
+                piece["name"] = new[k]
+            cfg["pieces"] = pieces
+            for c in cfg.get("wire_checks") or []:
+                k = int(c.get("object", 0))
+                if 0 <= k < len(old) and c.get("name") == f"{old[k]} wires":
+                    c["name"] = f"{new[k]} wires"
+
+        self._rewrite_model_cfg(part_number, _edit)
+
     def set_model_wire_checks(self, part_number: str, checks: List[dict]):
         """Replace a taught part's wire-colour checks. Each is
         {"name", "object", "offset": {"dx","dy","width","height"}, "colors",
