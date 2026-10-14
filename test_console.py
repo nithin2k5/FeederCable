@@ -11,6 +11,7 @@ import mysql.connector
 import threading
 import datetime
 from vision_engine.vision_controller import VisionController, VisionResult
+import wire_engine
 import time
 import os
 import re
@@ -3963,8 +3964,10 @@ def render(parent):
                 # part before the electrical tests even ran -- so the switch
                 # read as "fail everything" instead of "skip".
                 _log("Vision disabled in settings — skipping vision verification.")
-            elif not vision_ctrl.has_model(state["pno"]):
-                _log(f"Vision WARNING: No vision model configured for part '{state['pno']}'. Skipping vision.")
+            elif not vision_ctrl.has_vision(state["pno"]):
+                # Taught objects and wire colours are separate setups; a part
+                # with either one is inspected.
+                _log(f"Vision WARNING: No vision model or wire colours configured for part '{state['pno']}'. Skipping vision.")
             else:
                 _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
                 # Each enabled camera is inspected in turn against the part's
@@ -3995,13 +3998,20 @@ def render(parent):
                         _log(f"Vision CAM{cid} ERROR: {r.error}")
                         vision_failed.append(cid)
                     elif not r.ok:
-                        _log(f"Vision CAM{cid} NG: score={r.match_score:.4f}"
-                             + (f" — {r.error}" if len(r.objects) > 1 else ""))
+                        _log(f"Vision CAM{cid} NG: "
+                             + (f"score={r.match_score:.4f}" if r.objects else "")
+                             + (f" — {r.error}" if len(r.objects) > 1 or r.wires else ""))
                         vision_failed.append(cid)
                     else:
-                        _log(f"Vision CAM{cid} OK: score={r.match_score:.4f} in {r.processing_time_ms}ms"
-                             + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
-                                if len(r.objects) > 1 else ""))
+                        parts = []
+                        if r.objects:
+                            parts.append(f"score={r.match_score:.4f}"
+                                         + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
+                                            if len(r.objects) > 1 else ""))
+                        if r.wires:
+                            parts.append("wires " + ", ".join(
+                                f"{w.name}: {' > '.join(w.detected_order)}" for w in r.wires.regions))
+                        _log(f"Vision CAM{cid} OK in {r.processing_time_ms}ms: " + "; ".join(parts))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")
         # --- END VISION VERIFICATION ---
@@ -4753,6 +4763,10 @@ def render(parent):
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
             cv2.putText(frame, f"{result.judgement} {result.match_score:.2f}",
                         (x, max(14, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+        if result.wires:
+            # Each connector's wire box by its verdict, with the colours found
+            # in it, so a NG shows what was seen.
+            frame = wire_engine.draw_result(frame, result.wires)
         return frame
 
     def _show_vision_frame(result, cam_id=None):
@@ -4811,8 +4825,8 @@ def render(parent):
             # Nothing to warn about while vision is switched off -- the cycle
             # will not run it, taught model or not.
             _paint("Ready", "#4caf50"); return
-        if not vision_ctrl.has_model(pno):
-            _log(f"Vision WARNING: No vision model configured for part '{pno}'.")
+        if not vision_ctrl.has_vision(pno):
+            _log(f"Vision WARNING: No vision model or wire colours configured for part '{pno}'.")
             _paint("NO VISION MODEL", "#e8a000"); return
 
         _paint("Ready", "#4caf50")
