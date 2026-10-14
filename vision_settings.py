@@ -2759,13 +2759,13 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         if multi or wires:
             object_list.pack(fill="x", pady=(10, 0))
             tk.Frame(object_list, bg=LINE, height=1).pack(fill="x", pady=(0, 6))
-            for p in result.objects if multi else ():
-                _kv_row(object_list, p.name, "%.4f  %s" % (p.score, "✓" if p.ok else "✗"),
-                        value_fg=OK_GREEN if p.ok else NG_RED, mono=True)
             for w in wires:
                 _kv_row(object_list, w.name,
                         ("✓  " if w.passed else "✗  ") + (" > ".join(w.detected_order) or "no wires"),
                         value_fg=OK_GREEN if w.passed else NG_RED)
+            for p in result.objects if multi else ():
+                _kv_row(object_list, p.name, "%.4f  %s" % (p.score, "✓" if p.ok else "✗"),
+                        value_fg=OK_GREEN if p.ok else NG_RED, mono=True)
         else:
             object_list.pack_forget()
 

@@ -4004,13 +4004,13 @@ def render(parent):
                         vision_failed.append(cid)
                     else:
                         parts = []
+                        if r.wires:
+                            parts.append("wires " + ", ".join(
+                                f"{w.name}: {' > '.join(w.detected_order)}" for w in r.wires.regions))
                         if r.objects:
                             parts.append(f"score={r.match_score:.4f}"
                                          + (" (" + ", ".join(f"{p.name} {p.score:.2f}" for p in r.objects) + ")"
                                             if len(r.objects) > 1 else ""))
-                        if r.wires:
-                            parts.append("wires " + ", ".join(
-                                f"{w.name}: {' > '.join(w.detected_order)}" for w in r.wires.regions))
                         _log(f"Vision CAM{cid} OK in {r.processing_time_ms}ms: " + "; ".join(parts))
         else:
             _log("Vision skipped (not initialized/disabled). Proceeding with electrical tests.")

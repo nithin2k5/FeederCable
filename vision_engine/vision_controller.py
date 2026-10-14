@@ -30,7 +30,8 @@ Wire colours:
   the part sits elsewhere, and nothing outside the area. The checks are kept in
   vision_wires.json as one wire_engine profile per part number, apart from
   the template models, so re-teaching a part's pictures never touches them.
-  A part with both objects and wires is OK only when both pass.
+  Wire colours are checked first, then objects; a part with both is OK
+  only when both pass.
 """
 import configparser
 import itertools
@@ -484,9 +485,10 @@ class VisionController:
     # ── Production Inspection ───────────────────────────────────────────────
 
     def inspect(self, part_number: str, frame: Optional[np.ndarray] = None) -> VisionResult:
-        """Judge one frame against a part's taught objects and wire colours.
+        """Judge one frame against a part's wire colours, then its taught objects.
 
-        The two are independent: a part may have either or both, each is
+        Wire colours are the first check and object detection follows. The
+        two are independent: a part may have either or both, each is
         judged on its own (objects_ok / wires_ok), and the part is OK only
         when every detection it has passes. By default captures a fresh frame
         from the configured camera — the same path production uses. Pass
@@ -518,6 +520,17 @@ class VisionController:
             if frame is None:
                 return _error("Camera not available")
 
+        # ── 1. Wire colours ─────────────────────────────────────────────────
+        wires, wires_ok = None, None
+        if wire_profile is not None:
+            wires = self.inspect_wires(part_number, frame, wire_profile)
+            wires_ok = wires.passed
+            for reg in wires.regions:
+                print(f"[VISION DEBUG] pno={part_number} wires={reg.name!r} "
+                      f"expected={reg.expected_order} found={reg.detected_order} "
+                      f"ok={reg.passed}")
+
+        # ── 2. Object detection ─────────────────────────────────────────────
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         threshold = (model or {}).get("match_threshold",
                                       self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
@@ -558,27 +571,19 @@ class VisionController:
         weakest = min(results, key=lambda r: r.score) if results else None
         objects_ok = all(r.ok for r in results) if results else None
 
-        wires, wires_ok = None, None
-        if wire_profile is not None:
-            wires = self.inspect_wires(part_number, frame, wire_profile)
-            wires_ok = wires.passed
-            for reg in wires.regions:
-                print(f"[VISION DEBUG] pno={part_number} wires={reg.name!r} "
-                      f"expected={reg.expected_order} found={reg.detected_order} "
-                      f"ok={reg.passed}")
         elapsed = int((time.time() - start) * 1000)
 
         ok = objects_ok is not False and wires_ok is not False
         problems = []
+        if wires_ok is False:
+            problems.append("Wires: " + "; ".join(
+                f"{r.name} {r.message}" for r in wires.regions if not r.passed))
         if objects_ok is False:
             if len(results) == 1:
                 problems.append(f"No match found (score {weakest.score:.2f} < {threshold})")
             else:
                 problems.append("Not found: " + ", ".join(
                     f"{r.name} ({r.score:.2f})" for r in results if not r.ok))
-        if wires_ok is False:
-            problems.append("Wires: " + "; ".join(
-                f"{r.name} {r.message}" for r in wires.regions if not r.passed))
         return VisionResult(
             ok=ok, judgement="OK" if ok else "NG", part_number=part_number,
             match_score=weakest.score if weakest else 0.0, threshold=threshold,
