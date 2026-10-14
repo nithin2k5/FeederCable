@@ -2467,14 +2467,13 @@ def _open_wire_dialog(parent, ctrl, part_number):
                    "Box where a connector's wires leave it, then set their colours in order.",
                    compact=True)
 
-    # Each check's box is a fixed spot in the frame. A check saved when boxes
-    # could follow an object's match is turned into a fixed one off the first
-    # frame shown (see _use_frame).
+    # Each check's box is a fixed spot in the frame. Nothing here involves
+    # object detection.
     checks = [dict(c, offset=dict(c["offset"]) if c.get("offset") else None,
                    colors=list(c["colors"]))
               for c in ctrl.wire_checks(part_number)]
     sel = {"i": 0 if checks else None}
-    shot = {"frame": None, "anchors": None, "label": ""}
+    shot = {"frame": None, "label": ""}
     alive = {"v": True}
     loading = {"v": False}
     saved = {"v": False}
@@ -2620,7 +2619,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         """The check's box in the shown frame, as a RoiView dict, or None."""
         if not c or not c.get("offset") or shot["frame"] is None:
             return None
-        b = ctrl.wire_box(c, (0, 0, 0, 0), shot["frame"].shape)
+        b = ctrl.wire_box(c, shot["frame"].shape)
         return {"x": b[0], "y": b[1], "width": b[2], "height": b[3]} if b else None
 
     def _paint_rows():
@@ -2735,8 +2734,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         if c is None or b is None:
             return None
         return ctrl.check_wires(shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
-                                c["colors"], c["direction"], c["name"],
-                                reference=c.get("reference"))
+                                c["colors"], c["direction"], c["name"])
 
     def _paint_seen(c, result):
         if c is None:
@@ -2754,9 +2752,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         seen = " → ".join(result.found) or "no wires"
         seen_lbl.config(text=("✓  " if result.ok else "✗  ") + seen,
                         fg=OK_GREEN if result.ok else NG_RED)
-        note = ("Matches the good part saved for this check." if c.get("reference")
-                else "Order matches. Save records this frame as the good part: "
-                     "each wire's colour, place and size.") if result.ok else \
+        note = "Colours found in the order set." if result.ok else \
             "Expected %s — %s." % (" → ".join(result.expected), result.error)
         seen_note.config(text=note, fg=TXT_DIM if result.ok else WARN)
 
@@ -2780,7 +2776,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
                     ["Wires %d" % k for k in range(1, MAX_WIRE_CHECKS + 2)]
                     if n.lower() not in used)
         checks.append({"name": name, "offset": None, "colors": ["blue", "black"],
-                       "direction": "ltr", "follow": False})
+                       "direction": "ltr"})
         _select(len(checks) - 1)
 
     def _remove():
@@ -2799,7 +2795,6 @@ def _open_wire_dialog(parent, ctrl, part_number):
         while len(cols) < n:
             cols.append(palette_names[0])
         c["colors"] = cols
-        c["reference"] = None
         _refresh()
 
     def _on_edit(*_a):
@@ -2807,17 +2802,13 @@ def _open_wire_dialog(parent, ctrl, part_number):
         if loading["v"] or c is None:
             return
         c["name"] = name_var.get()
-        before = (list(c["colors"]), c["direction"])
         c["direction"] = dir_keys.get(dir_var.get(), "ltr")
         for i in range(len(c["colors"])):
             if color_vars[i].get():
                 c["colors"][i] = color_vars[i].get()
-        if (c["colors"], c["direction"]) != before:
-            c["reference"] = None
         _refresh()
 
     def _store_box(c, roi):
-        c["reference"] = None       # learned for the old box; Save learns anew
         c["offset"] = None if roi is None else {
             "dx": roi["x"], "dy": roi["y"], "width": roi["width"], "height": roi["height"]}
 
@@ -2839,58 +2830,19 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     def _use_frame(frame, label, then=None):
         """Show a frame, and run `then` once it is up. Nothing is detected
-        here: wire colours are judged only inside a drawn box. Only if an old
-        check still follows an object are the objects searched for -- on a
-        worker thread, as matching a large frame can stall the window -- to
-        turn its box into a fixed one where it sits now."""
-        done = {}
-        need = any(c.get("follow", "object" in c) for c in checks)
-
-        def _work():
-            try:
-                done["anchors"] = ctrl.locate_objects(part_number, frame) if need else None
-            except Exception:
-                done["anchors"] = []
-
-        def _poll():
-            if not alive["v"]:
-                return
-            if "anchors" not in done:
-                win.after(50, _poll)
-                return
-            shot["frame"], shot["anchors"], shot["label"] = frame, done["anchors"], label
-            loading["v"] = True
-            try:
-                view.set_image(frame, keep_roi=False)
-            finally:
-                loading["v"] = False
-            frame_lbl.config(text=label)
-            unplaced = []
-            for c in checks:
-                if not c.get("follow", "object" in c):
-                    continue
-                a = shot["anchors"] or []
-                k = int(c.get("object", 0))
-                b = (ctrl.wire_box(c, a[k].box, frame.shape)
-                     if 0 <= k < len(a) and a[k].ok else None)
-                c["offset"] = ({"dx": b[0], "dy": b[1], "width": b[2], "height": b[3]}
-                               if b else None)
-                c["follow"] = False
-                c.pop("object", None)
-                if b is None:
-                    c["reference"] = None
-                    unplaced.append(c["name"])
-            status_lbl.config(
-                text=("Redraw the box for: " + ", ".join(unplaced) +
-                      " — it was placed off an object not found here.") if unplaced else "",
-                fg=WARN)
-            _set_btn_enabled(btn_capture, stream["s"] is not None)
-            _refresh()
-            if then:
-                then()
-
-        threading.Thread(target=_work, daemon=True).start()
-        win.after(50, _poll)
+        here: wire colours are judged only inside a drawn box."""
+        shot["frame"], shot["label"] = frame, label
+        loading["v"] = True
+        try:
+            view.set_image(frame, keep_roi=False)
+        finally:
+            loading["v"] = False
+        frame_lbl.config(text=label)
+        status_lbl.config(text="", fg=TXT_DIM)
+        _set_btn_enabled(btn_capture, stream["s"] is not None)
+        _refresh()
+        if then:
+            then()
 
     def _capture():
         s = stream["s"]
@@ -2944,29 +2896,27 @@ def _open_wire_dialog(parent, ctrl, part_number):
             _use_frame(img, "TEST IMAGE  ·  %s" % name, then=_check_all)
 
     def _check_all():
-        """Run the whole inspection on this frame with the checks as drawn --
-        the path the test cycle takes -- and show every check's result on it."""
+        """Judge every drawn check on this frame and show each result on it.
+        Wire checks only: object detection is a separate check."""
         if shot["frame"] is None:
             return
-        drawn = [c for c in checks if c.get("offset")]
-        r = ctrl.inspect(part_number, frame=shot["frame"], wire_checks=drawn)
-        if r.judgement == "ERROR":
-            status_lbl.config(text="ERROR — %s" % r.error, fg=WARN)
-        else:
-            per_check = "   ".join("%s %s %s" % ("✓" if w.ok else "✗", w.name,
-                                                " → ".join(w.found) or "no wires")
-                                    for w in r.wires)
-            text = "Wire detection %s — %s" % ("OK" if r.wires_ok else "NG",
-                                               per_check or "no wire checks drawn")
-            if r.objects_ok is not None:
-                text += "    ·    Object detection %s" % ("OK" if r.objects_ok else "NG")
-            status_lbl.config(text=text, fg=OK_GREEN if r.wires_ok else NG_RED)
-        if r.objects:
-            view.set_overlays(
-                [({"x": o.box[0], "y": o.box[1], "width": o.box[2], "height": o.box[3]},
-                  OK_GREEN if o.ok else NG_RED, "%s %.2f" % (o.name, o.score))
-                 for o in r.objects if o.box]
-                + _wire_overlays(r.wires, WIRE_DRAW_BGR))
+        results = []
+        for c in checks:
+            b = _box_of(c)
+            if b:
+                results.append(ctrl.check_wires(
+                    shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
+                    c["colors"], c["direction"], c["name"]))
+        if not results:
+            status_lbl.config(text="No wire boxes drawn yet.", fg=WARN)
+            return
+        ok = all(r.ok for r in results)
+        status_lbl.config(
+            text="Wires %s — " % ("OK" if ok else "NG") + "   ".join(
+                "%s %s %s" % ("✓" if r.ok else "✗", r.name, " → ".join(r.found) or "no wires")
+                for r in results),
+            fg=OK_GREEN if ok else NG_RED)
+        view.set_overlays(_wire_overlays(results, WIRE_DRAW_BGR))
 
     def _save():
         undrawn = [c["name"].strip() or "Wires %d" % (i + 1)
@@ -2975,37 +2925,6 @@ def _open_wire_dialog(parent, ctrl, part_number):
             messagebox.showerror("Wire Colours", "Draw a box for: %s" % ", ".join(undrawn),
                                  parent=win)
             return
-        # Every check is recorded from the frame on screen as the good part --
-        # each wire's colour, place and size -- so the line can tell a real wire
-        # from a shadow or fixture edge that only has the right colour. That
-        # frame has to show every check passing, or a box drawn on background
-        # would be learned as "good".
-        if checks and shot["frame"] is None:
-            messagebox.showerror("Wire Colours",
-                                 "Capture a frame of a good part first — Save records "
-                                 "each wire from it.", parent=win)
-            return
-        failing = []
-        learned = []
-        for i, c in enumerate(checks):
-            b = _box_of(c)
-            r = ctrl.check_wires(shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
-                                 c["colors"], c["direction"], c["name"]) if b else None
-            if r is None or not r.ok:
-                failing.append("  •  %s — %s" % (c["name"].strip() or "Wires %d" % (i + 1),
-                                                  r.error if r else "box not placed"))
-            else:
-                learned.append(r.stats)
-        if failing:
-            messagebox.showerror(
-                "Wire Colours",
-                "Save records each wire from the part on screen as the good part, so "
-                "every check must read ✓ on it first:\n\n%s\n\nPut a good part in "
-                "and Capture Frame, or move the boxes onto its wires." % "\n".join(failing),
-                parent=win)
-            return
-        for c, ref in zip(checks, learned):
-            c["reference"] = ref
         try:
             ctrl.set_wire_checks(part_number, checks)
         except Exception as e:
@@ -3065,7 +2984,7 @@ def _open_rename_dialog(parent, ctrl, part_number):
     old = info["object_names"]
     win = _dialog(parent, "Rename Objects", 430, 170 + 44 * len(old))
     _dialog_header(win, "Rename objects — %s" % part_number,
-                   "Wire checks named after an object follow its new name.")
+                   "Only the object names change.")
 
     body = tk.Frame(win, bg=BG)
     body.pack(fill="both", expand=True, padx=20, pady=16)

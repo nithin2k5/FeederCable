@@ -28,13 +28,12 @@ Wire colours:
   connector's wires leave it, and the colours expected there in order (say
   blue then black, left to right). They are kept in vision_wires.json, apart
   from the template models, so teaching, re-teaching or deleting a part's
-  pictures never touches its wire checks. (Checks saved inside a model before
-  this are moved across the first time they are read; any of those that
-  followed an object's match still do.)
+  pictures never touches its wire checks. (Fixed-box checks saved inside a
+  model before this are moved across the first time they are read.)
   Inside the box every pixel is classed against a named colour palette, each
-  expected colour takes its largest blobs, and the blobs' order along the
-  wires' direction must equal the expected sequence. A swapped, missing or
-  wrong-coloured wire is an NG.
+  expected colour takes its largest patch, and the patches' order along the
+  wires' direction must equal the expected sequence. That is the whole rule:
+  a swapped, missing or wrong-coloured wire is an NG.
 """
 import configparser
 import json
@@ -61,27 +60,6 @@ DEFAULT_WIRE_MIN_AREA_PCT = 2.0
 # anything darker than this share of it, and not strongly coloured, is black.
 WIRE_BLACK_REL = 0.62
 WIRE_BLACK_MAX_SAT = 160
-# A check saved with a reference -- each wire as it looked on a good part --
-# also needs every wire within these limits of it. Position is the wire's
-# centre across the box (0 = first side, 1 = last side); colour is the
-# distance in OpenCV's 8-bit Lab, with lightness counted at half weight so a
-# brighter or dimmer frame is not mistaken for a different colour; size is the
-# wire's share of the box. Together they stop a shadow or a fixture edge that
-# merely has the right colour from passing for a wire.
-# Wires ordered left to right run up and down through the box (top to bottom:
-# side to side). A patch lying across that direction -- this many times wider
-# than it is long -- is a shadow line, a board edge or a fixture block, not a
-# wire, however right its colour.
-WIRE_MAX_CROSSWISE = 1.5
-# A connector's wires leave it together: neighbouring wires may be at most
-# this share of the box apart (gap between them, across the box). Colours
-# scattered far apart are unrelated things -- a blue fixture part at one end
-# of the box and a shadow at the other.
-WIRE_MAX_GAP = 0.35
-WIRE_REF_POS_TOL = 0.25
-WIRE_REF_COLOR_TOL = 32.0
-WIRE_REF_AREA_RATIO = 3.0
-
 # OpenCV HSV (H 0-179, S and V 0-255). Pixels are classed in this order and a
 # pixel takes the first colour it fits, so the classes never overlap: black
 # goes first, so the dark edge of a blue wire reads as black rather than the
@@ -130,10 +108,6 @@ class WireResult:
     ok: bool
     expected: List[str] = field(default_factory=list)
     found: List[str] = field(default_factory=list)          # in wire order
-    # One measurement per wire picked, in wire order: {"color", "pos" (centre
-    # across the box, 0..1), "lab" (mean colour), "area" (share of the box)}
-    # -- what a reference is learned from and compared against.
-    stats: List[dict] = field(default_factory=list)
     # One (colour, (x, y, w, h)) per wire blob picked, in frame coordinates.
     blobs: List[Tuple[str, Tuple[int, int, int, int]]] = field(default_factory=list)
     box: Optional[Tuple[int, int, int, int]] = None         # the wire box in frame
@@ -212,43 +186,6 @@ def _save_wires_file(data: dict):
 
 def get_vision_controller() -> "VisionController":
     return VisionController()
-
-
-def _runs_along(stat, direction: str) -> bool:
-    """Whether a patch is not lying across the wires' direction."""
-    bw, bh = stat[cv2.CC_STAT_WIDTH], stat[cv2.CC_STAT_HEIGHT]
-    across, along = (bh, bw) if direction == "ttb" else (bw, bh)
-    return across <= WIRE_MAX_CROSSWISE * along
-
-
-def _largest_gap(boxes, direction: str) -> int:
-    """The widest empty stretch between neighbouring wires, across the box."""
-    k = 1 if direction == "ttb" else 0
-    spans = sorted((b[k], b[k] + b[k + 2]) for b in boxes)
-    gap, reach = 0, spans[0][1] if spans else 0
-    for lo, hi in spans[1:]:
-        gap = max(gap, lo - reach)
-        reach = max(reach, hi)
-    return gap
-
-
-def _against_reference(stats: List[dict], reference: Optional[List[dict]]) -> Optional[str]:
-    """Why these wires don't match the good part's, or None if they do (or
-    there is no usable reference to hold them to)."""
-    if not reference or len(reference) != len(stats):
-        return None
-    for st, ref in zip(stats, reference):
-        what = st["color"] + " wire"
-        if abs(st["pos"] - ref["pos"]) > WIRE_REF_POS_TOL:
-            return what + " is not where it was on the good part"
-        (l1, a1, b1), (l2, a2, b2) = st["lab"], ref["lab"]
-        dist = (((l1 - l2) * 0.5) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2) ** 0.5
-        if dist > WIRE_REF_COLOR_TOL:
-            return what + " is a different shade from the good part"
-        ratio = st["area"] / max(ref["area"], 1e-6)
-        if not 1.0 / WIRE_REF_AREA_RATIO <= ratio <= WIRE_REF_AREA_RATIO:
-            return what + " is a different size from the good part"
-    return None
 
 
 class VisionController:
@@ -330,9 +267,6 @@ class VisionController:
 
             model_cfg["objects"] = objects
             model_cfg["templates"] = objects[0]["templates"]
-            model_cfg["wire_checks"] = [
-                c for c in (model_cfg.get("wire_checks") or [])
-                if 0 <= int(c.get("object", 0)) < len(objects)]
             self._model_cache[part_number] = model_cfg
             return model_cfg
         except (OSError, ValueError, KeyError):
@@ -383,27 +317,18 @@ class VisionController:
                                        score=best_score, box=best_box))
         return results, None
 
-    def locate_objects(self, part_number: str, frame: np.ndarray) -> List[ObjectResult]:
-        """Where each object of a taught part is found in `frame` -- what a wire
-        box is anchored to. Empty if the part has no usable model."""
-        model = self._load_model(part_number)
-        if model is None or not all(p["templates"] for p in model.get("objects", [])):
-            return []
-        threshold = model.get("match_threshold", self.config.get("match_threshold", DEFAULT_MATCH_THRESHOLD))
-        results, _ = self._match_objects(
-            model, part_number, cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), threshold)
-        return results
-
     def wire_checks(self, part_number: str) -> List[dict]:
         """A part's wire-colour checks (copies), from vision_wires.json.
 
-        Checks saved inside a template model before they had a file of their
-        own are moved across here the first time they are read.
+        Fixed-box checks saved inside a template model before they had a file
+        of their own are moved across here the first time they are read; ones
+        that were placed off an object's match can't be, and need redrawing.
         """
         data = _load_wires_file()
         if part_number in data:
             return [dict(c) for c in data[part_number]]
-        legacy = (self._load_model(part_number) or {}).get("wire_checks") or []
+        legacy = [c for c in self._legacy_wire_checks(part_number)
+                  if c.get("follow") is False and c.get("offset")]
         if legacy:
             data[part_number] = legacy
             try:
@@ -411,6 +336,16 @@ class VisionController:
             except OSError:
                 pass
         return [dict(c) for c in legacy]
+
+    def _legacy_wire_checks(self, part_number: str) -> List[dict]:
+        path = self._model_path(part_number)
+        if path is None:
+            return []
+        try:
+            with np.load(path, allow_pickle=True) as data:
+                return json.loads(str(data["config"])).get("wire_checks") or []
+        except (OSError, ValueError, KeyError):
+            return []
 
     def has_wire_checks(self, part_number: str) -> bool:
         return bool(self.wire_checks(part_number))
@@ -437,13 +372,11 @@ class VisionController:
         return palette
 
     @staticmethod
-    def wire_box(check: dict, anchor: Tuple[int, int, int, int],
-                 frame_shape) -> Optional[Tuple[int, int, int, int]]:
-        """A check's box in frame coordinates, placed off its anchor object's
-        match and clipped to the frame. None if too little of it is in frame."""
+    def wire_box(check: dict, frame_shape) -> Optional[Tuple[int, int, int, int]]:
+        """A check's box in frame coordinates, clipped to the frame. None if too
+        little of it is in frame."""
         off = check["offset"]
-        x0 = anchor[0] + int(off["dx"])
-        y0 = anchor[1] + int(off["dy"])
+        x0, y0 = int(off["dx"]), int(off["dy"])
         x1, y1 = x0 + int(off["width"]), y0 + int(off["height"])
         fh, fw = frame_shape[:2]
         x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, fw), min(y1, fh)
@@ -453,17 +386,14 @@ class VisionController:
 
     def check_wires(self, frame: np.ndarray, box: Tuple[int, int, int, int],
                     expected: List[str], direction: str = "ltr",
-                    name: str = "Wires",
-                    reference: Optional[List[dict]] = None) -> WireResult:
+                    name: str = "Wires") -> WireResult:
         """Find each expected colour inside `box` and check their order.
 
         Every pixel is classed against the palette (first fitting colour wins).
-        Each expected colour takes as many of its largest blobs as it appears in
-        the sequence; the picked blobs, ordered along the wires' direction
-        ("ltr" = left to right, "ttb" = top to bottom), must spell out the
-        expected sequence exactly. With a `reference` -- the stats of the same
-        check on a good part -- each wire must also sit, look and measure like
-        its counterpart there.
+        Each expected colour takes as many of its largest patches as it appears
+        in the sequence; the patches, ordered along the wires' direction ("ltr"
+        = left to right, "ttb" = top to bottom), must spell out the expected
+        sequence exactly. Nothing else is judged.
         """
         expected = [c.lower() for c in expected]
         x, y, w, h = box
@@ -479,9 +409,7 @@ class VisionController:
             result.error = "unknown colour " + ", ".join(unknown)
             return result
 
-        blurred = cv2.GaussianBlur(roi, (5, 5), 0)
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        lab = cv2.cvtColor(blurred, cv2.COLOR_BGR2LAB)
+        hsv = cv2.cvtColor(cv2.GaussianBlur(roi, (5, 5), 0), cv2.COLOR_BGR2HSV)
         # The background is most of a well-drawn box, so its upper-quartile
         # brightness stands for the board behind the wires.
         black_rel = None
@@ -506,72 +434,42 @@ class VisionController:
         min_area = max(12, int(w * h * pct / 100.0))
         kernel = np.ones((3, 3), np.uint8)
         axis = 1 if direction == "ttb" else 0
-        extent = float(h if direction == "ttb" else w)
-        picked = []         # (position along the wires, colour, (x, y, w, h), stats)
+        picked = []         # (position along the wires, colour, (x, y, w, h))
         missing = []
         for cname in dict.fromkeys(expected):
             need = expected.count(cname)
             m = cv2.morphologyEx(masks[cname], cv2.MORPH_OPEN, kernel)
-            n, labels, stats, cents = cv2.connectedComponentsWithStats(m)
-            blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area
-                            and _runs_along(stats[i], direction)),
+            n, _, stats, cents = cv2.connectedComponentsWithStats(m)
+            blobs = sorted((i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area),
                            key=lambda i: -stats[i, cv2.CC_STAT_AREA])[:need]
             if len(blobs) < need:
                 missing.append(cname)
             for i in blobs:
                 bx, by, bw, bh = (int(v) for v in stats[i, :4])
-                pos = float(cents[i][axis])
-                picked.append((pos, cname, (x + bx, y + by, bw, bh), {
-                    "color": cname,
-                    "pos": round(pos / extent, 4),
-                    "lab": [round(float(v), 1) for v in lab[labels == i].mean(axis=0)],
-                    "area": round(float(stats[i, cv2.CC_STAT_AREA]) / (w * h), 5),
-                }))
+                picked.append((float(cents[i][axis]), cname, (x + bx, y + by, bw, bh)))
 
         picked.sort(key=lambda t: t[0])
+        result.found = [c for _, c, _ in picked]
+        result.blobs = [(c, b) for _, c, b in picked]
         if missing:
-            # Not a full set of wires: whatever single colours turned up are
-            # more likely shadows or fixture than wires, so none is reported
-            # as one -- only what is missing.
-            result.error = ("no wires found" if len(missing) == len(set(expected))
-                            else "no " + ", ".join(missing) + " wire found")
-            return result
-        result.found = [c for _, c, _, _ in picked]
-        result.blobs = [(c, b) for _, c, b, _ in picked]
-        result.stats = [st for _, _, _, st in picked]
-        gap = _largest_gap([b for _, _, b, _ in picked], direction)
-        if gap > WIRE_MAX_GAP * extent:
-            result.error = "colours are not side by side like wires"
+            result.error = "no " + ", ".join(missing) + " wire found"
         elif result.found != expected:
             result.error = "saw " + " → ".join(result.found)
         else:
-            result.error = _against_reference(result.stats, reference)
-            result.ok = result.error is None
+            result.ok = True
         return result
 
-    def _run_wire_checks(self, checks: List[dict], objects: List[ObjectResult],
-                         frame: np.ndarray) -> List[WireResult]:
+    def _run_wire_checks(self, checks: List[dict], frame: np.ndarray) -> List[WireResult]:
         out = []
         for c in checks:
             name = c.get("name") or "Wires"
-            if c.get("follow", True):
-                k = int(c.get("object", 0))
-                anchor = objects[k].box if 0 <= k < len(objects) else None
-                if anchor is None:
-                    out.append(WireResult(name=name, ok=False,
-                                          expected=list(c.get("colors", [])),
-                                          error="its object was not found to place the box"))
-                    continue
-            else:
-                anchor = (0, 0, 0, 0)       # a fixed spot: the offset is the box
-            box = self.wire_box(c, anchor, frame.shape)
+            box = self.wire_box(c, frame.shape) if c.get("offset") else None
             if box is None:
                 out.append(WireResult(name=name, ok=False, expected=list(c.get("colors", [])),
                                       error="wire box falls outside the frame"))
                 continue
             out.append(self.check_wires(frame, box, c.get("colors", []),
-                                        c.get("direction", "ltr"), name,
-                                        reference=c.get("reference")))
+                                        c.get("direction", "ltr"), name))
         return out
 
     # ── Production Inspection ───────────────────────────────────────────────
@@ -626,12 +524,9 @@ class VisionController:
         weakest = min(results, key=lambda r: r.score) if results else None
 
         # ── Wire detection ──────────────────────────────────────────────────
-        # Judged on its own. Only an old check that followed an object's match
-        # waits on that match -- off a wrong match it would look in the wrong
-        # place, so it is reported as unplaced instead.
         wires, wires_ok = [], None
         if checks:
-            wires = self._run_wire_checks(checks, results if objects_ok else [], frame)
+            wires = self._run_wire_checks(checks, frame)
             wires_ok = all(w.ok for w in wires)
             for wr in wires:
                 print(f"[VISION DEBUG] pno={part_number} wires={wr.name!r} "
@@ -665,7 +560,6 @@ class VisionController:
         roi: Union[dict, List[dict], List[List[dict]]],
         match_threshold: float = DEFAULT_MATCH_THRESHOLD,
         object_names: Optional[List[str]] = None,
-        wire_checks: Optional[List[dict]] = None,
     ) -> str:
         """Crop the templates for every object of a part and save them as its model.
 
@@ -676,9 +570,6 @@ class VisionController:
         lands on background in any reference where the part sat elsewhere, and a
         background template matches the live background at a high score — which
         would pass an empty fixture.
-
-        `wire_checks` are kept as given, less any anchored to an object the
-        part no longer has.
         """
         rois = list(roi) if isinstance(roi, (list, tuple)) else [roi] * len(images)
         if len(rois) != len(images):
@@ -721,8 +612,6 @@ class VisionController:
             "roi": rois[0][0],              # older readers expect a single region
             "match_threshold": match_threshold,
             "num_references": len(images),
-            "wire_checks": [c for c in (wire_checks or [])
-                            if 0 <= int(c.get("object", 0)) < n_objects],
         }
 
         os.makedirs(_MODELS_DIR, exist_ok=True)
@@ -806,9 +695,7 @@ class VisionController:
             part_number, lambda cfg: cfg.__setitem__("match_threshold", float(threshold)))
 
     def rename_objects(self, part_number: str, names: List[str]):
-        """Rename a taught part's objects, in order. A wire check still carrying
-        its object's default name ("<object> wires") is renamed along with it;
-        one the operator named themselves is left alone."""
+        """Rename a taught part's objects, in order."""
         model = self._load_model(part_number)
         if model is None:
             raise ValueError(f"No model file mapped to '{part_number}'.")
@@ -825,20 +712,14 @@ class VisionController:
                 piece["name"] = new[k]
             cfg["pieces"] = pieces
 
-        checks = self.wire_checks(part_number)
         self._rewrite_model_cfg(part_number, _edit)
-        renames = {f"{o} wires": f"{n} wires" for o, n in zip(old, new)}
-        if any(c.get("name") in renames for c in checks):
-            for c in checks:
-                c["name"] = renames.get(c.get("name"), c.get("name"))
-            self.set_wire_checks(part_number, checks)
 
     def set_wire_checks(self, part_number: str, checks: List[dict]):
         """Replace a part's wire-colour checks; an empty list removes them.
 
         Each is {"name", "offset": {"dx","dy","width","height"}, "colors",
-        "direction", "reference"}: a fixed box in the frame (dx, dy are its
-        corner). The part needs no taught pictures to have them.
+        "direction"}: a fixed box in the frame (dx, dy are its corner). The
+        part needs no taught pictures to have them.
         """
         if len(checks) > MAX_WIRE_CHECKS:
             raise ValueError(f"At most {MAX_WIRE_CHECKS} wire checks per part.")
@@ -850,22 +731,12 @@ class VisionController:
             off = c.get("offset")
             if not off:
                 raise ValueError(f"“{c.get('name')}” has no wire box drawn.")
-            ref = c.get("reference")
-            if ref is not None and len(ref) != len(colors):
-                raise ValueError(f"“{c.get('name')}” reference does not match its wires.")
-            entry = {
+            clean.append({
                 "name": (c.get("name") or "").strip() or f"Wires {len(clean) + 1}",
                 "offset": {k: int(off[k]) for k in ("dx", "dy", "width", "height")},
                 "colors": colors,
                 "direction": "ttb" if c.get("direction") == "ttb" else "ltr",
-                # A check saved before "follow" existed was measured off its
-                # object, so it keeps following it; anything newer is fixed.
-                "follow": bool(c.get("follow", "object" in c)),
-                "reference": ref,
-            }
-            if entry["follow"]:
-                entry["object"] = int(c.get("object", 0))
-            clean.append(entry)
+            })
         names = [c["name"].lower() for c in clean]
         if len(set(names)) != len(names):
             raise ValueError("Each wire check needs a different name.")
@@ -878,7 +749,7 @@ class VisionController:
         _save_wires_file(data)
         # The file is the one source now: drop any copy still inside the model,
         # or it would be read back in as soon as the file has none.
-        if (self._load_model(part_number) or {}).get("wire_checks"):
+        if self._legacy_wire_checks(part_number):
             self._rewrite_model_cfg(part_number, lambda cfg: cfg.pop("wire_checks", None))
 
     # The name from when wire checks lived inside the model.
