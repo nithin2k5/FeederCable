@@ -282,6 +282,27 @@ def _play_wav(filename: str):
         except Exception:
             pass
 
+# Set by the live Test Console page to its on-screen log. A label that fails
+# to print used to say so only on the console, which a station has no window
+# for -- the operator saw "START label -> ..." and nothing come out.
+_PRINT_LOG = {"fn": None}
+
+# Which label a scratch file carries, for saying so on screen.
+_LABEL_KIND = {"TEMPMARKER_START.prn": "START label", "TEMPMARKER_END.prn": "END label",
+               "TEMPPRN.prn": "part label", "TEMPLOTPRN.prn": "lot label"}
+
+
+def _print_problem(msg: str):
+    """Report a print failure on the console and in the on-screen log."""
+    print(f"[PRINT DEBUG] {msg}")
+    fn = _PRINT_LOG.get("fn")
+    if fn:
+        try:
+            fn(f"PRINT PROBLEM — {msg}")
+        except Exception:
+            pass
+
+
 def _print_raw(printer_name: str, filename: str) -> bool:
     """Send a .prn file to a printer verbatim. True when the spooler took it.
 
@@ -289,17 +310,25 @@ def _print_raw(printer_name: str, filename: str) -> bool:
     the lot label, which is printed once per box on an explicit click. The
     per-part callers ignore it and rely on the console trace, as before.
     """
+    what = _LABEL_KIND.get(os.path.basename(filename), os.path.basename(filename))
     if not _print_ok:
-        print("[PRINT DEBUG] win32print not available (pywin32 not installed) -- cannot print")
+        _print_problem(f"{what} not printed: pywin32 is not installed, so nothing can print")
         return False
     if not os.path.exists(filename):
-        print(f"[PRINT DEBUG] label file not found: {filename}")
+        _print_problem(f"{what} not printed: label file not found ({filename})")
         return False
     try:
         installed = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
         print(f"[PRINT DEBUG] installed printers: {installed}")
         if printer_name not in installed:
-            print(f"[PRINT DEBUG] '{printer_name}' is NOT in the installed printers list above -- check exact spelling in Windows Settings > Printers & scanners")
+            _print_problem(f"{what}: no printer named '{printer_name}' in Windows "
+                           f"(installed: {', '.join(installed) or 'none'}) — check the name "
+                           f"in Settings > Printers & scanners")
+        elif not _printer_online(printer_name):
+            # The spooler still takes the job, so this is not a failure yet --
+            # but nothing comes out until the printer is back.
+            _print_problem(f"{what}: printer '{printer_name}' is offline, paused or in "
+                           f"error — the label is queued and prints when it is back")
     except Exception as ex:
         print(f"[PRINT DEBUG] could not enumerate printers: {ex}")
     try:
@@ -320,7 +349,7 @@ def _print_raw(printer_name: str, filename: str) -> bool:
             win32print.ClosePrinter(hPrinter)
         return True
     except Exception as ex:
-        print(f"[PRINT DEBUG] print FAILED: {ex}")
+        _print_problem(f"{what} not printed on '{printer_name}': {ex}")
         return False
 # ── Delta DVP PLC Modbus RTU Address Mapping ──────────────────────────────────
 # Memory Coils (M):      base 0x0800  (write via FC05/FC15)
@@ -1419,10 +1448,12 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         prn_file = f"{root}{suffix}{ext or '.prn'}"
     print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
     if not prn_file or not os.path.exists(prn_file):
-        print(f"[PRINT DEBUG] template not found, falling back to TEMPPRN.prn")
+        if prn_file:    # a template was set for this part and is missing
+            _print_problem(f"part label template '{prn_file}' not found — "
+                           f"printing with TEMPPRN.prn instead")
         prn_file = os.path.join(base, "TEMPPRN.prn")
     if not os.path.exists(prn_file):
-        print(f"[PRINT DEBUG] no label file at all ({prn_file}) -- aborting print")
+        _print_problem(f"part label not printed: no label file at all ({prn_file})")
         return
     now = datetime.datetime.now()
     try:
@@ -1440,7 +1471,7 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
     except Exception as ex:
-        print(f"[PRINT DEBUG] failed building/sending label: {ex}")
+        _print_problem(f"part label not printed: {ex}")
 
 # 35 mm at 203 dpi (8 dots/mm), and the TSPL internal fonts that are fixed
 # width -- cell width in dots, so a rendered line's width is exactly
@@ -1547,12 +1578,12 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     base = os.path.dirname(__file__)
     prn_file = os.path.join(base, "MARKER.prn")
     if not os.path.exists(prn_file):
-        print(f"[PRINT DEBUG] marker template not found ({prn_file}) -- aborting print")
+        _print_problem(f"{marker} label not printed: MARKER.prn not found ({prn_file})")
         return
     try:
         with open(prn_file, "r", encoding="latin-1") as f: template = f.read()
     except Exception as ex:
-        print(f"[PRINT DEBUG] could not read marker template: {ex}")
+        _print_problem(f"{marker} label not printed: could not read MARKER.prn ({ex})")
         return
     # Read before the body is built, not after: the stock size in it is what
     # the line positions are measured against.
@@ -1591,7 +1622,7 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         with open(tmp, "w", encoding="latin-1") as f: f.write(text)
         _print_raw(printer_name, tmp)
     except Exception as ex:
-        print(f"[PRINT DEBUG] failed building/sending marker label: {ex}")
+        _print_problem(f"{marker} label not printed: {ex}")
 
 def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number: str,
                      lot_no: str, qty: int, count: int, emp: str, machine_id: str,
@@ -1614,7 +1645,7 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
     base = os.path.dirname(__file__)
     prn_file = os.path.join(base, "LOTPRN.prn")
     if not os.path.exists(prn_file):
-        print(f"[PRINT DEBUG] lot label template not found ({prn_file}) -- aborting print")
+        _print_problem(f"lot label not printed: LOTPRN.prn not found ({prn_file})")
         return False
     now = datetime.datetime.now()
     fields = {
@@ -1648,7 +1679,7 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
             f.write(text)
         return _print_raw(printer_name, tmp)
     except Exception as ex:
-        print(f"[PRINT DEBUG] failed building/sending lot label: {ex}")
+        _print_problem(f"lot label not printed: {ex}")
         return False
 
 # render() publishes a callback here so main.py can close out the loaded
@@ -2262,6 +2293,7 @@ def render(parent):
             # Navigating away is not "closing the program", so this only drops
             # the hook -- it does not print an END.
             _ACTIVE["close_out"] = None
+            _PRINT_LOG["fn"] = None
             for feed in _cam_feeds:
                 feed.stop()
             state["input_polling"] = False
@@ -3158,6 +3190,7 @@ def render(parent):
             except Exception: pass
         try: _after(0, _do_log)
         except Exception: pass
+    _PRINT_LOG["fn"] = _log
 
     def _toggle_scan_required():
         """Enable/disable label scan verification, behind a login.
