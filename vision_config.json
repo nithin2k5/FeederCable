@@ -2,5 +2,7 @@
     "vision_enabled": true,
     "camera_source": "cam1",
     "match_threshold": 0.75,
-    "part_mapping": {}
+    "part_mapping": {
+        "123": "123.npz"
+    }
 }

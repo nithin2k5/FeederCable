@@ -267,21 +267,6 @@ def _to_photo(img_bgr, box_w, box_h):
     return ImageTk.PhotoImage(im), scale
 
 
-def _enhance_for_display(img_bgr):
-    """A clearer picture for the operator to draw on: local contrast lifted
-    (CLAHE on lightness), colour strengthened and edges sharpened, so thin
-    wires stand out from a washed-out frame. Display only -- detection always
-    judges the raw frame, exactly as the test cycle does."""
-    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    l = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(l)
-    out = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-    hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
-    hsv[..., 1] = cv2.multiply(hsv[..., 1], 1.35)
-    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-    return cv2.addWeighted(out, 1.6, cv2.GaussianBlur(out, (0, 0), 2.0), -0.6, 0)
-
-
 def _threshold_caption(value: float) -> tuple:
     """Plain-language reading of a correlation threshold."""
     if value < 0.55:
@@ -345,9 +330,6 @@ class RoiView(tk.Canvas):
         self._accent = OK_GREEN
         self._locked_size = None    # (w, h) in image px, or None for free drawing
         self._overlays = []         # [(roi, color, label)] drawn read-only
-        self._dim_outside = True    # shade everything outside the box
-        self._display_filter = None # img -> img applied for display only
-        self._display = None        # the filtered image, cached per image
 
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<ButtonPress-1>", self._on_press)
@@ -361,7 +343,6 @@ class RoiView(tk.Canvas):
     def set_image(self, img, keep_roi=True):
         prev_shape = None if self._image is None else self._image.shape[:2]
         self._image = img
-        self._display = None
         if img is not None:
             if not keep_roi:
                 self._roi = None
@@ -386,28 +367,6 @@ class RoiView(tk.Canvas):
         self._editable = editable
         self.config(cursor="crosshair" if editable else "arrow")
         self._redraw()
-
-    def set_dim_outside(self, on):
-        self._dim_outside = on
-        self._redraw()
-
-    def set_display_filter(self, fn):
-        """Show the image through `fn` (or as it is, for None). The box,
-        overlays and coordinates are untouched -- only the picture changes."""
-        self._display_filter = fn
-        self._display = None
-        self._redraw()
-
-    def _shown_image(self):
-        if self._display_filter is None:
-            return self._image
-        if self._display is None:
-            # Cached: a drag redraws many times a second.
-            try:
-                self._display = self._display_filter(self._image)
-            except Exception:
-                self._display = self._image
-        return self._display
 
     def set_accent(self, color):
         self._accent = color
@@ -493,7 +452,7 @@ class RoiView(tk.Canvas):
             return
 
         s, ox, oy, dw, dh = self._view
-        self._photo, _ = _to_photo(self._shown_image(), dw, dh)
+        self._photo, _ = _to_photo(self._image, dw, dh)
         self.create_image(ox, oy, image=self._photo, anchor="nw")
         self.create_rectangle(ox, oy, ox + dw, oy + dh, outline=LINE)
 
@@ -526,7 +485,7 @@ class RoiView(tk.Canvas):
         x0, y0, x1, y1 = self._roi_screen()
 
         # Dim everything outside the ROI so the taught region reads at a glance.
-        for box in () if not self._dim_outside else ((ox, oy, ox + dw, y0), (ox, y1, ox + dw, oy + dh),
+        for box in ((ox, oy, ox + dw, y0), (ox, y1, ox + dw, oy + dh),
                     (ox, y0, x0, y1), (x1, y0, ox + dw, y1)):
             if box[2] > box[0] and box[3] > box[1]:
                 self.create_rectangle(*box, fill="#000000", outline="",
@@ -751,10 +710,9 @@ def render(parent):
     table_wrap = tk.Frame(pb, bg=LINE)
     table_wrap.pack(fill="both", expand=True)
 
-    cols = ("part", "file", "objects", "wires", "refs", "roi", "thresh", "taught", "status")
+    cols = ("part", "file", "objects", "refs", "roi", "thresh", "taught", "status")
     heads = {"part": ("PART NUMBER", 150, "w"), "file": ("MODEL FILE", 150, "w"),
              "objects": ("OBJECTS", 60, "center"),
-             "wires": ("WIRES", 60, "center"),
              "refs": ("REFS", 55, "center"), "roi": ("TEMPLATE", 100, "center"),
              "thresh": ("THRESHOLD", 90, "center"),
              "taught": ("TAUGHT", 145, "center"), "status": ("STATUS", 120, "w")}
@@ -799,7 +757,7 @@ def render(parent):
             info = ctrl.model_info(pno)
             if info is None:
                 tree.insert("", "end", iid=pno, tags=("problem",),
-                            values=(pno, filename, "—", "—", "—", "—", "—", "—", "FILE MISSING"))
+                            values=(pno, filename, "—", "—", "—", "—", "—", "FILE MISSING"))
             else:
                 tw, th = info["template_size"]
                 sizes = ("%d x %d" % (tw, th) if info["uniform_templates"]
@@ -808,20 +766,11 @@ def render(parent):
                 # guarded while nothing is really being checked. Say so.
                 weak = info["threshold"] < 0.55
                 tree.insert("", "end", iid=pno, tags=("problem" if weak else "ready",),
-                            values=(pno, filename, info["objects"],
-                                    len(info["wire_checks"]) or "—", info["references"],
+                            values=(pno, filename, info["objects"], info["references"],
                                     sizes,
                                     "%.2f" % info["threshold"],
                                     str(info["created"]).replace("T", "  "),
                                     "Threshold too low" if weak else "Ready"))
-
-        # Parts checked by wire colours alone: no pictures taught, but the cycle
-        # still judges them, so they are listed like any other part.
-        for pno in ctrl.parts_with_wires():
-            if not tree.exists(pno):
-                tree.insert("", "end", iid=pno, tags=("ready",),
-                            values=(pno, "—", "—", len(ctrl.wire_checks(pno)), "—", "—",
-                                    "—", "—", "Wires only"))
 
         # Files on disk that no part number resolves to. Production cannot reach
         # these, so surface them rather than letting them look installed.
@@ -829,11 +778,11 @@ def render(parent):
             for f in sorted(os.listdir(_MODELS_DIR)):
                 if f.endswith(".npz") and f not in mapped_files:
                     tree.insert("", "end", iid=_ORPHAN + f, tags=("problem",),
-                                values=("—", f, "—", "—", "—", "—", "—", "—", "NOT MAPPED"))
+                                values=("—", f, "—", "—", "—", "—", "—", "NOT MAPPED"))
 
         if not tree.get_children():
             tree.insert("", "end", iid="!none", tags=("empty",),
-                        values=("—", "No parts taught yet", "", "", "", "", "", "",
+                        values=("—", "No parts taught yet", "", "", "", "", "",
                                 "Start with “Teach New Part”"))
 
         if remembered and tree.exists(remembered):
@@ -945,7 +894,7 @@ def render(parent):
         if not master_parts:
             cov_summary.config(text="No parts in the master yet", fg=TXT_FAINT)
             return
-        mapped = set(ctrl.get_mapped_parts()) | set(ctrl.parts_with_wires())
+        mapped = set(ctrl.get_mapped_parts())
         missing = [pno for pno, _ in master_parts if pno not in mapped]
         covered = len(master_parts) - len(missing)
         cov_summary.config(text="%d of %d parts have vision" % (covered, len(master_parts)),
@@ -1099,25 +1048,6 @@ def render(parent):
         if _open_threshold_dialog(parent, ctrl, value, info["threshold"]):
             _refresh_table(select=value)
 
-    def _rename():
-        kind, value = _selection()
-        if kind == "part" and ctrl.model_info(value) is not None:
-            if _open_rename_dialog(parent, ctrl, value):
-                _refresh_table(select=value)
-
-    def _set_wires():
-        """Wire checks are their own detection: any part number can have them,
-        taught pictures or not. With no part selected, ask for one."""
-        kind, value = _selection()
-        if kind != "part":
-            value = _prompt_part_number(
-                parent, "Wire Colours", "Part number to set wire-colour checks for:",
-                taken=set(ctrl.get_mapped_parts()) | set(ctrl.parts_with_wires()))
-            if not value:
-                return
-        if _open_wire_dialog(parent, ctrl, value):
-            _refresh_table(select=value)
-
     def _map_orphan():
         kind, filename = _selection()
         if kind != "orphan":
@@ -1149,31 +1079,13 @@ def render(parent):
                 messagebox.showerror("Delete", str(e), parent=parent)
                 return
         elif kind == "part":
-            # The two detections are separate: Delete takes the taught
-            # pictures (object detection) and leaves the wire checks, which
-            # are removed in Wire Colours. A part with only wire checks has
-            # nothing else to delete, so there it takes those.
-            has_wires = ctrl.has_wire_checks(value)
-            if value in ctrl.get_mapped_parts():
-                if not messagebox.askyesno(
-                        "Delete Pictures",
-                        "Delete the taught pictures (object detection) for part “%s”?\n\n%s"
-                        % (value, "Its wire-colour checks are kept and still run on the line."
-                           if has_wires else
-                           "The part will no longer be checked by vision on the line."),
-                        parent=parent):
-                    return
-                ctrl.delete_model(value)
-            elif has_wires:
-                if not messagebox.askyesno(
-                        "Delete Wire Checks",
-                        "Delete the wire-colour checks for part “%s”?\n\n"
-                        "The part will no longer be checked by vision on the line." % value,
-                        parent=parent):
-                    return
-                ctrl.delete_wire_checks(value)
-            else:
+            if not messagebox.askyesno(
+                    "Delete Dataset",
+                    "Delete the vision dataset for part “%s”?\n\n"
+                    "The part will no longer be checked by vision on the line."
+                    % value, parent=parent):
                 return
+            ctrl.delete_model(value)
         else:
             return
         _refresh_table()
@@ -1187,10 +1099,6 @@ def render(parent):
     btn_test.pack(side="left", padx=(8, 0))
     btn_thresh = _btn(toolbar, "Threshold…", BTN_NEUTRAL, command=_set_threshold, pady=7)
     btn_thresh.pack(side="left", padx=(8, 0))
-    btn_rename = _btn(toolbar, "Rename…", BTN_NEUTRAL, command=_rename, pady=7)
-    btn_rename.pack(side="left", padx=(8, 0))
-    btn_wires = _btn(toolbar, "Wire Colours…", BTN_NEUTRAL, command=_set_wires, pady=7)
-    btn_wires.pack(side="left", padx=(8, 0))
     btn_del = _btn(toolbar, "Delete", BTN_DANGER, command=_delete, pady=7)
     btn_del.pack(side="left", padx=(8, 0))
     btn_map.config(command=_map_orphan)
@@ -1200,10 +1108,8 @@ def render(parent):
         is_part = kind == "part"
         info = ctrl.model_info(value) if is_part else None
         usable = info is not None
-        wired = is_part and ctrl.has_wire_checks(value)
-        for b, on in ((btn_reteach, is_part), (btn_test, usable or wired),
-                      (btn_thresh, usable), (btn_wires, kind != "orphan"),
-                      (btn_rename, usable), (btn_del, kind is not None)):
+        for b, on in ((btn_reteach, is_part), (btn_test, usable),
+                      (btn_thresh, usable), (btn_del, kind is not None)):
             _set_btn_enabled(b, on)
 
         if kind == "orphan":
@@ -1213,11 +1119,7 @@ def render(parent):
             btn_map.pack(side="right")
         else:
             btn_map.pack_forget()
-            if is_part and not usable and wired:
-                detail_lbl.config(
-                    text="Checked by wire colours only — no pictures taught. Teach it to "
-                         "add object detection; both must then pass.", fg=TXT_FAINT)
-            elif is_part and not usable:
+            if is_part and not usable:
                 detail_lbl.config(
                     text="Mapped file is missing from vision_models — re-teach this part.",
                     fg=WARN)
@@ -1484,8 +1386,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     if reteach:
         ent_pno.set(part_number)
         ent_pno.lock()
-        pno_note.config(text="Saving replaces this part's taught pictures. Its "
-                             "wire-colour checks are separate and stay as they are.",
+        pno_note.config(text="Saving replaces the existing dataset for this part.",
                         fg=WARN)
     else:
         ent_pno.focus_set()
@@ -2103,7 +2004,7 @@ def _draw_score_meter(canvas, score, threshold, verdict_color):
 
 def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
     """Run the production inspect() path against the live camera, or a still image."""
-    from vision_engine.vision_controller import VisionResult, WIRE_DRAW_BGR
+    from vision_engine.vision_controller import VisionResult
     from vision_engine import camera
 
     win = _dialog(parent, "Inspection Test", 900, 740)
@@ -2250,7 +2151,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         for w_ in (verdict_lbl, verdict_note):
             w_.config(bg=bgs.get(result.judgement, "#1c1f25"))
         verdict_lbl.config(text=result.judgement, fg=color)
-        verdict_note.config(text=result.error or "Every check passed", fg=color)
+        verdict_note.config(text=result.error or "Part found", fg=color)
 
         info = ctrl.model_info(part_number) or {}
         m_source.config(text="Live camera" if source["kind"] == "camera" else source["label"])
@@ -2265,33 +2166,14 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         m_tmpl.config(text=("%d objects" % len(result.objects)) if multi else
                       "%d x %d" % (tw, th) if tw else "—", fg=TXT)
 
-        # Object detection and wire detection are separate checks, so each gets
-        # its own heading and verdict; the part is OK only if both are.
         for w_ in object_list.winfo_children():
             w_.destroy()
-
-        def _section(title, verdict_ok):
-            head = tk.Frame(object_list, bg=PANEL)
-            head.pack(fill="x", pady=(8, 2))
-            tk.Label(head, text=title, bg=PANEL, fg=TXT_DIM,
-                     font=("Arial", 9, "bold")).pack(side="left")
-            text, fg = (("not set up", TXT_FAINT) if verdict_ok is None else
-                        ("✓ OK", OK_GREEN) if verdict_ok else ("✗ NG", NG_RED))
-            tk.Label(head, text=text, bg=PANEL, fg=fg,
-                     font=("Arial", 9, "bold")).pack(side="right")
-
-        if result.judgement != "ERROR":
-            object_list.pack(fill="x", pady=(6, 0))
-            tk.Frame(object_list, bg=LINE, height=1).pack(fill="x")
-            _section("OBJECT DETECTION", result.objects_ok)
+        if multi:
+            object_list.pack(fill="x", pady=(10, 0))
+            tk.Frame(object_list, bg=LINE, height=1).pack(fill="x", pady=(0, 6))
             for p in result.objects:
                 _kv_row(object_list, p.name, "%.4f  %s" % (p.score, "✓" if p.ok else "✗"),
                         value_fg=OK_GREEN if p.ok else NG_RED, mono=True)
-            _section("WIRE DETECTION", result.wires_ok)
-            for w_r in result.wires:
-                _kv_row(object_list, w_r.name,
-                        "%s  %s" % (" → ".join(w_r.found) or "none", "✓" if w_r.ok else "✗"),
-                        value_fg=OK_GREEN if w_r.ok else NG_RED)
         else:
             object_list.pack_forget()
 
@@ -2301,16 +2183,15 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         if result.frame is not None:
             view.set_image(result.frame)
             view.set_accent(color)
-            wires = _wire_overlays(result.wires, WIRE_DRAW_BGR, label_wires=False)
             if multi:
                 # Every object's match, each coloured by its own verdict, rather
                 # than one box that could only speak for the weakest object.
                 view.set_roi(None, notify=False)
                 view.set_overlays([(_box(p.box), OK_GREEN if p.ok else NG_RED,
                                     "%s %.2f" % (p.name, p.score))
-                                   for p in result.objects] + wires)
+                                   for p in result.objects])
             else:
-                view.set_overlays(wires)
+                view.set_overlays([])
                 if result.match_box:
                     view.set_roi(_box(result.match_box), notify=False)
             view.set_hint("Best match found in this " +
@@ -2322,33 +2203,24 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
         thr = result.threshold or info.get("threshold", 0.0)
         _draw_score_meter(meter, result.match_score, thr, color)
 
-        if result.judgement == "NG":
-            # One line per detection that failed, saying which one it was.
-            parts = []
-            if result.objects_ok is False:
-                parts.append(
-                    "Object detection failed: %s must each reach %.2f. The red boxes "
-                    "show where the closest match landed — if that is not on the part, "
-                    "the pictures were taught on something else; re-teach the part."
-                    % (", ".join(p.name for p in result.objects if not p.ok), thr))
-            if result.wires_ok is False:
-                parts.append(
-                    "Wire detection failed: %s. If the wires really are right, check "
-                    "the boxes with “Wire Colours…”."
-                    % ", ".join(w_r.name for w_r in result.wires if not w_r.ok))
-            if result.objects_ok and result.wires_ok is False:
-                parts.insert(0, "Object detection passed.")
-            if result.wires_ok and result.objects_ok is False:
-                parts.insert(0, "Wire detection passed.")
-            hint.config(text="\n\n".join(parts), fg=WARN)
+        if result.judgement == "NG" and multi:
+            hint.config(
+                text="Every object must reach %.2f. If %s is genuinely present and "
+                     "correct, re-teach with more reference images or lower this "
+                     "part's threshold."
+                     % (thr, ", ".join(p.name for p in result.objects if not p.ok)), fg=WARN)
+        elif result.judgement == "NG":
+            hint.config(
+                text="The best match scored %.2f against a %.2f threshold. If the part "
+                     "is genuinely present and correct, either re-teach it with more "
+                     "reference images or lower this part's threshold."
+                     % (result.match_score, thr), fg=WARN)
         elif result.judgement == "ERROR":
             hint.config(text="Nothing was judged — fix the error above and run again.",
                         fg=WARN)
-        elif result.objects:
+        else:
             hint.config(text="Headroom above threshold: %+.2f."
                              % (result.match_score - thr), fg=TXT_DIM)
-        else:
-            hint.config(text="Every wire check passed.", fg=TXT_DIM)
         _set_btn_enabled(btn_rerun, True)
         _set_btn_enabled(btn_tune, bool(info))
 
@@ -2413,627 +2285,8 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Wire colours
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_DIRECTIONS = (("ltr", "Left → right"), ("ttb", "Top → bottom"))
-
-
-def _bgr_hex(bgr):
-    return "#%02x%02x%02x" % (bgr[2], bgr[1], bgr[0])
-
-
-def _wire_overlays(wire_results, draw_bgr, label_wires=True):
-    """Overlays for judged wire checks: each wire box coloured by its verdict,
-    and every wire blob picked inside it outlined in its colour -- and tagged
-    with it, unless `label_wires` is off: on a small, whole-frame view the tags
-    pile up over the box's own name, and the colours are listed beside it."""
-    out = []
-    for w in wire_results:
-        if w.box:
-            out.append(({"x": w.box[0], "y": w.box[1], "width": w.box[2],
-                         "height": w.box[3]}, OK_GREEN if w.ok else NG_RED,
-                        w.name if label_wires else "%s %s" % (w.name, "✓" if w.ok else "✗")))
-        for cname, (bx, by, bw, bh) in w.blobs:
-            # Black drawn black is invisible on a dark wire, so it gets grey.
-            col = _bgr_hex(draw_bgr.get(cname, (200, 200, 200)))
-            out.append(({"x": bx, "y": by, "width": bw, "height": bh},
-                        "#9e9e9e" if cname == "black" else col,
-                        cname if label_wires else ""))
-    return out
-
-
-def _open_wire_dialog(parent, ctrl, part_number):
-    """Draw a part's wire-colour checks and set the colour order each must show.
-    Wire detection is its own check, separate from object detection: the part
-    needs no taught pictures, and each box is a fixed spot in the frame.
-    Returns True if they were saved."""
-    if not _cv2_ok or not _pil_ok:
-        messagebox.showerror("Vision", "OpenCV and Pillow are required.", parent=parent)
-        return False
-
-    from vision_engine.vision_controller import MAX_WIRE_CHECKS, MAX_WIRES, WIRE_DRAW_BGR
-    from vision_engine import camera
-
-    ctrl.reload_config()
-    palette_names = list(ctrl.wire_palette())
-    dir_labels = dict(_DIRECTIONS)
-    dir_keys = {v: k for k, v in _DIRECTIONS}
-
-    wx, wy, ww, wh = _work_area(parent)
-    tw, th = max(900, int(ww * 0.88)), max(600, wh - 90)
-    win = _dialog(parent, "Wire Colours", tw, th, wx + (ww - tw) // 2, wy + 10)
-    _dialog_header(win, "Wire colours — %s" % part_number,
-                   "Box where a connector's wires leave it, then set their colours in order.",
-                   compact=True)
-
-    # Each check's box is a fixed spot in the frame. Nothing here involves
-    # object detection.
-    checks = [dict(c, offset=dict(c["offset"]) if c.get("offset") else None,
-                   colors=list(c["colors"]))
-              for c in ctrl.wire_checks(part_number)]
-    sel = {"i": 0 if checks else None}
-    shot = {"frame": None, "label": ""}
-    alive = {"v": True}
-    loading = {"v": False}
-    saved = {"v": False}
-
-    # ── Footer (packed first, as in the teach wizard) ──────────────────────
-    foot = tk.Frame(win, bg=PANEL)
-    foot.pack(side="bottom", fill="x")
-    tk.Frame(win, bg=LINE, height=1).pack(side="bottom", fill="x")
-    foot_in = tk.Frame(foot, bg=PANEL)
-    foot_in.pack(fill="x", padx=18, pady=5)
-    status_lbl = tk.Label(foot_in, text="", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
-                          anchor="w", justify="left")
-    status_lbl.pack(side="left", fill="x", expand=True)
-    btn_save = _btn(foot_in, "Save", BTN_SUCCESS, font_size=12, pady=4)
-    btn_save.pack(side="right")
-    btn_cancel = _btn(foot_in, "Cancel", BTN_NEUTRAL, font_size=12, pady=4)
-    btn_cancel.pack(side="right", padx=(0, 8))
-    btn_check = _btn(foot_in, "Check All", BTN_PRIMARY, font_size=12, pady=4)
-    btn_check.pack(side="right", padx=(0, 8))
-
-    body = tk.Frame(win, bg=BG)
-    body.pack(fill="both", expand=True, padx=10, pady=4)
-    body.columnconfigure(0, weight=1)
-    body.rowconfigure(0, weight=1)
-
-    left = tk.Frame(body, bg=BG)
-    left.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-    left.rowconfigure(0, weight=1)
-    left.columnconfigure(0, weight=1)
-    view_wrap = tk.Frame(left, bg=LINE)
-    view_wrap.grid(row=0, column=0, sticky="nsew")
-    view = RoiView(view_wrap, on_change=lambda r, final: _roi_changed(r, final))
-    view.pack(fill="both", expand=True, padx=1, pady=1)
-    view_bar = tk.Frame(left, bg=BG)
-    view_bar.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-    frame_lbl = tk.Label(view_bar, text="", bg=BG, fg=TXT_DIM, font=("Consolas", 11))
-    frame_lbl.pack(side="right")
-    btn_capture = _btn(view_bar, "◉  Capture Frame", BTN_SUCCESS)
-    btn_capture.pack(side="left")
-    btn_import = _btn(view_bar, "Import Image…", BTN_NEUTRAL)
-    btn_import.pack(side="left", padx=(8, 0))
-    btn_test_img = _btn(view_bar, "Test Image…", BTN_PRIMARY)
-    btn_test_img.pack(side="left", padx=(8, 0))
-    # The wires are a few pixels across in a washed-out frame: show them
-    # clearer, and without the shading the teach view puts outside the box,
-    # which hid the very wires being boxed.
-    enhance_var = tk.BooleanVar(value=True)
-    view.set_dim_outside(False)
-    view.set_display_filter(_enhance_for_display)
-
-    def _toggle_enhance():
-        view.set_display_filter(_enhance_for_display if enhance_var.get() else None)
-
-    tk.Checkbutton(view_bar, text="  Enhance view", variable=enhance_var,
-                   command=_toggle_enhance, bg=BG, fg=TXT_DIM, selectcolor=FIELD,
-                   activebackground=BG, activeforeground=TXT, font=("Arial", 10),
-                   bd=0, highlightthickness=0, cursor="hand2").pack(side="left", padx=(14, 0))
-
-    rail = tk.Frame(body, bg=BG, width=330)
-    rail.grid(row=0, column=1, sticky="ns")
-    rail.pack_propagate(False)
-
-    s1, _b1 = _step(rail, 1, "Wire checks")
-    tk.Label(s1, text="One box per connector whose wire order matters. Each must "
-                      "show its colours in order for wire detection to pass.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
-             justify="left", anchor="w").pack(fill="x", pady=(0, 6))
-    rows = tk.Frame(s1, bg=BG)
-    rows.pack(fill="x")
-    list_btns = tk.Frame(s1, bg=BG)
-    list_btns.pack(fill="x", pady=(6, 0))
-    btn_add = _btn(list_btns, "+  Add", BTN_NEUTRAL, pady=3, font_size=10)
-    btn_add.pack(side="left")
-    btn_remove = _btn(list_btns, "Remove", BTN_DANGER, pady=3, font_size=10)
-    btn_remove.pack(side="left", padx=(6, 0))
-
-    s2, _b2 = _step(rail, 2, "Selected check")
-    editor = tk.Frame(s2, bg=BG)
-    editor.pack(fill="x")
-    editor.columnconfigure(1, weight=1)
-
-    def _label(text, row):
-        tk.Label(editor, text=text, bg=BG, fg=TXT_DIM, font=("Arial", 10, "bold"),
-                 anchor="w").grid(row=row, column=0, sticky="w", pady=3, padx=(0, 8))
-
-    name_var = tk.StringVar()
-    dir_var = tk.StringVar()
-    _label("Name", 0)
-    tk.Entry(editor, textvariable=name_var, bg=FIELD, fg=TXT, font=("Arial", 11),
-             insertbackground=TXT, relief="flat", highlightthickness=1,
-             highlightbackground=LINE, highlightcolor=ACCENT).grid(
-        row=0, column=1, sticky="ew", pady=3, ipady=2)
-    _label("Order", 2)
-    ttk.Combobox(editor, textvariable=dir_var, state="readonly",
-                 values=[t for _, t in _DIRECTIONS], font=("Arial", 11)).grid(
-        row=2, column=1, sticky="ew", pady=3)
-    _label("Wires", 3)
-    count_row = tk.Frame(editor, bg=BG)
-    count_row.grid(row=3, column=1, sticky="w", pady=3)
-    count_btns = []
-    for n in range(1, MAX_WIRES + 1):
-        b = _btn(count_row, str(n), BTN_NEUTRAL, pady=1, font_size=10, width=2,
-                 command=lambda n=n: _set_wire_count(n))
-        b.config(padx=4)        # all six have to fit across the rail
-        b.pack(side="left", padx=(0, 3))
-        count_btns.append(b)
-
-    colors_box = tk.Frame(s2, bg=BG)
-    colors_box.pack(fill="x", pady=(6, 0))
-    color_vars = [tk.StringVar() for _ in range(MAX_WIRES)]
-    color_cells = []
-    for i in range(MAX_WIRES):
-        cell = tk.Frame(colors_box, bg=BG)
-        swatch = tk.Label(cell, text="■", bg=BG, font=("Arial", 13))
-        swatch.pack(side="left")
-        side = tk.Label(cell, text="", bg=BG, fg=TXT_DIM, font=("Arial", 10, "bold"),
-                        width=10, anchor="w")
-        side.pack(side="left", padx=(4, 0))
-        ttk.Combobox(cell, textvariable=color_vars[i], state="readonly",
-                     values=palette_names, width=10, font=("Arial", 11)).pack(side="left")
-        color_cells.append((cell, swatch, side))
-
-    s3, _b3 = _step(rail, 3, "Seen in this frame")
-    seen_lbl = tk.Label(s3, text="—", bg=BG, fg=TXT, font=("Arial", 13, "bold"),
-                        anchor="w", justify="left", wraplength=270)
-    seen_lbl.pack(fill="x")
-    seen_note = tk.Label(s3, text="", bg=BG, fg=TXT_FAINT, font=("Arial", 10),
-                         anchor="w", justify="left", wraplength=270)
-    seen_note.pack(fill="x", pady=(4, 0))
-    tk.Label(s3, text="Make the box cover only the wires, just past the connector, "
-                      "with no other wire, the fixture or shadows in it. Colours are "
-                      "found by hue, so keep the lighting the line will have.",
-             bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=270,
-             justify="left", anchor="w").pack(fill="x", pady=(10, 0))
-
-    # ── Behaviour ──────────────────────────────────────────────────────────
-
-    def _cur():
-        i = sel["i"]
-        return checks[i] if i is not None and 0 <= i < len(checks) else None
-
-    def _box_of(c):
-        """The check's box in the shown frame, as a RoiView dict, or None."""
-        if not c or not c.get("offset") or shot["frame"] is None:
-            return None
-        b = ctrl.wire_box(c, shot["frame"].shape)
-        return {"x": b[0], "y": b[1], "width": b[2], "height": b[3]} if b else None
-
-    def _paint_rows():
-        for w in rows.winfo_children():
-            w.destroy()
-        if not checks:
-            tk.Label(rows, text="None yet — this part's wires are not checked.",
-                     bg=BG, fg=TXT_FAINT, font=("Arial", 10), anchor="w").pack(fill="x")
-        for i, c in enumerate(checks):
-            selected = i == sel["i"]
-            row = tk.Frame(rows, bg=ACCENT if selected else LINE, cursor="hand2")
-            row.pack(fill="x", pady=(0, 4))
-            inner = tk.Frame(row, bg=PANEL if selected else BG)
-            inner.pack(fill="x", padx=1, pady=1)
-            name = tk.Label(inner, text=c["name"].strip() or "Wires %d" % (i + 1), bg=inner["bg"], fg=TXT,
-                            font=("Arial", 11, "bold"), anchor="w", cursor="hand2")
-            name.pack(side="left", padx=6, pady=3)
-            summary = " → ".join(c["colors"]) if c.get("offset") else "no box yet"
-            sub = tk.Label(inner, text=summary, bg=inner["bg"],
-                           fg=TXT_DIM if c.get("offset") else WARN,
-                           font=("Arial", 10), anchor="e", cursor="hand2")
-            sub.pack(side="right", padx=6)
-            for w in (row, inner, name, sub):
-                w.bind("<Button-1>", lambda e, i=i: _select(i))
-        _set_btn_enabled(btn_add, len(checks) < MAX_WIRE_CHECKS)
-        _set_btn_enabled(btn_remove, _cur() is not None)
-
-    def _paint_editor():
-        c = _cur()
-        loading["v"] = True
-        try:
-            for w in editor.winfo_children() + [colors_box]:
-                _enable_tree(w, c is not None)
-            if c is None:
-                name_var.set(""); dir_var.set("")
-                for v in color_vars:
-                    v.set("")
-                for cell, _, _ in color_cells:
-                    cell.grid_forget()
-                return
-            # Only when it differs: rewriting the entry on every keystroke
-            # would move the cursor out from under the operator.
-            if name_var.get() != c["name"]:
-                name_var.set(c["name"])
-            dir_var.set(dir_labels.get(c["direction"], dir_labels["ltr"]))
-            n = len(c["colors"])
-            for idx, b in enumerate(count_btns):
-                b._colors = BTN_PRIMARY if idx + 1 == n else BTN_NEUTRAL
-                b.config(bg=b._colors[0])
-            # Name each slot by the side of the box it sits on, so "which wire
-            # goes where" reads straight off the editor rather than a number.
-            first, last = ("Top", "Bottom") if c["direction"] == "ttb" else ("Left", "Right")
-            for i, (cell, swatch, side) in enumerate(color_cells):
-                if i < n:
-                    color_vars[i].set(c["colors"][i])
-                    swatch.config(fg=_bgr_hex(WIRE_DRAW_BGR.get(c["colors"][i], (200, 200, 200))))
-                    side.config(text="Only wire" if n == 1 else
-                                "%s side" % first if i == 0 else
-                                "%s side" % last if i == n - 1 else
-                                "%d of %d" % (i + 1, n))
-                    cell.grid(row=i, column=0, sticky="w", pady=2)
-                else:
-                    cell.grid_forget()
-        finally:
-            loading["v"] = False
-
-    def _enable_tree(w, on):
-        try:
-            if isinstance(w, ttk.Combobox):
-                w.config(state="readonly" if on else "disabled")
-            elif isinstance(w, (tk.Entry, tk.Checkbutton)):
-                w.config(state="normal" if on else "disabled")
-            elif isinstance(w, tk.Button):
-                _set_btn_enabled(w, on)
-        except tk.TclError:
-            pass
-        for ch in w.winfo_children():
-            _enable_tree(ch, on)
-
-    def _paint_view():
-        """The selected check editable, the other checks drawn read-only, and
-        the wires found in the selected box."""
-        c = _cur()
-        if shot["frame"] is None:
-            view.set_editable(False)
-            return
-        loading["v"] = True
-        try:
-            view.set_roi(_box_of(c), notify=False)
-        finally:
-            loading["v"] = False
-        view.set_editable(c is not None)
-        overlays = []
-        for i, other in enumerate(checks):
-            if i != sel["i"]:
-                b = _box_of(other)
-                if b:
-                    overlays.append((b, TXT_FAINT, other["name"]))
-        result = _judge(c)
-        if result is not None:
-            overlays += [o for o in _wire_overlays([result], WIRE_DRAW_BGR)
-                         if o[2] != result.name]
-        view.set_overlays(overlays)
-        view.set_hint("Drag a box over the wires"
-                      if c and not c.get("offset") else
-                      "Drag the box to move it, or its handles to resize" if c else
-                      "Add a wire check to start")
-        _paint_seen(c, result)
-
-    def _judge(c):
-        b = _box_of(c)
-        if c is None or b is None:
-            return None
-        return ctrl.check_wires(shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
-                                c["colors"], c["direction"], c["name"])
-
-    def _paint_seen(c, result):
-        if c is None:
-            seen_lbl.config(text="—", fg=TXT_DIM)
-            seen_note.config(text="")
-            return
-        if shot["frame"] is None:
-            seen_lbl.config(text="No frame", fg=TXT_DIM)
-            seen_note.config(text="Capture a frame or import an image.")
-            return
-        if result is None:
-            seen_lbl.config(text="No box drawn", fg=WARN)
-            seen_note.config(text="Drag a box over the wires on the image.")
-            return
-        seen = " → ".join(result.found) or "no wires"
-        seen_lbl.config(text=("✓  " if result.ok else "✗  ") + seen,
-                        fg=OK_GREEN if result.ok else NG_RED)
-        note = "Colours found in the order set." if result.ok else \
-            "Expected %s — %s." % (" → ".join(result.expected), result.error)
-        seen_note.config(text=note, fg=TXT_DIM if result.ok else WARN)
-
-    def _refresh():
-        _paint_rows()
-        _paint_editor()
-        _paint_view()
-
-    def _select(i):
-        sel["i"] = i
-        status_lbl.config(text="", fg=TXT_DIM)
-        _refresh()
-
-    def _add():
-        if len(checks) >= MAX_WIRE_CHECKS:
-            return
-        # Two connectors is the usual case, so the first two names say which
-        # side; rename freely.
-        used = {c["name"].strip().lower() for c in checks}
-        name = next(n for n in ["Left wires", "Right wires"] +
-                    ["Wires %d" % k for k in range(1, MAX_WIRE_CHECKS + 2)]
-                    if n.lower() not in used)
-        checks.append({"name": name, "offset": None, "colors": ["blue", "black"],
-                       "direction": "ltr"})
-        _select(len(checks) - 1)
-
-    def _remove():
-        i = sel["i"]
-        if _cur() is None:
-            return
-        checks.pop(i)
-        sel["i"] = min(i, len(checks) - 1) if checks else None
-        _refresh()
-
-    def _set_wire_count(n):
-        c = _cur()
-        if c is None:
-            return
-        cols = c["colors"][:n]
-        while len(cols) < n:
-            cols.append(palette_names[0])
-        c["colors"] = cols
-        _refresh()
-
-    def _on_edit(*_a):
-        c = _cur()
-        if loading["v"] or c is None:
-            return
-        c["name"] = name_var.get()
-        c["direction"] = dir_keys.get(dir_var.get(), "ltr")
-        for i in range(len(c["colors"])):
-            if color_vars[i].get():
-                c["colors"][i] = color_vars[i].get()
-        _refresh()
-
-    def _store_box(c, roi):
-        c["offset"] = None if roi is None else {
-            "dx": roi["x"], "dy": roi["y"], "width": roi["width"], "height": roi["height"]}
-
-    def _roi_changed(roi, final=True):
-        c = _cur()
-        if loading["v"] or c is None:
-            return
-        _store_box(c, roi)
-        if final:
-            _refresh()
-
-    for v in (name_var, dir_var, *color_vars):
-        v.trace_add("write", _on_edit)
-
-    # ── Frames ─────────────────────────────────────────────────────────────
-
-    cam_index, cam_w, cam_h = ctrl.cam_settings()
-    stream = {"s": camera.acquire(cam_index, cam_w, cam_h) if cam_index >= 0 else None}
-
-    def _use_frame(frame, label, then=None):
-        """Show a frame, and run `then` once it is up. Nothing is detected
-        here: wire colours are judged only inside a drawn box."""
-        shot["frame"], shot["label"] = frame, label
-        loading["v"] = True
-        try:
-            view.set_image(frame, keep_roi=False)
-        finally:
-            loading["v"] = False
-        frame_lbl.config(text=label)
-        status_lbl.config(text="", fg=TXT_DIM)
-        _set_btn_enabled(btn_capture, stream["s"] is not None)
-        _refresh()
-        if then:
-            then()
-
-    def _capture():
-        s = stream["s"]
-        if s is None:
-            return
-        _set_btn_enabled(btn_capture, False)
-        frame_lbl.config(text="Capturing…")
-        got = {}
-
-        def _work():
-            got["f"] = s.read(timeout=5.0)
-
-        def _poll():
-            if not alive["v"]:
-                return
-            if "f" not in got:
-                win.after(50, _poll)
-                return
-            if got["f"] is None:
-                _set_btn_enabled(btn_capture, True)
-                frame_lbl.config(text="No frame from camera %d" % cam_index)
-                return
-            _use_frame(got["f"].copy(), "LIVE CAPTURE  ·  camera %d" % cam_index)
-
-        threading.Thread(target=_work, daemon=True).start()
-        win.after(50, _poll)
-
-    def _pick_image(title):
-        path = filedialog.askopenfilename(
-            parent=win, title=title,
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
-        if not path:
-            return None
-        img = cv2.imread(path)
-        if img is None:
-            messagebox.showerror("Image", "Could not read that image file.", parent=win)
-            return None
-        return img, os.path.basename(path)
-
-    def _import():
-        picked = _pick_image("Select Image")
-        if picked:
-            _use_frame(*picked)
-
-    def _test_image():
-        """Judge a saved image -- a known good part, or one with its wires
-        swapped -- against the checks as drawn, without the part on the rig."""
-        picked = _pick_image("Select Test Image")
-        if picked:
-            img, name = picked
-            _use_frame(img, "TEST IMAGE  ·  %s" % name, then=_check_all)
-
-    def _check_all():
-        """Judge every drawn check on this frame and show each result on it.
-        Wire checks only: object detection is a separate check."""
-        if shot["frame"] is None:
-            return
-        results = []
-        for c in checks:
-            b = _box_of(c)
-            if b:
-                results.append(ctrl.check_wires(
-                    shot["frame"], (b["x"], b["y"], b["width"], b["height"]),
-                    c["colors"], c["direction"], c["name"]))
-        if not results:
-            status_lbl.config(text="No wire boxes drawn yet.", fg=WARN)
-            return
-        ok = all(r.ok for r in results)
-        status_lbl.config(
-            text="Wires %s — " % ("OK" if ok else "NG") + "   ".join(
-                "%s %s %s" % ("✓" if r.ok else "✗", r.name, " → ".join(r.found) or "no wires")
-                for r in results),
-            fg=OK_GREEN if ok else NG_RED)
-        view.set_overlays(_wire_overlays(results, WIRE_DRAW_BGR))
-
-    def _save():
-        undrawn = [c["name"].strip() or "Wires %d" % (i + 1)
-                   for i, c in enumerate(checks) if not c.get("offset")]
-        if undrawn:
-            messagebox.showerror("Wire Colours", "Draw a box for: %s" % ", ".join(undrawn),
-                                 parent=win)
-            return
-        try:
-            ctrl.set_wire_checks(part_number, checks)
-        except Exception as e:
-            messagebox.showerror("Wire Colours", str(e), parent=win)
-            return
-        saved["v"] = True
-        _close()
-
-    def _close():
-        alive["v"] = False
-        if stream["s"] is not None:
-            try:
-                stream["s"].release()
-            except Exception:
-                pass
-            stream["s"] = None
-        try:
-            win.grab_release()
-        except Exception:
-            pass
-        win.destroy()
-
-    btn_add.config(command=_add)
-    btn_remove.config(command=_remove)
-    btn_capture.config(command=_capture)
-    btn_import.config(command=_import)
-    btn_test_img.config(command=_test_image)
-    btn_check.config(command=_check_all)
-    btn_save.config(command=_save)
-    btn_cancel.config(command=_close)
-    win.protocol("WM_DELETE_WINDOW", _close)
-    win.bind("<Escape>", lambda e: _close())
-
-    if stream["s"] is not None:
-        view.set_placeholder("Starting camera %d…" % cam_index)
-        win.after(120, _capture)
-    else:
-        _set_btn_enabled(btn_capture, False)
-        view.set_placeholder("No camera configured\n\nImport an image of a good part.")
-    _refresh()
-
-    parent.wait_window(win)
-    return saved["v"]
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Small dialogs
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _open_rename_dialog(parent, ctrl, part_number):
-    """Rename a taught part's objects. Returns True if renamed."""
-    from vision_engine.vision_controller import MAX_OBJECTS
-
-    info = ctrl.model_info(part_number)
-    if info is None:
-        return False
-    old = info["object_names"]
-    win = _dialog(parent, "Rename Objects", 430, 170 + 44 * len(old))
-    _dialog_header(win, "Rename objects — %s" % part_number,
-                   "Only the object names change.")
-
-    body = tk.Frame(win, bg=BG)
-    body.pack(fill="both", expand=True, padx=20, pady=16)
-    vars_ = []
-    for k, name in enumerate(old):
-        row = tk.Frame(body, bg=BG)
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text="●", bg=BG, fg=OBJECT_COLORS[k % len(OBJECT_COLORS)],
-                 font=("Arial", 13)).pack(side="left", padx=(0, 6))
-        tk.Label(row, text=name, bg=BG, fg=TXT_DIM, font=("Arial", 11), width=10,
-                 anchor="w").pack(side="left")
-        tk.Label(row, text="→", bg=BG, fg=TXT_FAINT, font=("Arial", 11)).pack(side="left",
-                                                                               padx=6)
-        v = tk.StringVar(value=name)
-        e = tk.Entry(row, textvariable=v, bg=FIELD, fg=TXT, font=("Arial", 12),
-                     insertbackground=TXT, relief="flat", highlightthickness=1,
-                     highlightbackground=LINE, highlightcolor=ACCENT)
-        e.pack(side="left", fill="x", expand=True, ipady=3)
-        if k == 0:
-            e.focus_set()
-            e.select_range(0, "end")
-        vars_.append(v)
-
-    saved = {"v": False}
-
-    def _save(event=None):
-        try:
-            ctrl.rename_objects(part_number, [v.get() for v in vars_])
-        except Exception as e:
-            messagebox.showerror("Rename", str(e), parent=win)
-            return
-        saved["v"] = True
-        win.destroy()
-
-    tk.Frame(win, bg=LINE, height=1).pack(fill="x")
-    foot = tk.Frame(win, bg=PANEL)
-    foot.pack(fill="x")
-    foot_in = tk.Frame(foot, bg=PANEL)
-    foot_in.pack(fill="x", padx=18, pady=12)
-    _btn(foot_in, "Save", BTN_PRIMARY, command=_save, font_size=10,
-         pady=8).pack(side="right")
-    _btn(foot_in, "Cancel", BTN_NEUTRAL, command=win.destroy, font_size=10,
-         pady=8).pack(side="right", padx=(0, 8))
-    win.bind("<Return>", _save)
-    win.bind("<Escape>", lambda e: win.destroy())
-
-    parent.wait_window(win)
-    return saved["v"]
-
 
 def _open_threshold_dialog(parent, ctrl, part_number, current, anchor=None):
     """Edit one taught part's own threshold. Returns True if it was saved."""

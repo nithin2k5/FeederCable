@@ -24,8 +24,3 @@ FeederCable.spec
 
 # Native crash traces written by faulthandler (see main.py)
 crash.log
-
-# Wire-colour checks drawn on the station -- station data, like the vision
-# captures; tracked, a pull could overwrite what was set up there
-vision_wires.json
-vision_wires.json.tmp
