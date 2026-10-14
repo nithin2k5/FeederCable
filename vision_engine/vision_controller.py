@@ -23,17 +23,21 @@ Objects:
 
 Wire colours:
   Each part number can also have its own wire-colour check, independent of
-  its objects: a box drawn over each connector's wires (Connector 1,
-  Connector 2) and the colours expected there, left to right. wire_engine
-  does the detection, and only inside those boxes. The checks are kept in
+  its objects: a search area drawn around each connector (Connector 1,
+  Connector 2) and the colours expected there, left to right. On a good part
+  the strip where the wires run is found inside each area (locate_wires);
+  wire_engine checks that strip on the line, sliding it within the area if
+  the part sits elsewhere, and nothing outside the area. The checks are kept in
   vision_wires.json as one wire_engine profile per part number, apart from
   the template models, so re-teaching a part's pictures never touches them.
   A part with both objects and wires is OK only when both pass.
 """
 import configparser
+import itertools
 import json
 import os
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -41,6 +45,7 @@ import cv2
 import numpy as np
 
 import wire_engine
+from wire_engine.detector import _column_runs, wire_masks
 
 from . import camera
 
@@ -109,6 +114,50 @@ class VisionResult:
     wires: Optional[wire_engine.InspectionResult] = None
     objects_ok: Optional[bool] = None
     wires_ok: Optional[bool] = None
+
+
+def _wires_look_real(wires, on, fills, h, min_fill):
+    """Do these wire runs look like one cable's wires rather than a fixture?
+
+    `wires` is [(start, end, score, colour)] left to right, in the columns of
+    a band `h` rows tall; `on` the band's mask per expected colour and `fills`
+    its column fill per colour. The wires must be long and thin, of similar
+    widths, side by side, with background on both sides, and most of each
+    colour in the band must be its wires: a jig block or plate of a wire's
+    colour fails that. Returns (share, x1, x2) -- the weakest colour's share
+    and the group's columns with a margin -- or None.
+    """
+    width = len(next(iter(fills.values())))
+    widths = [e - s for s, e, _, _ in wires]
+    if not widths or max(widths) > 2.0 * min(widths):
+        return None
+    med = float(np.median(widths))
+    if 2 * med > h:
+        return None                 # a wire is long and thin; this is a block
+    centers = [(s + e) / 2 for s, e, _, _ in wires]
+    if any(b - a > 4.0 * med for a, b in zip(centers, centers[1:])):
+        return None
+    # Background both sides: no other expected colour runs through the
+    # columns just outside the group. (The edge wire's own colour may: a run
+    # is the wire's core, and its soft edge spills past it. A block of that
+    # colour beside it fails the share test.)
+    need = max(3, int(med / 2))
+    left, right = wires[0][0], wires[-1][1]
+    if left < need or right > width - need:
+        return None
+    if any(float(fills[n][cols].max()) >= min_fill
+           for cols, edge in ((np.r_[left - need:left], wires[0][3]),
+                              (np.r_[right:right + need], wires[-1][3]))
+           for n in fills if n != edge):
+        return None
+    pad = int(min(2 * med, left, width - right))
+    x1, x2 = left - pad, right + pad
+    share = 1.0
+    for n, mask in on.items():
+        total = int(mask[:, x1:x2].sum())
+        inside = sum(int(mask[:, max(0, s - 2):e + 2].sum()) for s, e, _, wn in wires if wn == n)
+        share = min(share, inside / total if total else 0.0)
+    return (share, x1, x2) if share >= 0.5 else None
 
 
 def _load_wires_file() -> dict:
@@ -285,6 +334,81 @@ class VisionController:
         return {"colors": colors, "detection": data.get("detection") or {},
                 "profiles": {part_number: profile}}
 
+    def locate_wires(self, frame: np.ndarray, search_box, expected: List[str]) -> Optional[dict]:
+        """Find the wires box inside a connector's search area on a good part.
+
+        A wire only counts where it runs through most of the box's height, so
+        a box around the whole connector (boot, grommet, foam) misses a wire
+        that shows only briefly. This scans bands of several heights down
+        `search_box` (x1, y1, x2, y2, frame pixels) for the expected wires in
+        order, shaped like one cable -- similar widths, side by side, with
+        background on both sides -- and keeps the band where the wires'
+        colours belong most to the wires themselves (a jig block of a wire's
+        colour fails that), then the cleanest read, then the taller band. The
+        winner must read the same through wire_engine, as it will on the line.
+        Returns {"box", "wire_signature"} in frame pixels, or None.
+        """
+        cfg = self._wire_engine_config("", {})
+        colors, det = cfg["colors"], cfg["detection"]
+        min_fill = det.get("min_column_fill", 0.35)
+        min_width = det.get("min_wire_width_px", 3)
+        min_sat = det.get("colored_min_saturation", 110)
+        min_chroma = det.get("colored_min_chroma", 40)
+        max_ratio = det.get("max_wire_width_ratio", 2.5)
+
+        fh, fw = frame.shape[:2]
+        x1, y1, x2, y2 = (int(v) for v in search_box)
+        x1, x2 = sorted((max(0, x1), min(fw, x2)))
+        y1, y2 = sorted((max(0, y1), min(fh, y2)))
+        if x2 - x1 < 8 or y2 - y1 < 8 or not expected:
+            return None
+        expected = list(expected)
+        area = frame[y1:y2, x1:x2]
+        ah, aw = area.shape[:2]
+        counts = Counter(expected)
+        names = list(counts)
+
+        on = {n: m > 0 for n, m in wire_masks(area, colors, names, min_sat, min_chroma).items()}
+        # Column sums of each colour over any band of rows, in O(1) per band.
+        cum = {n: np.vstack([np.zeros((1, aw), np.float32),
+                             np.cumsum(m, axis=0, dtype=np.float32)]) for n, m in on.items()}
+
+        candidates = []         # (key, box in area coordinates)
+        for h in sorted({int(ah * k) for k in (1.0, 0.8, 0.65, 0.5, 0.4, 0.3, 0.22, 0.15, 0.1)},
+                        reverse=True):
+            if h < 12:
+                continue
+            for y0 in range(0, ah - h + 1, max(3, h // 5)):
+                fills = {n: (cum[n][y0 + h] - cum[n][y0]) / h for n in names}
+                runs = {n: _column_runs(fills[n], min_fill, min_width, counts[n] + 3)
+                        for n in names}
+                if any(len(runs[n]) < counts[n] for n in names):
+                    continue
+                for pick in itertools.product(*(itertools.combinations(runs[n], counts[n])
+                                                for n in names)):
+                    wires = sorted((s, e, sc, n) for n, group in zip(names, pick)
+                                   for s, e, sc in group)
+                    if [w[3] for w in wires] != expected:
+                        continue
+                    real = _wires_look_real(wires, {n: on[n][y0:y0 + h] for n in names},
+                                            fills, h, min_fill)
+                    if real is None:
+                        continue
+                    share, bx1, bx2 = real
+                    key = (round(share, 1), round(min(w[2] for w in wires), 1), h)
+                    candidates.append((key, (bx1, y0, bx2, y0 + h)))
+
+        for _, (bx1, by1, bx2, by2) in sorted(candidates, key=lambda c: c[0], reverse=True)[:20]:
+            dets = wire_engine.detect_wires(area[by1:by2, bx1:bx2], colors, counts, min_fill,
+                                            min_width, min_sat, min_chroma, max_ratio)
+            if [d.color for d in dets] != expected:
+                continue
+            box = (x1 + bx1, y1 + by1, x1 + bx2, y1 + by2)
+            signature = wire_engine.wire_signature(frame, box, None, colors, expected, det)
+            if signature is not None:
+                return {"box": [int(v) for v in box], "wire_signature": signature}
+        return None
+
     def inspect_wires(self, part_number: str, frame: np.ndarray,
                       profile: Optional[dict] = None) -> Optional[wire_engine.InspectionResult]:
         """Run wire_engine over the part's connector boxes in `frame`.
@@ -295,13 +419,38 @@ class VisionController:
         profile = profile or self.wire_profile(part_number)
         if not profile:
             return None
-        return wire_engine.inspect(frame, self._wire_engine_config(part_number, profile),
-                                   part_number)
+        cfg = self._wire_engine_config(part_number, profile)
+        result = wire_engine.inspect(frame, cfg, part_number)
+
+        # A strip found by sliding over the search area (the part sat
+        # elsewhere) only counts if it looks like real wires, by the same
+        # rules the strip was found with: a jig block and a dark gap of the
+        # right colours can match the wires' widths and spacing. Otherwise
+        # the connector is judged on its saved strip alone.
+        det = cfg["detection"]
+        min_fill = det.get("min_column_fill", 0.35)
+        for i, (region, res) in enumerate(zip(profile["regions"], result.regions)):
+            if res.located_by != "wires" or not res.passed:
+                continue
+            x1, y1, x2, y2 = res.box
+            on = {n: m > 0 for n, m in wire_masks(
+                frame[y1:y2, x1:x2], cfg["colors"], list(Counter(res.expected_order)),
+                det.get("colored_min_saturation", 110), det.get("colored_min_chroma", 40)).items()}
+            wires = [(d.x_start, d.x_end, d.score, d.color) for d in res.detections]
+            if _wires_look_real(wires, on, {n: m.mean(axis=0) for n, m in on.items()},
+                                y2 - y1, min_fill) is None:
+                fixed = {k: v for k, v in region.items() if k != "wire_signature"}
+                cfg["profiles"][part_number] = dict(profile, regions=[fixed])
+                result.regions[i] = wire_engine.inspect(frame, cfg, part_number).regions[0]
+                cfg["profiles"][part_number] = profile
+        return result
 
     def set_wire_profile(self, part_number: str, image_size: Tuple[int, int],
                          regions: List[dict]):
         """Save a part's wire check: `regions` is [{"name", "box": [x1, y1, x2, y2],
-        "expected_order": [colour, ...]}] in `image_size` (w, h) pixels."""
+        "expected_order": [colour, ...]}] in `image_size` (w, h) pixels, each
+        optionally with the "search_box" it was found in and its
+        "wire_signature" (see locate_wires)."""
         known = set(self.wire_color_names())
         for r in regions:
             order = r.get("expected_order") or []
@@ -318,8 +467,12 @@ class VisionController:
         data = _load_wires_file()
         data["profiles"][part_number] = {
             "image_size": [int(image_size[0]), int(image_size[1])],
-            "regions": [{"name": r["name"], "box": [int(v) for v in r["box"]],
-                         "expected_order": list(r["expected_order"])} for r in regions],
+            "regions": [dict({"name": r["name"], "box": [int(v) for v in r["box"]],
+                              "expected_order": list(r["expected_order"])},
+                             **({"search_box": [int(v) for v in r["search_box"]],
+                                 "wire_signature": r["wire_signature"]}
+                                if r.get("search_box") and r.get("wire_signature") else {}))
+                        for r in regions],
         }
         _save_wires_file(data)
 

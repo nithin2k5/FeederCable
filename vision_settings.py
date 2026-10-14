@@ -2034,9 +2034,11 @@ WIRE_SWATCH = {
 
 
 def _open_wire_dialog(parent, ctrl, part_number):
-    """Set one part's wire colours: a box over each connector's wires and the
-    colours expected there, left to right. wire_engine looks for the wires
-    only inside these boxes. Returns True if the part's wire colours changed."""
+    """Set one part's wire colours: a search area around each connector and the
+    colours expected there, left to right. On a good part the strip where the
+    wires run is found inside each area (see VisionController.locate_wires);
+    on the line wire_engine checks that strip, sliding it within the area if
+    the part sits elsewhere. Returns True if the part's wire colours changed."""
     if not _cv2_ok or not _pil_ok:
         messagebox.showerror("Vision", "OpenCV and Pillow are required to set wire colours.",
                              parent=parent)
@@ -2053,7 +2055,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     tw, th = max(900, int(ww * 0.92)), max(600, wh - 90)
     win = _dialog(parent, "Wire Colours", tw, th, wx + (ww - tw) // 2, wy + 10)
     _dialog_header(win, "Wire Colours — %s" % part_number,
-                   "Box each connector's wires, then list its colours left to right.",
+                   "Draw an area around each connector, then list its wire colours left to right.",
                    compact=True)
 
     alive = {"v": True}
@@ -2071,15 +2073,25 @@ def _open_wire_dialog(parent, ctrl, part_number):
     saved_regions = {r["name"]: r for r in (saved_profile or {}).get("regions", [])}
     for k, name in enumerate(WIRE_CONNECTORS):
         reg = saved_regions.get(name)
-        roi = None
+        roi, wires = None, None
         if reg:
-            x1, y1, x2, y2 = reg["box"]
+            # The area drawn is the search box. A check saved before search
+            # areas has only its wires box: that becomes the area, and the
+            # wires are found inside it again.
+            x1, y1, x2, y2 = reg.get("search_box") or reg["box"]
             roi = {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
+            if reg.get("search_box") and reg.get("wire_signature"):
+                wires = {"box": reg["box"], "wire_signature": reg["wire_signature"]}
         conns.append({
             "name": name,
             "enabled": tk.BooleanVar(value=bool(reg) or not saved_profile),
             "roi": roi,
             "colors": [tk.StringVar(value=c) for c in (reg or {}).get("expected_order", [])],
+            # The wires strip found in the area: {"box", "wire_signature"}.
+            # Dropped whenever the area or colours change, found again on
+            # the next Check or Save.
+            "wires": wires,
+            "error": None,
         })
 
     # ── Footer ─────────────────────────────────────────────────────────────
@@ -2152,10 +2164,10 @@ def _open_wire_dialog(parent, ctrl, part_number):
     rail_canvas.bind("<Enter>", lambda e: rail_canvas.bind_all("<MouseWheel>", _rail_wheel))
     rail_canvas.bind("<Leave>", lambda e: rail_canvas.unbind_all("<MouseWheel>"))
 
-    tk.Label(rail, text="Click a connector, then drag a box over its wires on the image. "
-                        "Keep the box tight to the wires: colours are looked for only "
-                        "inside it. Wires run top to bottom through the box and are "
-                        "read left to right.",
+    tk.Label(rail, text="Click a connector, then drag a box around it on the image — "
+                        "wires are looked for only inside this area. With a good part "
+                        "in place, Check finds where its wires run (the dashed strip). "
+                        "Wires run top to bottom and are read left to right.",
              bg=BG, fg=TXT_FAINT, font=("Arial", 10), wraplength=300,
              justify="left", anchor="w").pack(fill="x", pady=(0, 10))
 
@@ -2194,16 +2206,33 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     # ── Behaviour ──────────────────────────────────────────────────────────
 
+    def _locate(img):
+        """Find the wires strip of every connector that has none yet, on `img`
+        (a good part). A connector whose wires can't be found gets an error."""
+        for c in conns:
+            r = c["roi"]
+            order = [v.get() for v in c["colors"] if v.get()]
+            if not (c["enabled"].get() and r and order) or c["wires"]:
+                continue
+            area = [r["x"], r["y"], r["x"] + r["width"], r["y"] + r["height"]]
+            c["wires"] = ctrl.locate_wires(img, area, order)
+            c["error"] = None if c["wires"] else (
+                "Couldn't find %s side by side in this area. Check the colours and "
+                "that a good part is in place." % " | ".join(order))
+
     def _profile():
-        """The connectors set up so far as a wire_engine profile, or None."""
+        """The connectors whose wires have been found, as a wire_engine profile,
+        or None."""
         regions = []
         for c in conns:
             r = c["roi"]
             order = [v.get() for v in c["colors"] if v.get()]
-            if c["enabled"].get() and r and order:
+            if c["enabled"].get() and r and order and c["wires"]:
                 regions.append({"name": c["name"], "expected_order": order,
-                                "box": [r["x"], r["y"], r["x"] + r["width"],
-                                        r["y"] + r["height"]]})
+                                "search_box": [r["x"], r["y"], r["x"] + r["width"],
+                                               r["y"] + r["height"]],
+                                "box": list(c["wires"]["box"]),
+                                "wire_signature": c["wires"]["wire_signature"]})
         if not regions or size["wh"] is None:
             return None
         return {"image_size": list(size["wh"]), "regions": regions}
@@ -2237,7 +2266,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
         problems = _problems()
         status.config(text="   ".join("○ " + p for p in problems) if problems else
                       "✓ Ready to save", fg=WARN if problems else OK_GREEN)
-        _set_btn_enabled(btn_save, not problems and size["wh"] is not None)
+        _set_btn_enabled(btn_save, not problems and size["wh"] is not None and (
+            view.get_image() is not None or all(c["wires"] for c in conns
+                                                 if c["enabled"].get())))
         _set_btn_enabled(btn_check, not problems and view.get_image() is not None)
 
     def _paint_results():
@@ -2245,7 +2276,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
         by_name = {r.name: r for r in res.regions} if res else {}
         for c, w in zip(conns, widgets):
             r = by_name.get(c["name"])
-            if r is None:
+            if c["error"] and c["enabled"].get():
+                w["result"].config(text="✗ " + c["error"], fg=NG_RED)
+            elif r is None:
                 w["result"].config(text="")
             else:
                 w["result"].config(text=("✓ " if r.passed else "✗ ") + r.message,
@@ -2254,8 +2287,15 @@ def _open_wire_dialog(parent, ctrl, part_number):
         for k, c in enumerate(conns):
             if k != active["k"] and c["enabled"].get() and c["roi"]:
                 overlays.append((c["roi"], OBJECT_COLORS[k], c["name"]))
+            if c["enabled"].get() and c["wires"] and not by_name.get(c["name"]):
+                x1, y1, x2, y2 = c["wires"]["box"]
+                overlays.append(({"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
+                                 OBJECT_COLORS[k], ""))
         for r in (res.regions if res else []):
             x1, y1, x2, y2 = r.box
+            if r.located_by is not None:
+                overlays.append(({"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
+                                 OK_GREEN if r.passed else NG_RED, ""))
             for d in r.detections:
                 overlays.append(({"x": x1 + d.x_start, "y": y1, "width": d.x_end - d.x_start,
                                   "height": y2 - y1},
@@ -2266,6 +2306,12 @@ def _open_wire_dialog(parent, ctrl, part_number):
         """Anything that changes what would be checked drops the last result."""
         checked["result"] = None
         _paint()
+
+    def _refind(k):
+        """Connector k's area or colours changed: its wires must be found again."""
+        conns[k]["wires"] = None
+        conns[k]["error"] = None
+        _changed()
 
     def _paint_rows(k):
         c, w = conns[k], widgets[k]
@@ -2283,8 +2329,8 @@ def _open_wire_dialog(parent, ctrl, part_number):
                               width=12, font=("Arial", 11))
             cb.pack(side="left")
             cb.bind("<<ComboboxSelected>>",
-                    lambda e, s=swatch, v=var: (s.config(bg=WIRE_SWATCH.get(v.get(), TXT_FAINT)),
-                                                _changed()))
+                    lambda e, s=swatch, v=var, k=k: (
+                        s.config(bg=WIRE_SWATCH.get(v.get(), TXT_FAINT)), _refind(k)))
             cb.bind("<Button-1>", lambda e, k=k: _select(k) if active["k"] != k else None, add="+")
             x = tk.Label(row, text="✕", bg=PANEL, fg=TXT_DIM, font=("Arial", 10, "bold"),
                          cursor="hand2")
@@ -2298,12 +2344,12 @@ def _open_wire_dialog(parent, ctrl, part_number):
         c["colors"].append(tk.StringVar(value=color_names[0]))
         _select(k)
         _paint_rows(k)
-        _changed()
+        _refind(k)
 
     def _remove_wire(k, i):
         conns[k]["colors"].pop(i)
         _paint_rows(k)
-        _changed()
+        _refind(k)
 
     def _select(k):
         active["k"] = k
@@ -2314,7 +2360,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     def _roi_changed(roi, final=True):
         conns[active["k"]]["roi"] = roi
         if final:
-            _changed()
+            _refind(active["k"])
 
     def _set_frame(img):
         """Show `img`, rescaling the boxes if it is another size than they were
@@ -2327,6 +2373,9 @@ def _open_wire_dialog(parent, ctrl, part_number):
                 if r:
                     c["roi"] = {"x": int(r["x"] * sx), "y": int(r["y"] * sy),
                                 "width": int(r["width"] * sx), "height": int(r["height"] * sy)}
+                # Found again at this size: the strip and wire widths are
+                # in the old size's pixels.
+                c["wires"], c["error"] = None, None
             checked["result"] = None
         first = size["wh"] != (w, h)
         size["wh"] = (w, h)
@@ -2388,27 +2437,43 @@ def _open_wire_dialog(parent, ctrl, part_number):
 
     def _check():
         img = view.get_image()
-        profile = _profile()
-        if img is None or profile is None:
+        if img is None or _problems():
             return None
         if live["on"]:
             # Judge one still frame, and keep it on screen so the wires found
             # line up with the picture they were found in.
             img = img.copy()
             _freeze(img, "CHECKED FRAME")
+        win.config(cursor="watch")
+        win.update_idletasks()
         try:
-            checked["result"] = ctrl.inspect_wires(part_number, img, profile)
+            _locate(img)
+            profile = _profile()
+            checked["result"] = (ctrl.inspect_wires(part_number, img, profile)
+                                 if profile else None)
         except Exception as e:
             messagebox.showerror("Check", str(e), parent=win)
             return None
+        finally:
+            win.config(cursor="")
         _paint()
         return checked["result"]
 
     def _save():
-        profile = _profile()
-        if _problems() or profile is None:
+        if _problems():
             return
         res = checked["result"] or (_check() if view.get_image() is not None else None)
+        lost = [c["name"] for c in conns if c["enabled"].get() and not c["wires"]]
+        if lost:
+            messagebox.showerror(
+                "Wires Not Found",
+                "The wires of %s could not be found in the area drawn.\n\n"
+                "Put a good part in place, check the colours and the area, and "
+                "press Check." % " and ".join(lost), parent=win)
+            return
+        profile = _profile()
+        if profile is None:
+            return
         if res is not None and not res.passed:
             failed = "\n".join("  •  %s: %s" % (r.name, r.message)
                                for r in res.regions if not r.passed)
@@ -2711,6 +2776,12 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
             """Each connector's box, and every wire found in it, by verdict."""
             out = []
             for w in wires:
+                if w.search_box:
+                    sx1, sy1, sx2, sy2 = w.search_box
+                    out.append(({"x": sx1, "y": sy1, "width": sx2 - sx1, "height": sy2 - sy1},
+                                TXT_FAINT, ""))
+                if w.located_by is None:
+                    continue        # wires not found: only the area means anything
                 x1, y1, x2, y2 = w.box
                 wc = OK_GREEN if w.passed else NG_RED
                 out.append(({"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1},
