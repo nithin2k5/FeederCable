@@ -264,7 +264,8 @@ def render(parent):
     status_lbl = tk.Label(status_bar, text="", bg=BG, fg=TXT_DIM,
                           font=("Consolas", 9), anchor="w", padx=10, pady=4)
     status_lbl.pack(side="left")
-    tk.Label(status_bar, text="click a column header to sort  ·  select a row for its vision frame",
+    tk.Label(status_bar, text="click a column header to sort  ·  select a row for its vision frame  ·  "
+                              "click the frame to enlarge it",
              bg=BG, fg="#3f5662", font=("Arial", 8), anchor="e", padx=10).pack(side="right")
 
     # ── Table ────────────────────────────────────────────────────────────────
@@ -290,10 +291,15 @@ def render(parent):
 
     row_images = {}                 # tree item id -> visionimg path from the DB (or "")
     preview_photo = {"img": None}   # keep a reference so Tk doesn't collect it
+    # The image the thumbnail is showing, for the enlarged view; None when the
+    # box holds a message instead.
+    preview_src = {"path": None, "lot": ""}
     sort_state = {"col": None, "desc": False}
 
     def _show_preview(path, lot_no=""):
         preview_lot_lbl.config(text=f"LOT {lot_no}" if lot_no else "")
+        preview_src["path"], preview_src["lot"] = None, lot_no
+        preview_img_lbl.config(cursor="")
         if not path:
             preview_photo["img"] = None
             msg = "No vision image for this record" if lot_no else "Select a row"
@@ -314,10 +320,68 @@ def render(parent):
             img.thumbnail((PREVIEW_W - 10, PREVIEW_H - 10), Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             preview_photo["img"] = photo
-            preview_img_lbl.config(image=photo, text="")
+            preview_img_lbl.config(image=photo, text="", cursor="hand2")
+            preview_src["path"] = path
         except Exception as ex:
             preview_photo["img"] = None
             preview_img_lbl.config(image="", text=f"Couldn't open image:\n{ex}", fg=NG)
+
+    def _open_enlarged(event=None):
+        """The selected record's vision frame, large: as big as fits the
+        screen, never stretched past its own size. Escape or a click closes it."""
+        path = preview_src["path"]
+        if not path:
+            return
+        try:
+            src = Image.open(path)
+            src.load()
+        except Exception as ex:
+            messagebox.showerror("Vision Frame", f"Couldn't open image:\n{ex}", parent=parent)
+            return
+
+        root = parent.winfo_toplevel()
+        win = tk.Toplevel(root)
+        win.withdraw()
+        lot = preview_src["lot"]
+        win.title(f"Vision Frame — LOT {lot}" if lot else "Vision Frame")
+        win.configure(bg="#05080a")
+        win.transient(root)
+
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        # As large as fits the screen, with room for the title bar and the
+        # taskbar -- a 640x480 frame is scaled up, since seeing it bigger is
+        # the point.
+        max_w, max_h = int(sw * 0.9), int((sh - 120) * 0.95)
+        scale = min(max_w / src.width, max_h / src.height)
+        w, h = max(1, int(src.width * scale)), max(1, int(src.height * scale))
+        win.geometry(f"{w}x{h + 26}+{(sw - w) // 2}+{max(0, (sh - 120 - h) // 2)}")
+
+        lbl = tk.Label(win, bg="#05080a", cursor="hand2")
+        lbl.pack(fill="both", expand=True)
+        tk.Label(win, text=f"{os.path.basename(path)}   ·   {src.width} x {src.height}"
+                           "   ·   click or Esc to close",
+                 bg="#05080a", fg=TXT_DIM, font=("Consolas", 9)).pack(side="bottom", fill="x")
+        shown = {"photo": None, "size": None}
+
+        def _fit(_event=None):
+            bw, bh = lbl.winfo_width(), lbl.winfo_height()
+            if bw < 10 or bh < 10 or shown["size"] == (bw, bh):
+                return
+            shown["size"] = (bw, bh)
+            k = min(bw / src.width, bh / src.height)
+            img = src.resize((max(1, int(src.width * k)), max(1, int(src.height * k))),
+                             Image.LANCZOS)
+            shown["photo"] = ImageTk.PhotoImage(img)
+            lbl.config(image=shown["photo"])
+
+        lbl.bind("<Configure>", _fit)
+        lbl.bind("<Button-1>", lambda e: win.destroy())
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.deiconify()
+        win.focus_set()
+
+    preview_img_lbl.bind("<Button-1>", _open_enlarged)
+    tree.bind("<Double-1>", lambda e: _open_enlarged() if tree.identify_region(e.x, e.y) == "cell" else None)
 
     def _on_row_select(event=None):
         sel = tree.selection()
