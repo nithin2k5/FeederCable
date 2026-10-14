@@ -1473,96 +1473,40 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     except Exception as ex:
         _print_problem(f"part label not printed: {ex}")
 
-# 35 mm at 203 dpi (8 dots/mm), and the TSPL internal fonts that are fixed
-# width -- cell width in dots, so a rendered line's width is exactly
-# len(text) * cell * multiplier.
-# TSPL's internal fonts are sized in dots, so a label's width in mm only
-# becomes a usable number with this. 8 dots/mm is 203 dpi, which is what the
-# font widths below are measured at.
-# 300 dpi. TSPL counts in dots and this was set to 8 dots/mm, which is a
-# 203 dpi printer -- so every width here was computed against 280 dots of a
-# stock that is really 420, and the anchor meant to sit 15 dots from the edge
-# sat 155 dots in. That is the indent that three attempts at this label's
-# alignment were all looking at: the maths was placing the block correctly on
-# a label a third narrower than the one in the printer.
+# Where the marker label's text goes, measured off printed labels rather than
+# derived. Derived geometry got this label wrong four times running: the last
+# attempt assumed a larger x moves the text toward the reading-left edge, set
+# x=405 for a 15 dot margin, and the text came out starting 55% of the way
+# across with the date row cut off at the right edge.
 #
-# Measured off a printed END marker: the block started 36% of the way across
-# the stock. With one anchor for every line, reading-left = label_w - 265, so
-# label_w = 265 / (1 - 0.36) = 411 dots, which is 11.8 dots/mm on 35 mm --
-# 300 dpi, where TSPL counts 12 dots to the millimetre.
-_MARKER_DPMM = 12
-# 35 mm, the stock MARKER.prn is written for. Only used if its SIZE line
-# cannot be read.
-_MARKER_LABEL_W_DEFAULT = 35 * _MARKER_DPMM
-# Every number below is LOTPRN.prn's, not one worked out here. That label
-# prints on this same 35 x 25 mm stock at this same rotation, and it is the
-# layout going out on boxes today -- so its geometry is known good, where this
-# one's has been derived from first principles twice and been wrong both
-# times. LOTPRN anchors every line at x=265 on 280 dots of stock, a
-# reading-left margin of 15; its title sits at y=172 and its field rows step
-# down by 24 from y=140.
-_MARKER_LEFT_MARGIN = 280 - 265
+# What the printed labels show, on EOLPRINTER and 35 x 25 mm stock:
+#   - every line starts at the same reading-left point and runs right, so one
+#     x for all lines is still one left margin;
+#   - a larger x moves that point right: x=265 started the block ~36% across,
+#     x=405 started it ~55% across;
+#   - the head is 300 dpi (12 dots/mm, 420 dots of stock) and the internal
+#     fonts are not scaled to it: "START LABEL" in font 3 measured 14.7 mm,
+#     which is 16 dots a character, and font 2 is 12.
+#
+# Those two points fit both "start = x - 173 dots" and "start = 0.58 * x", and
+# the two disagree. x=215 lands the block inside the label either way -- 42
+# dots (3.5 mm) or 125 dots (10.4 mm) from the reading-left edge -- with the
+# widest row, the 22 character date, ending at 306 or 389 of 420 dots, so
+# nothing is cut whichever is right. Once a label printed at 215 is measured,
+# this can be set exactly.
+_MARKER_X = 215
+# Title then rows, on LOTPRN's title height and row pitch, so the two labels
+# coming off this machine are laid out the same way.
 _MARKER_TITLE_Y = 172
 _MARKER_FIRST_ROW_Y = 140
 _MARKER_ROW_PITCH = 24
-# The internal bitmap fonts are 12 and 16 dots wide on a 203 dpi printer and
-# scale with the head, so on this one they are half again as wide. Only the
-# overflow guard reads these; getting them wrong lets a line run off the edge
-# rather than misplacing the block.
-_MARKER_FONT_W = {"2": 18, "3": 24}
-_MARKER_SIZE_LINE = re.compile(r"^\s*SIZE\s+([\d.]+)\s*mm", re.I | re.M)
 
 
-def _marker_label_width(template: str) -> int:
-    """The label's width in dots, taken from the template's own SIZE line.
-
-    The stock is declared once, at the top of MARKER.prn, and every line
-    position here is worked out from it. Reading it back from the template
-    means changing the stock there moves the text with it, instead of leaving
-    it positioned for a label that is no longer being printed on.
-    """
-    m = _MARKER_SIZE_LINE.search(template or "")
-    if not m: return _MARKER_LABEL_W_DEFAULT
-    try: return int(round(float(m.group(1)) * _MARKER_DPMM))
-    except ValueError: return _MARKER_LABEL_W_DEFAULT
-
-def _marker_line(y: int, font: str, mul: int, content: str, label_w: int) -> str:
-    """One TSPL TEXT line, rotation 180, positioned without the printer's help.
-
-    TSPL's own alignment argument is not supported across all TSC firmware,
-    but these internal fonts are fixed width, so a line's rendered width is
-    exact and the position can just be computed.
-
-    Every line takes the same x, and that is what left aligns them. This has
-    been got wrong twice, in both directions, so here is the actual geometry.
-
-    Under rotation 180 a line grows in -x from its anchor, so it occupies
-    printer-x [x - width, x]. Reading it means turning the label around, and
-    that turn reverses the axis: printer-x P is read at label_w - P. The span
-    is therefore read as [label_w - x, label_w - x + width], and the anchor --
-    the end the *printer* treats as trailing -- is the end the *reader* sees
-    first. One x for every line is one left margin for every line.
-
-    The trap is stopping at the printer's own span. "The line ends at its
-    anchor, so a shared anchor lines up trailing edges" is true and still
-    gives a left aligned block, because the label is read the other way up.
-    Adding each line's width to spread the anchors, as the previous attempt
-    did, right aligns it instead.
-
-    Four templates settle it rather than any reasoning here. VW DATAMATRIX,
-    nice DATAMATRIX1 and TEMPPRN each put four lines of plainly different
-    lengths at a flat x=90, all at rotation 180 and all written by the label
-    designer, which would not emit that for anything but an aligned block.
-    LOTPRN does the same at x=265 on this same 35 mm stock, and that one goes
-    out on boxes today.
-
-    A line too long for the stock is pushed back to the edge rather than
-    hanging off it, which breaks it out of alignment with the rest --
-    visibly, which is the point. Nothing is silently cropped.
-    """
-    width = len(content) * _MARKER_FONT_W[font] * mul
-    x = min(max(width, label_w - _MARKER_LEFT_MARGIN), label_w)
-    return f'TEXT {x},{y},"{font}",180,{mul},{mul},"{content}"'
+def _marker_line(y: int, font: str, mul: int, content: str) -> str:
+    """One TSPL TEXT line, rotation 180, at the shared anchor. TSPL's own
+    alignment argument is not supported across all TSC firmware, so every
+    line takes the same x instead, which lines them up on the left."""
+    return f'TEXT {_MARKER_X},{y},"{font}",180,{mul},{mul},"{content}"'
 
 def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
     """Print the text-only label that brackets a part's run on the roll.
@@ -1585,9 +1529,6 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     except Exception as ex:
         _print_problem(f"{marker} label not printed: could not read MARKER.prn ({ex})")
         return
-    # Read before the body is built, not after: the stock size in it is what
-    # the line positions are measured against.
-    label_w = _marker_label_width(template)
     now = datetime.datetime.now()
     # Captions padded to the longest one so the colons line up down the block.
     #
@@ -1610,8 +1551,8 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     # is what LOTPRN would look like with three fields on it.
     rows = [_MARKER_FIRST_ROW_Y - i * _MARKER_ROW_PITCH for i in range(len(fields))]
     body = '\r\n'.join(
-        [_marker_line(_MARKER_TITLE_Y, "3", 1, f"{marker} LABEL", label_w)]
-        + [_marker_line(y, "2", 1, f, label_w) for y, f in zip(rows, fields)]
+        [_marker_line(_MARKER_TITLE_Y, "3", 1, f"{marker} LABEL")]
+        + [_marker_line(y, "2", 1, f) for y, f in zip(rows, fields)]
     )
     try:
         text = template.replace("@body@", body)
