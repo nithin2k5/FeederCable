@@ -51,9 +51,10 @@ Usage: ./install.sh [options]
   --init-db           Run init_db.py after installing, to create the MySQL
                       schema. Needs MySQL reachable with db.py's credentials.
   --seed-from-repo    Provision the station's config by copying this checkout's
-                      camera_cfg.ini, vision_config.json and vision_models/
-                      verbatim, instead of writing neutral defaults. Use it to
-                      clone a known-good station; see "Provisioning" below.
+                      camera_cfg.ini, vision_config.json, vision_wires.json and
+                      vision_models/ verbatim, instead of writing neutral
+                      defaults. Use it to clone a known-good station; see
+                      "Provisioning" below.
   --console           Build a debug exe that keeps a console window open. The
                       app prints [PLC DEBUG], [HIPOT DEBUG] and [VISION DEBUG]
                       lines to stdout; the default windowed build discards them,
@@ -156,6 +157,11 @@ RETIRED_FILES=(
 )
 # Station state. Created by the installer if absent, never overwritten.
 CONFIG_FILES=("comport_cfg.ini" "camera_cfg.ini" "vision_config.json" "emp.txt")
+# Station state the app creates itself when first needed, so the installer
+# neither seeds nor requires it -- but an upgrade must still carry it across.
+# vision_wires.json holds every part's wire colour checks (Vision Settings ->
+# Wire Colours...).
+OPTIONAL_FILES=("vision_wires.json")
 STATE_DIRS=("vision_models" "vision_captures")
 
 ICON="FC EOL.ico"
@@ -274,7 +280,8 @@ fi
 # place every time it prints, so a developer who ran the app from this checkout
 # would trip the check on a build that is perfectly current.
 STALE=0
-STALE_AGAINST=(*.py)
+# The packages count too: the vision and wire colour checks live in them.
+STALE_AGAINST=(*.py vision_engine/*.py wire_engine/*.py)
 for f in "${ASSET_FILES[@]}"; do
     case "$f" in TEMPPRN.prn|TEMPMARKER_START.prn|TEMPLOTPRN.prn) continue ;; esac
     STALE_AGAINST+=("$f")
@@ -313,7 +320,7 @@ if [ -e "$DEST/$APP_NAME.exe" ]; then
     # the fresh payload rather than letting the copy bury it.
     KEEP="$(mktemp -d)"
     src="$DEST$SUB"
-    for c in "${CONFIG_FILES[@]}"; do
+    for c in "${CONFIG_FILES[@]}" "${OPTIONAL_FILES[@]}"; do
         if [ -f "$src/$c" ]; then cp -p "$src/$c" "$KEEP/"; note "keeping $c"; fi
     done
     for d in "${STATE_DIRS[@]}"; do
@@ -393,6 +400,7 @@ CFG
 if [ "$SEED_FROM_REPO" = 1 ]; then
     copy_from_repo "camera_cfg.ini"    || true
     copy_from_repo "vision_config.json" || true
+    copy_from_repo "vision_wires.json"  || true
 else
     # Both cameras off and index -1. Enabling a camera the station may not have
     # would fail every vision check before the electrical tests ever ran.
@@ -518,7 +526,8 @@ cat <<'POST'
       1. MySQL must be reachable with db.py's credentials (localhost / feeder
          / root). Re-run with --init-db to create the schema.
       2. COM Port Settings — assign the Delta PLC and HiPot ports.
-      3. Vision Settings — enable the cameras and teach each part.
+      3. Vision Settings — enable the cameras, teach each part, and set
+         its wire colours (Wire Colours...).
       4. emp.txt — add the site's employee numbers if it is still empty.
       5. Windows printers named EOLPRINTER (part labels) and LOTPRINTER
          (box labels) must exist, spelled exactly.
