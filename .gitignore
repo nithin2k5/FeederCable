@@ -19,6 +19,7 @@ TEMPLOTPRN.prn
 build/
 dist/
 FeederCable.spec
+FeederCableV2.spec
 .install.lock/
 .build.stamp
 

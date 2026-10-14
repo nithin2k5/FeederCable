@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# install.sh — build FeederCable.exe from source and install it on this machine.
+# install.sh — build FeederCableV2.exe from source and install it on this machine.
 #
 # Run from Git Bash on the Windows box that will host the station:
 #
 #     ./install.sh                  # build, install, provision, verify
-#     ./install.sh --build-only     # produce dist/FeederCable, install nothing
-#     ./install.sh --install-only   # install an already-built dist/FeederCable
+#     ./install.sh --build-only     # produce dist/FeederCableV2, install nothing
+#     ./install.sh --install-only   # install an already-built dist/FeederCableV2
 #     ./install.sh --init-db        # also create the MySQL schema
 #     ./install.sh --help           # every option
 #
@@ -22,12 +22,16 @@
 
 set -euo pipefail
 
-APP_NAME="FeederCable"
+APP_NAME="FeederCableV2"
 ENTRY="main.py"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
 DEFAULT_DEST="${LOCALAPPDATA:-$HOME/AppData/Local}/Programs/$APP_NAME"
+# The name the app was installed under before it became $APP_NAME. A first
+# install under the new name takes its station config from there.
+LEGACY_NAME="FeederCable"
+LEGACY_DEST="${LOCALAPPDATA:-$HOME/AppData/Local}/Programs/$LEGACY_NAME"
 
 DO_BUILD=1
 DO_INSTALL=1
@@ -43,9 +47,9 @@ usage() {
     cat <<'USAGE'
 Usage: ./install.sh [options]
 
-  --build-only        Build dist/FeederCable and stop.
-  --install-only      Skip the build; install whatever is in dist/FeederCable.
-  --dest <path>       Install location. Default: %LOCALAPPDATA%\Programs\FeederCable
+  --build-only        Build dist/FeederCableV2 and stop.
+  --install-only      Skip the build; install whatever is in dist/FeederCableV2.
+  --dest <path>       Install location. Default: %LOCALAPPDATA%\Programs\FeederCableV2
   --no-shortcut       Do not create Desktop / Start Menu shortcuts.
   --clean             Delete build/ and dist/ before building.
   --init-db           Run init_db.py after installing, to create the MySQL
@@ -97,6 +101,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+DEST_GIVEN="$DEST"
 DEST="${DEST:-$DEFAULT_DEST}"
 VPY=".venv/Scripts/python.exe"
 
@@ -313,13 +318,21 @@ SUB=""
 [ -d "dist/$APP_NAME/_internal" ] && SUB="/_internal"
 
 KEEP=""
+src=""
 if [ -e "$DEST/$APP_NAME.exe" ]; then
     note "Existing install found — upgrading in place."
+    src="$DEST$SUB"
+elif [ -z "$DEST_GIVEN" ] && [ -e "$LEGACY_DEST/$LEGACY_NAME.exe" ]; then
+    # First install under the new name on a station that ran the app as
+    # $LEGACY_NAME. Its config is carried over; the old install is left as is.
+    note "Earlier install found at $LEGACY_DEST — carrying its config over."
+    src="$LEGACY_DEST$SUB"
+fi
+if [ -n "$src" ]; then
     # A station's config is earned: COM ports assigned, cameras calibrated,
     # parts taught, a year of pass images. Hold it aside and put it back over
     # the fresh payload rather than letting the copy bury it.
     KEEP="$(mktemp -d)"
-    src="$DEST$SUB"
     for c in "${CONFIG_FILES[@]}" "${OPTIONAL_FILES[@]}"; do
         if [ -f "$src/$c" ]; then cp -p "$src/$c" "$KEEP/"; note "keeping $c"; fi
     done
