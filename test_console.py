@@ -1488,13 +1488,13 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
 #     fonts are not scaled to it: "START LABEL" in font 3 measured 14.7 mm,
 #     which is 16 dots a character, and font 2 is 12.
 #
-# Those two points fit both "start = x - 173 dots" and "start = 0.58 * x", and
-# the two disagree. x=215 lands the block inside the label either way -- 42
-# dots (3.5 mm) or 125 dots (10.4 mm) from the reading-left edge -- with the
-# widest row, the 22 character date, ending at 306 or 389 of 420 dots, so
-# nothing is cut whichever is right. Once a label printed at 215 is measured,
-# this can be set exactly.
-_MARKER_X = 215
+# A label printed at x=215 came out a little right of centre, so the block
+# starts around 125 dots in there. The block is centred when its widest row,
+# the 22 character date (264 dots), has 78 dots either side. How far a step
+# of x moves the block is not pinned down -- the measurements so far put it
+# between 0.58 and 1 dot -- which puts centre at x=134 to 168. 150 is within
+# about 1.5 mm of centre at either end of that range.
+_MARKER_X = 150
 # Title then rows, on LOTPRN's title height and row pitch, so the two labels
 # coming off this machine are laid out the same way.
 _MARKER_TITLE_Y = 172
