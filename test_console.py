@@ -4171,7 +4171,8 @@ def render(parent):
             
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no
         # NO LABEL parts print nothing, so there is nothing to scan either.
-        state["no_label"] = _part_label_template(pno, state.get("is_rework", False)) == NO_LABEL
+        label_tpl = _part_label_template(pno, state.get("is_rework", False))
+        state["no_label"] = label_tpl == NO_LABEL
         state["scan_checks"] = _scan_target(pno, state.get("is_rework", False), lot_no, state["alc"])
         elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
         elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
@@ -4196,6 +4197,14 @@ def render(parent):
                              kwargs={"num_channels": state["num_channels"],
                                      "ir_ch": ir_ch, "acw_ch": acw_ch},
                              daemon=True).start()
+            # The log line alone is easy to miss, and the part's label is
+            # simply not there -- so say it where the operator is looking.
+            if not state["no_label"] and not os.path.exists(label_tpl):
+                _after(0, lambda p=pno, f=label_tpl: messagebox.showerror(
+                    "Label template missing",
+                    f"The label template for part {p} was not found:\n\n{f}\n\n"
+                    "No label was printed. Copy the .prn file back into the app "
+                    "folder, or pick another template in Model Settings."))
             if cfg.get("scan_enabled", True) and not state.get("no_label"):
                 state["awaiting_scan"] = True
                 # Focus immediately, not after a delay: printers eject a label
