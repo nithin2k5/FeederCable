@@ -128,20 +128,24 @@ trap cleanup EXIT INT TERM
 
 # ── What the frozen app needs beside itself ──────────────────────────────────
 # Read-only assets, shipped inside the bundle. Label templates are chosen per
-# part in Model Settings, so every .prn ships -- a part whose template is
-# missing prints no part label at all. The three
-# date code tables ship with them, for the same reason: a station missing
-# one falls back to the built-in scheme and prints a code nobody chose.
+# part in Model Settings, from the .prn files in the app's folder, so every
+# .prn in this checkout ships -- a part whose template is missing prints no
+# part label at all. Found by pattern rather than listed, so a new template
+# (or its R rework sibling) ships without anyone remembering to add it here.
+# TEMP*.prn are left out: the app writes them on every print, and the one in
+# this checkout is a rendered label with another part's values in it.
+# The three date code tables ship with them, for the same reason as the
+# templates: a station missing one falls back to the built-in scheme and
+# prints a code nobody chose.
+shopt -s nullglob
+PRN_FILES=()
+for f in *.prn; do
+    case "$f" in TEMP*) continue ;; esac
+    PRN_FILES+=("$f")
+done
+shopt -u nullglob
 ASSET_FILES=(
-    "BARCODE FINAL.prn"
-    "DATAMATRIX FINAL.prn"
-    "HMI BARCODE .prn"
-    "LOTPRN.prn"
-    "MARKER.prn"
-    "TEMPMARKER_START.prn"
-    "TEMPPRN.prn"
-    "VW DATAMATRIX.prn"
-    "nice DATAMATRIX1.prn"
+    "${PRN_FILES[@]}"
     "DAY CODE.txt"
     "MONTH CODE.txt"
     "YEAR CODE.txt"
@@ -280,17 +284,9 @@ fi
 # destination with the time of the copy, which is always now, so an installed
 # exe always looks current no matter how old the build behind it is. dist/
 # still carries the time PyInstaller wrote it.
-#
-# The TEMP* label templates are skipped on purpose. The app rewrites them in
-# place every time it prints, so a developer who ran the app from this checkout
-# would trip the check on a build that is perfectly current.
 STALE=0
 # The packages count too: the vision and wire colour checks live in them.
-STALE_AGAINST=(*.py vision_engine/*.py wire_engine/*.py)
-for f in "${ASSET_FILES[@]}"; do
-    case "$f" in TEMPPRN.prn|TEMPMARKER_START.prn|TEMPLOTPRN.prn) continue ;; esac
-    STALE_AGAINST+=("$f")
-done
+STALE_AGAINST=(*.py vision_engine/*.py wire_engine/*.py "${ASSET_FILES[@]}")
 for f in "${STALE_AGAINST[@]}"; do
     [ -f "$f" ] || continue
     if [ "$f" -nt "dist/$APP_NAME/$APP_NAME.exe" ]; then
@@ -538,10 +534,15 @@ cat <<'POST'
     Still to do on a new station:
       1. MySQL must be reachable with db.py's credentials (localhost / feeder
          / root). Re-run with --init-db to create the schema.
-      2. COM Port Settings — assign the Delta PLC and HiPot ports.
+      2. COM Port Settings — assign the Delta PLC and HiPot ports, and set
+         the Machine ID. Model Settings shows it and saves parts under it.
       3. Vision Settings — enable the cameras, teach each part, and set
          its wire colours (Wire Colours...).
       4. emp.txt — add the site's employee numbers if it is still empty.
       5. Windows printers named EOLPRINTER (part labels) and LOTPRINTER
          (box labels) must exist, spelled exactly.
+      6. Label templates — Model Settings lists the .prn files in the
+         config and state folder printed above. A template added on the
+         station goes there (with its R rework copy); one added to the repo
+         ships with the next install.
 POST
