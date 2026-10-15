@@ -1,9 +1,19 @@
 import os
+import configparser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import mysql.connector
 
 import db
+
+
+def _station_machine_id() -> str:
+    """The Machine ID saved in COM Port Settings, the one this station stamps
+    onto its lot numbers and labels. Read the same way Test Console reads it,
+    so a part saved here is filed under the machine that actually tests it."""
+    cfg = configparser.ConfigParser()
+    cfg.read(os.path.join(os.path.dirname(__file__), "comport_cfg.ini"))
+    return cfg.get("COM", "machine_id", fallback="PB1")
 
 
 def render(parent):
@@ -237,8 +247,19 @@ def render(parent):
 
     _set_label_entry("")
 
-    cb_machine = mk_combo(f3, ["PB1", "PB2", "PB3", "PB4"])
-    cb_machine.grid(row=2, column=1, sticky="ew", pady=6)
+    # Not editable here: it is the station's Machine ID from COM Port
+    # Settings, read fresh each time the page opens. A dropdown let a part be
+    # saved under a machine other than the one it is tested on.
+    ent_machine = mk_entry(f3)
+    ent_machine.grid(row=2, column=1, sticky="ew", pady=6)
+
+    def _show_machine_id():
+        ent_machine.config(state="normal")
+        ent_machine.delete(0, "end")
+        ent_machine.insert(0, _station_machine_id())
+        ent_machine.config(state="readonly")
+
+    _show_machine_id()
 
     # ─────────────────────────────────────────────────────────────────────────
     # TEST SPECIFICATION  — IR + ACW rows per channel (settingspec)
@@ -420,7 +441,7 @@ def render(parent):
             e.delete(0, "end")
         cb_channels.current(0)
         _set_label_entry("")
-        cb_machine.current(0)
+        _show_machine_id()
         cb_testmode.current(0)
         selected_pno["value"] = None
         update_channel_visibility()
@@ -439,7 +460,7 @@ def render(parent):
                   ent_vcode, ent_eon, ent_alc):
             e.config(state=st)
         cb_state = "disabled" if locked else "readonly"
-        for cb in (cb_channels, cb_label, cb_machine, cb_testmode):
+        for cb in (cb_channels, cb_label, cb_testmode):
             cb.config(state=cb_state)
         btn_browse_label.config(state=st)
 
@@ -495,9 +516,9 @@ def render(parent):
 
         _set_label_entry(row_dict.get("lblsel", ""))
 
-        mach_val = row_dict.get("machine", "PB1")
-        if mach_val in list(cb_machine["values"]):
-            cb_machine.set(mach_val)
+        # The part's stored machine is not shown: saving it again files it
+        # under this station's Machine ID, which is what the box displays.
+        _show_machine_id()
 
         tmode_val = row_dict.get("testmode", "Combined")
         if tmode_val in list(cb_testmode["values"]):
@@ -659,7 +680,7 @@ def render(parent):
                     (pno, ent_pname.get().strip(), ent_cname.get().strip(),
                      ent_model.get().strip(), ent_vcode.get().strip(),
                      ent_eon.get().strip(), ent_alc.get().strip(),
-                     cb_channels.get(), cb_label.get(), cb_machine.get(),
+                     cb_channels.get(), cb_label.get(), ent_machine.get(),
                      cb_testmode.get()))
 
                 # Insert settingspec for each channel and test type
@@ -709,7 +730,7 @@ def render(parent):
                     (ent_pname.get().strip(), ent_cname.get().strip(),
                      ent_model.get().strip(), ent_vcode.get().strip(),
                      ent_eon.get().strip(),
-                     cb_channels.get(), cb_label.get(), cb_machine.get(),
+                     cb_channels.get(), cb_label.get(), ent_machine.get(),
                      cb_testmode.get(), pno))
 
                 num_channels = int(cb_channels.get())
