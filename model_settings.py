@@ -1,7 +1,7 @@
 import os
 import configparser
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import mysql.connector
 
 import db
@@ -64,9 +64,9 @@ def render(parent):
                      readonlybackground=FIELD, state=state)
         return e
 
-    def mk_combo(parent, values, width=12, state="readonly"):
+    def mk_combo(parent, values, width=12, state="readonly", postcommand=""):
         cb = ttk.Combobox(parent, values=values, font=('Arial', 12),
-                          width=width, state=state)
+                          width=width, state=state, postcommand=postcommand)
         if values:
             cb.current(0)
         return cb
@@ -202,48 +202,48 @@ def render(parent):
     cb_channels = mk_combo(f3, [str(i) for i in range(1, 9)])
     cb_channels.grid(row=0, column=1, sticky="ew", pady=6)
 
-    # Label template: picked via a file-explorer dialog instead of a fixed list
-    lbl_wrap = tk.Frame(f3, bg=PANEL)
-    lbl_wrap.grid(row=1, column=1, sticky="ew", pady=6)
-    lbl_wrap.columnconfigure(0, weight=1)
+    # Label template: one of the .prn files in the app's own folder, the one
+    # Test Console prints from. Stored as the full path, as before.
+    LABEL_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    cb_label = tk.Entry(lbl_wrap, bg=FIELD, fg=TXT, font=('Arial', 12),
-                        bd=0, relief="flat", highlightbackground=LINE,
-                        highlightcolor=ACCENT, highlightthickness=1,
-                        insertbackground="white", width=12,
-                        disabledbackground="#151515", disabledforeground="#4a4a4a",
-                        readonlybackground=FIELD, state="readonly")
-    cb_label.grid(row=0, column=0, sticky="ew")
+    def _label_choices():
+        """The part label templates in LABEL_DIR, by file name.
+
+        Left out: the files the app writes on every print (TEMP*), the START/
+        END and lot label layouts, and a rework template whose plain sibling is
+        here too -- choosing hehe.prn already prints heheR.prn for rework, and
+        choosing heheR.prn would look for heheRR.prn.
+        """
+        try:
+            names = [n for n in os.listdir(LABEL_DIR) if n.lower().endswith(".prn")]
+        except OSError:
+            return []
+        lower = {n.lower() for n in names}
+        keep = []
+        for n in names:
+            stem = n[:-4]
+            if n.upper().startswith("TEMP") or n.upper() in ("MARKER.PRN", "LOTPRN.PRN"):
+                continue
+            if stem[-1:].upper() == "R" and (stem[:-1] + ".prn").lower() in lower:
+                continue
+            keep.append(n)
+        return sorted(keep, key=str.lower)
+
+    def _refresh_label_choices():
+        cb_label.config(values=_label_choices())
+
+    cb_label = mk_combo(f3, [], postcommand=_refresh_label_choices)
+    cb_label.grid(row=1, column=1, sticky="ew", pady=6)
 
     def _set_label_entry(val):
-        prev_state = cb_label.cget("state")
-        cb_label.config(state="normal")
-        cb_label.delete(0, "end")
-        cb_label.insert(0, val or "")
-        cb_label.config(state=prev_state)
-        # The stored path is longer than the box, and Tk shows its head. Show
-        # the tail instead: the file name is the half that says which template
-        # this is.
-        try:
-            cb_label.xview_moveto(1.0)
-        except Exception:
-            pass
+        """Show a stored template (a full path) by its file name."""
+        _refresh_label_choices()
+        cb_label.set(os.path.basename(val) if val else "")
 
-    def on_browse_label():
-        base = os.path.dirname(os.path.abspath(__file__))
-        path = filedialog.askopenfilename(
-            title="Select Label Template",
-            initialdir=base,
-            filetypes=[("PRN Label Files", "*.prn"), ("All Files", "*.*")])
-        if not path:
-            return
-        _set_label_entry(os.path.abspath(path))
-
-    btn_browse_label = tk.Button(lbl_wrap, text="Browse", bg="#2a2a2a", fg=TXT,
-                                 font=('Arial', 10), bd=0, padx=10, pady=4,
-                                 activebackground="#3a3a3a", activeforeground=TXT,
-                                 cursor="hand2", command=on_browse_label)
-    btn_browse_label.grid(row=0, column=1, padx=(6, 0))
+    def _label_path():
+        """The chosen template as the full path stored in lblsel."""
+        name = cb_label.get().strip()
+        return os.path.join(LABEL_DIR, name) if name else ""
 
     _set_label_entry("")
 
@@ -462,7 +462,6 @@ def render(parent):
         cb_state = "disabled" if locked else "readonly"
         for cb in (cb_channels, cb_label, cb_testmode):
             cb.config(state=cb_state)
-        btn_browse_label.config(state=st)
 
     # Part number and ALC are what a saved part is filed under, not fields of
     # it: test records carry the number they were tested under and the labels
@@ -680,7 +679,7 @@ def render(parent):
                     (pno, ent_pname.get().strip(), ent_cname.get().strip(),
                      ent_model.get().strip(), ent_vcode.get().strip(),
                      ent_eon.get().strip(), ent_alc.get().strip(),
-                     cb_channels.get(), cb_label.get(), ent_machine.get(),
+                     cb_channels.get(), _label_path(), ent_machine.get(),
                      cb_testmode.get()))
 
                 # Insert settingspec for each channel and test type
@@ -730,7 +729,7 @@ def render(parent):
                     (ent_pname.get().strip(), ent_cname.get().strip(),
                      ent_model.get().strip(), ent_vcode.get().strip(),
                      ent_eon.get().strip(),
-                     cb_channels.get(), cb_label.get(), ent_machine.get(),
+                     cb_channels.get(), _label_path(), ent_machine.get(),
                      cb_testmode.get(), pno))
 
                 num_channels = int(cb_channels.get())
