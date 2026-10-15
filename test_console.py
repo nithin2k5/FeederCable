@@ -1513,6 +1513,15 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         _print_problem(f"part label not printed: template '{prn_file}' for part "
                        f"{pno} not found — check it in Model Settings")
         return
+    # TEMP*.prn are what this function and the lot/marker printers write the
+    # filled-in label to. A part saved with one as its template -- typed in
+    # before Model Settings offered a list -- would read it, fill it and write
+    # it back over itself, so its placeholders were gone after the first test.
+    if os.path.basename(prn_file).upper().startswith("TEMP"):
+        _print_problem(f"part label not printed: part {pno} uses "
+                       f"'{os.path.basename(prn_file)}', the app's print scratch "
+                       f"file, as its template — pick a real template in Model Settings")
+        return
     now = datetime.datetime.now()
     try:
         with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
