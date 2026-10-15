@@ -1,0 +1,46 @@
+SIZE 35 mm, 25 mm
+GAP 3 mm, 0 mm
+DIRECTION 0,0
+REFERENCE 0,0
+OFFSET 0 mm
+SET PEEL OFF
+SET CUTTER OFF
+SET PARTIAL_CUTTER OFF
+SET TEAR ON
+CLS
+CODEPAGE 1252
+; Ruler for placing the START/END label text (_MARKER_X in test_console.py).
+; A tick every 25 dots across, tall and numbered every 50. Same stock setup
+; and rotation as MARKER.prn, so a photo of this label shows where each x
+; lands. The top row is the marker label's widest row, at its current x (150).
+BAR 0,20,3,80
+TEXT 0,130,"2",180,1,1,"0"
+BAR 25,50,3,50
+BAR 50,20,3,80
+TEXT 50,130,"2",180,1,1,"50"
+BAR 75,50,3,50
+BAR 100,20,3,80
+TEXT 100,130,"2",180,1,1,"100"
+BAR 125,50,3,50
+BAR 150,20,3,80
+TEXT 150,130,"2",180,1,1,"150"
+BAR 175,50,3,50
+BAR 200,20,3,80
+TEXT 200,130,"2",180,1,1,"200"
+BAR 225,50,3,50
+BAR 250,20,3,80
+TEXT 250,130,"2",180,1,1,"250"
+BAR 275,50,3,50
+BAR 300,20,3,80
+TEXT 300,130,"2",180,1,1,"300"
+BAR 325,50,3,50
+BAR 350,20,3,80
+TEXT 350,130,"2",180,1,1,"350"
+BAR 375,50,3,50
+BAR 400,20,3,80
+TEXT 400,130,"2",180,1,1,"400"
+BAR 425,50,3,50
+BAR 450,20,3,80
+TEXT 450,130,"2",180,1,1,"450"
+TEXT 150,250,"2",180,1,1,"D&T   : 15/10/26 14:30"
+PRINT 1,1
