@@ -170,14 +170,16 @@ CHAPTERS = [
           "TO CONTINUE — and the scan entry takes focus by itself, so pulling the "
           "scanner trigger is all that is needed."),
     ("p", "What the scan is checked for depends on the part's label template. "
-          "If its barcode or data matrix carries the lot number (@lotNo@ or "
-          "@traceabilityCode@), the scan must contain this test's lot number. "
-          "If it does not, the scan must contain the part's ALC code instead. "
-          "A label carrying both is checked by lot number."),
+          "The scan must contain every one of these that the template's barcode "
+          "or data matrix carries: this test's lot number (@lotNo@ or "
+          "@traceabilityCode@), the part number (@partNumber@) and the ALC code "
+          "(@alcCode@). A label carrying only the ALC code is checked for the "
+          "ALC code alone, and one carrying none of the three is checked by "
+          "ALC code."),
     ("tbl", ["Verdict", "Meaning"], [
-        ["OK", "The scanned code contains the lot number (or the ALC code, for a label without one)"],
+        ["OK", "The scanned code contains every value its label carries — lot number, part number, ALC code"],
         ["NG", "The code does not match — wrong label presented"],
-        ["DUP", "This label was already scanned for an earlier lot"],
+        ["DUP", "This label was already scanned for an earlier lot. Only a label carrying the lot number can be caught this way."],
     ]),
     ("note", "Scan required is a supervisor setting: turning it off asks for a "
              "login. Unticked, a PASS finishes as soon as the label prints."),

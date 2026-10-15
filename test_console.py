@@ -243,11 +243,11 @@ _SCAN_CTRL_NAMES = {
 def _fmt_scan(raw: str) -> str:
     return "".join(_SCAN_CTRL_NAMES.get(ch, ch) for ch in raw)
 
-def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
-    """PASS only if the lot number is a substring of one whole field of the
-    scanned data, never spanning across a field boundary -- so a lot number
-    that happens to only partially overlap two adjacent fields (part number,
-    serial, etc.) can't produce a false OK.
+def _scan_has(scanned: str, value: str) -> bool:
+    """True only if value (a lot number, part number or ALC) is a substring
+    of one whole field of the scanned data, never spanning across a field
+    boundary -- so a value that happens to only partially overlap two
+    adjacent fields (part number, serial, etc.) can't produce a false OK.
 
     Fields are split on any non-alphanumeric character rather than on the
     specific ISO 15434 control bytes, since a keyboard-wedge scanner does
@@ -260,17 +260,34 @@ def _scan_lot_ok(scanned: str, labelstr: str) -> bool:
     number with no prefix at all -- either way the lot number is a substring
     of that one field, so checking membership in the field is enough.
     """
-    if not labelstr:
+    want = _alnum_words(value)
+    if not want:
         return False
-    word = ""
-    for ch in scanned + "\x00":
+    got = _alnum_words(scanned)
+    if len(want) == 1:
+        return any(want[0] in word for word in got)
+    # A value with punctuation of its own -- a part number like 96230-K6510 --
+    # spans several fields once split. It has to appear as that same run of
+    # fields in the scan: its first word ending one field (a field may carry
+    # a prefix, as in P96230), the middle words whole, its last word starting
+    # the field after.
+    n = len(want)
+    for i in range(len(got) - n + 1):
+        if (got[i].endswith(want[0]) and got[i + n - 1].startswith(want[-1])
+                and got[i + 1:i + n - 1] == want[1:-1]):
+            return True
+    return False
+
+
+def _alnum_words(text: str) -> list:
+    """text split into its runs of letters and digits, the fields a scan is read by."""
+    words, word = [], ""
+    for ch in text + "\x00":
         if ch.isalnum():
             word += ch
-        else:
-            if labelstr in word:
-                return True
-            word = ""
-    return False
+        elif word:
+            words.append(word); word = ""
+    return words
 
 def _play_wav(filename: str):
     base = os.path.dirname(__file__)
@@ -1463,40 +1480,52 @@ def _part_label_template(pno: str, is_rework: bool = False) -> str:
 
 
 # What a label scan is checked against. The scanner reads the barcode or data
-# matrix, not the printed text, so what counts is whether the lot number is
-# inside the code: a line that draws one (BARCODE, DMATRIX, ...) or a string
-# variable a code is drawn from (AC$="..." in a BASIC form).
+# matrix, not the printed text, so what counts is which values are inside the
+# code: a line that draws one (BARCODE, DMATRIX, ...) or a string variable a
+# code is drawn from (AC$="..." in a BASIC form).
 _CODE_COMMANDS = ("BARCODE", "DMATRIX", "QRCODE", "PDF417", "AZTEC", "MAXICODE")
-_LOT_PLACEHOLDERS = ("@lotNo@", "@traceabilityCode@")
+# The values a scan can be checked for, by the placeholders that put each one
+# into a code. Lot first: it is the one unique to the test.
+_SCAN_FIELDS = (("lot", ("@lotNo@", "@traceabilityCode@")),
+                ("part no", ("@partNumber@",)),
+                ("ALC", ("@alcCode@",)))
 
 
-def _label_codes_lot(prn_file: str) -> bool:
-    """True when the template puts the lot number into its barcode/data matrix."""
+def _label_coded_fields(prn_file: str) -> set:
+    """The _SCAN_FIELDS names the template puts into its barcode/data matrix,
+    or None when the template cannot be read."""
     try:
         with open(prn_file, "r", encoding="latin-1") as f:
             lines = f.read().splitlines()
     except OSError:
-        return False
+        return None
+    found = set()
     for line in lines:
         head = line.strip().upper()
-        is_code = head.startswith(_CODE_COMMANDS) or re.match(r"^\w+\$\s*=", head)
-        if is_code and any(p in line for p in _LOT_PLACEHOLDERS):
-            return True
-    return False
+        if head.startswith(_CODE_COMMANDS) or re.match(r"^\w+\$\s*=", head):
+            found.update(name for name, marks in _SCAN_FIELDS
+                         if any(m in line for m in marks))
+    return found
 
 
-def _scan_target(pno: str, is_rework: bool, lot_no: str, alc: str) -> tuple:
-    """(what the scan is checked for, its value): the lot number when the
-    part's label carries it in the code, otherwise the ALC code.
+def _scan_target(pno: str, is_rework: bool, lot_no: str, alc: str) -> list:
+    """[(name, value), ...]: every value the scan must contain -- each of lot,
+    part number and ALC that the part's label puts into its code.
 
-    A label with both is checked by lot -- it is unique to the test, where the
-    ALC is the same on every label of the part. A template that cannot be
-    read is treated as carrying the lot, the stricter of the two.
+    A label coding only the ALC is checked for the ALC alone. One coding none
+    of the three is checked by ALC, and one that cannot be read by lot, the
+    strictest single check.
     """
+    values = {"lot": lot_no, "part no": pno, "ALC": alc}
     prn_file = _part_label_template(pno, is_rework)
-    if prn_file != NO_LABEL and os.path.exists(prn_file) and not _label_codes_lot(prn_file):
-        return "ALC", alc
-    return "lot", lot_no
+    fields = None
+    if prn_file != NO_LABEL and os.path.exists(prn_file):
+        fields = _label_coded_fields(prn_file)
+    if fields is None:
+        fields = {"lot"}
+    elif not fields:
+        fields = {"ALC"}
+    return [(name, values[name]) for name, _ in _SCAN_FIELDS if name in fields]
 
 
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
@@ -1867,7 +1896,7 @@ def render(parent):
     state = {
         "pno": None, "alc": "", "model": "", "vendor_code": "", "eo_number": "", "pname": "", "cname": "",
         "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "test_running": False, "awaiting_scan": False, "dev_polling": False, "total": 0, "ok": 0, "ng": 0,
-        "lot_no": "", "labelstr": "", "start_time": None, "flag": True, "input_polling": False,
+        "lot_no": "", "scan_checks": [], "start_time": None, "flag": True, "input_polling": False,
         "last_vision_result": None, "is_rework": False,
         "ct_last": None, "ct_running": False, "batch_no": 0, "batch_ok": 0, "batch_reason": "", "batch_shown": None,
         "cam_results": {1: None, 2: None},
@@ -3414,7 +3443,7 @@ def render(parent):
 
         Covers both ways an operator can present a used label: triggering the
         scanner twice on the current one, and picking an earlier part's label
-        up off the bench. Matching reuses _scan_lot_ok against each candidate,
+        up off the bench. Matching reuses _scan_has against each candidate,
         so it reads a label exactly the way verification does.
 
         Scoped to this part, and it has to be: the lot sequence restarts at 1
@@ -3432,7 +3461,7 @@ def render(parent):
             # to the normal OK/NG comparison rather than blocking a good part.
             _log(f"Duplicate check failed: {ex}"); return "", False
         done = {row[0] for row in rows if row[0]}
-        dup = next((lot for lot in done if _scan_lot_ok(scanned, lot)), "")
+        dup = next((lot for lot in done if _scan_has(scanned, lot)), "")
         return dup, state["lot_no"] in done
 
     def _validate_employee(empno: str) -> bool:
@@ -4143,7 +4172,7 @@ def render(parent):
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no
         # NO LABEL parts print nothing, so there is nothing to scan either.
         state["no_label"] = _part_label_template(pno, state.get("is_rework", False)) == NO_LABEL
-        state["scan_by"], state["labelstr"] = _scan_target(pno, state.get("is_rework", False), lot_no, state["alc"])
+        state["scan_checks"] = _scan_target(pno, state.get("is_rework", False), lot_no, state["alc"])
         elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
         elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
         # Cycle time == this test's duration (START to verdict), which is what
@@ -4159,7 +4188,7 @@ def render(parent):
         vision_img_path = _save_vision_pass_image(lot_no)
         _save_result(lot_no, overall, ir_ch, acw_ch, contact_ch, vision_img_path)
         if overall == "PASS":
-            _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda: scan_lbl.config(text="✅  PASS — Scan the printed barcode label", bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
+            _after(0, lambda: _set_verdict("PASS", "#1b5e20", "white")); _after(0, lambda t="✅  PASS" if state.get("no_label") or not cfg.get("scan_enabled", True) else "✅  PASS — Scan the printed barcode label": scan_lbl.config(text=t, bg="#0a2200", fg="#76ff03")); _play_wav("OK.WAV"); blink_stop()
             threading.Thread(target=_print_barcode_label,
                              args=(pno, state["alc"], state["model"], state["vendor_code"],
                                    state["eo_number"], lot_no, cfg["machine_id"],
@@ -4199,10 +4228,14 @@ def render(parent):
         except Exception: pass
         _set_scan_box("")
     def _on_scan_enter(event=None):
-        scanned = ent_scan.get().strip(); labelstr = state.get("labelstr", "")
+        scanned = ent_scan.get().strip(); checks = state.get("scan_checks") or []
         if not scanned: return
-        print(f"[SCAN DEBUG] labelstr={labelstr!r} scanned={scanned!r} result={_scan_lot_ok(scanned, labelstr)}")
-        dup_lot, cur_done = _duplicate_check(scanned)
+        missing = [(name, val) for name, val in checks if not _scan_has(scanned, val)]
+        print(f"[SCAN DEBUG] checks={checks!r} scanned={scanned!r} missing={missing!r}")
+        # Only a label with the lot in its code can be told apart from the
+        # part's other labels; an ALC-only label reads the same on every one.
+        dup_lot, cur_done = (_duplicate_check(scanned) if any(n == "lot" for n, _ in checks)
+                             else ("", False))
         if dup_lot:
             _log(f"Scan verify: duplicate label — lot {dup_lot} was already scanned")
             _set_scan_box("DUP", scanned)
@@ -4216,8 +4249,13 @@ def render(parent):
             _set_awaiting_scan(False)
             _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
             return
-        if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK by {state.get('scan_by', 'lot')} ({_fmt_scan(scanned)})")
-        else: res_str = "NG"; _log(f"Scan verify: NG (expected {state.get('scan_by', 'lot')} '{labelstr}', got '{_fmt_scan(scanned)}')")
+        if checks and not missing:
+            res_str = "OK"
+            _log(f"Scan verify: OK by {' + '.join(n for n, _ in checks)} ({_fmt_scan(scanned)})")
+        else:
+            res_str = "NG"
+            want = ", ".join(f"{n} '{v}'" for n, v in missing) or "nothing to check"
+            _log(f"Scan verify: NG (missing {want}, got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
         _update_scan_result(state["lot_no"], res_str)
         # Today's PASS Records was drawn when the test finished, before this
@@ -4604,7 +4642,7 @@ def render(parent):
         # chose for it, and the part after that inherit it again -- so it is
         # emptied here and asked for again on the next load.
         ent_lot_qty.delete(0, "end")
-        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "labelstr": "", "flag": True, "last_vision_result": None,
+        state.update({"pno": None, "num_channels": 0, "spec_ir": {}, "spec_acw": {}, "lot_no": "", "scan_checks": [], "flag": True, "last_vision_result": None,
                       "ct_last": None, "batch_ok": 0, "batch_shown": None})
         _update_counts()
         btn_start.config(bg="#1a1a1a", fg="#444")
