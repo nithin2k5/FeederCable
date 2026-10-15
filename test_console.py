@@ -1429,8 +1429,14 @@ def _apply_lot_3_letters(text: str, code: str) -> str:
     return text.replace("@lot3letters@", code).replace("@lot3letters", code)
 
 
+# What Model Settings stores in lblsel for a part that gets no part label,
+# and its default. A part saved with no template at all is read the same way.
+NO_LABEL = "NO LABEL"
+
+
 def _part_label_template(pno: str, is_rework: bool = False) -> str:
-    """The .prn the part label is printed from, or "" when none is set.
+    """The .prn the part label is printed from, or NO_LABEL when the part is
+    set to print none.
 
     The path is returned whether or not the file exists; the caller says so.
     """
@@ -1445,6 +1451,8 @@ def _part_label_template(pno: str, is_rework: bool = False) -> str:
     # lblsel is the full path of the .prn template picked in Model Settings.
     # nice1.prn = regular-part template, nice1R.prn = rework-part template
     # (a sibling file with "R" inserted before the extension).
+    if not lbl_sel.strip() or lbl_sel.strip().upper() == NO_LABEL:
+        return NO_LABEL
     suffix = "R" if is_rework else ""
     prn_file = ""
     if lbl_sel:
@@ -1486,7 +1494,7 @@ def _scan_target(pno: str, is_rework: bool, lot_no: str, alc: str) -> tuple:
     read is treated as carrying the lot, the stricter of the two.
     """
     prn_file = _part_label_template(pno, is_rework)
-    if prn_file and os.path.exists(prn_file) and not _label_codes_lot(prn_file):
+    if prn_file != NO_LABEL and os.path.exists(prn_file) and not _label_codes_lot(prn_file):
         return "ALC", alc
     return "lot", lot_no
 
@@ -1494,14 +1502,13 @@ def _scan_target(pno: str, is_rework: bool, lot_no: str, alc: str) -> tuple:
 def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
     base = os.path.dirname(__file__)
     prn_file = _part_label_template(pno, is_rework)
+    if prn_file == NO_LABEL:
+        print(f"[PRINT DEBUG] pno={pno} is set to NO LABEL -- part label not printed")
+        return
     # No fallback template. TEMPPRN.prn is where the last label was rendered,
     # values and all, so falling back to it reprinted that label -- another
     # part's number and a stale lot code -- on every part with no template.
     # A missing label is caught at the line; a wrong one is not.
-    if not prn_file:
-        _print_problem(f"part label not printed: no label template set for part "
-                       f"{pno} — choose one in Model Settings")
-        return
     if not os.path.exists(prn_file):
         _print_problem(f"part label not printed: template '{prn_file}' for part "
                        f"{pno} not found — check it in Model Settings")
@@ -4125,6 +4132,8 @@ def render(parent):
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
         pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no
+        # NO LABEL parts print nothing, so there is nothing to scan either.
+        state["no_label"] = _part_label_template(pno, state.get("is_rework", False)) == NO_LABEL
         state["scan_by"], state["labelstr"] = _scan_target(pno, state.get("is_rework", False), lot_no, state["alc"])
         elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
         elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
@@ -4149,7 +4158,7 @@ def render(parent):
                              kwargs={"num_channels": state["num_channels"],
                                      "ir_ch": ir_ch, "acw_ch": acw_ch},
                              daemon=True).start()
-            if cfg.get("scan_enabled", True):
+            if cfg.get("scan_enabled", True) and not state.get("no_label"):
                 state["awaiting_scan"] = True
                 # Focus immediately, not after a delay: printers eject a label
                 # fast enough that a delay left the entry still readonly when

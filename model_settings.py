@@ -229,8 +229,12 @@ def render(parent):
             keep.append(n)
         return sorted(keep, key=str.lower)
 
+    # The default, and what a part with no template saved shows. Stored as is
+    # in lblsel; Test Console prints no part label for it and skips the scan.
+    NO_LABEL = "NO LABEL"
+
     def _refresh_label_choices():
-        cb_label.config(values=_label_choices())
+        cb_label.config(values=[NO_LABEL] + _label_choices())
 
     cb_label = mk_combo(f3, [], postcommand=_refresh_label_choices)
     cb_label.grid(row=1, column=1, sticky="ew", pady=6)
@@ -238,12 +242,17 @@ def render(parent):
     def _set_label_entry(val):
         """Show a stored template (a full path) by its file name."""
         _refresh_label_choices()
-        cb_label.set(os.path.basename(val) if val else "")
+        if not val or val.strip().upper() == NO_LABEL:
+            cb_label.set(NO_LABEL)
+        else:
+            cb_label.set(os.path.basename(val))
 
     def _label_path():
         """The chosen template as the full path stored in lblsel."""
         name = cb_label.get().strip()
-        return os.path.join(LABEL_DIR, name) if name else ""
+        if not name or name == NO_LABEL:
+            return NO_LABEL
+        return os.path.join(LABEL_DIR, name)
 
     _set_label_entry("")
 
