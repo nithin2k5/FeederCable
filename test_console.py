@@ -1478,33 +1478,29 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     except Exception as ex:
         _print_problem(f"part label not printed: {ex}")
 
-# Where the marker label's text goes, measured off printed labels rather than
-# derived. Derived geometry got this label wrong four times running: the last
-# attempt assumed a larger x moves the text toward the reading-left edge, set
-# x=405 for a 15 dot margin, and the text came out starting 55% of the way
-# across with the date row cut off at the right edge.
+# Where the marker label's text goes. EOLPRINTER is 203 dpi (8 dots/mm) on
+# 50 x 35 mm stock: 400 x 280 dots, the size MARKER.prn declares. Earlier
+# layouts were all worked out for 35 x 25 mm stock the roll never was, and
+# with the printer told the wrong size the text landed somewhere different
+# every time and the labels drifted across the gap.
 #
-# What the printed labels show, on EOLPRINTER and 35 x 25 mm stock:
-#   - every line starts at the same reading-left point and runs right, so one
-#     x for all lines is still one left margin;
-#   - a larger x moves that point right: x=265 started the block ~36% across,
-#     x=405 started it ~55% across;
-#   - the head is 300 dpi (12 dots/mm, 420 dots of stock) and the internal
-#     fonts are not scaled to it: "START LABEL" in font 3 measured 14.7 mm,
-#     which is 16 dots a character, and font 2 is 12.
-#
-# A label printed at x=215 came out a little right of centre, so the block
-# starts around 125 dots in there. The block is centred when its widest row,
-# the 22 character date (264 dots), has 78 dots either side. How far a step
-# of x moves the block is not pinned down -- the measurements so far put it
-# between 0.58 and 1 dot -- which puts centre at x=134 to 168. 150 is within
-# about 1.5 mm of centre at either end of that range.
-_MARKER_X = 150
-# Title then rows, on LOTPRN's title height and row pitch, so the two labels
-# coming off this machine are laid out the same way.
-_MARKER_TITLE_Y = 172
-_MARKER_FIRST_ROW_Y = 140
-_MARKER_ROW_PITCH = 24
+# With DIRECTION 0 the label reads the right way up turned 180 degrees from
+# the head's own frame, so a line's reading-left edge is LABEL_W - x and its
+# reading-top edge is LABEL_H - y. Checked against the part label printed on
+# the same roll: its data matrix at x=280, y=80 sits 24 dots in from the
+# left and 104 down from the top. A rotation 180 TEXT line grows from its
+# anchor toward smaller x and y, which on the label is right and down, so the
+# anchor is the line's reading top-left corner and one x left aligns them all.
+_MARKER_LABEL_W = 400
+_MARKER_LABEL_H = 280
+# 3 mm clear of the left and top edges, the part label's own left margin.
+_MARKER_MARGIN = 24
+_MARKER_X = _MARKER_LABEL_W - _MARKER_MARGIN
+# Font "3" is 24 dots tall and "2" is 20; rows are 28 apart and the first
+# starts 12 dots below the title.
+_MARKER_TITLE_Y = _MARKER_LABEL_H - _MARKER_MARGIN
+_MARKER_FIRST_ROW_Y = _MARKER_TITLE_Y - 24 - 12
+_MARKER_ROW_PITCH = 28
 
 
 def _marker_line(y: int, font: str, mul: int, content: str) -> str:
@@ -1540,20 +1536,15 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
     # Date and time share one row. They are one fact about the run -- when it
     # opened, when it closed -- and split across two rows they cost a line of
     # a four line label for no reading anyone does by eye. The time is minutes
-    # only: with seconds the row comes to 25 characters, and at 12 dots a
-    # character in font "2" that is 300 dots against a 280 dot label, so the
-    # D&T caption would print off the edge. Seconds are still recorded where
-    # they are used, on the part label and in testmaster.
+    # only; seconds are recorded where they are used, on the part label and in
+    # testmaster. At 12 dots a character in font "2", a row has room for 31
+    # characters between the left margin and the right edge.
     fields = [f"{cap:<5} : {val}" for cap, val in (
         ("P/NO",  pno),
         ("D&T",   now.strftime("%d/%m/%y %H:%M")),
         ("MC ID", machine_id),
     )]
     # Read top to bottom on the label; with rotation 180 that is y descending.
-    # Title then rows, on LOTPRN's own title height and row pitch, so the two
-    # labels coming off this machine are laid out the same way. Three rows
-    # against that label's six leaves the lower part of the stock clear, which
-    # is what LOTPRN would look like with three fields on it.
     rows = [_MARKER_FIRST_ROW_Y - i * _MARKER_ROW_PITCH for i in range(len(fields))]
     body = '\r\n'.join(
         [_marker_line(_MARKER_TITLE_Y, "3", 1, f"{marker} LABEL")]
