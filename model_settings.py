@@ -241,20 +241,39 @@ def render(parent):
     cb_label = mk_combo(f3, [], postcommand=_refresh_label_choices)
     cb_label.grid(row=1, column=1, sticky="ew", pady=6)
 
+    # Shown after a saved template's name when its file is not in LABEL_DIR.
+    # The box would otherwise show the name as if the template were there,
+    # and the part would print nothing.
+    MISSING = "  (MISSING)"
+
     def _set_label_entry(val):
         """Show a stored template by its file name (older rows hold a full path)."""
         _refresh_label_choices()
         if not val or val.strip().upper() == NO_LABEL:
             cb_label.set(NO_LABEL)
-        else:
-            cb_label.set(os.path.basename(val))
+            return
+        name = os.path.basename(val.strip())
+        cb_label.set(name if os.path.isfile(os.path.join(LABEL_DIR, name)) else name + MISSING)
 
     def _label_path():
         """The chosen template as stored in lblsel: its file name."""
         name = cb_label.get().strip()
+        if name.endswith(MISSING.strip()):
+            name = name[:-len(MISSING.strip())].strip()
         if not name or name == NO_LABEL:
             return NO_LABEL
         return name
+
+    def _label_ok_to_save():
+        """False when the chosen template is missing and the user backs out."""
+        name = _label_path()
+        if name == NO_LABEL or os.path.isfile(os.path.join(LABEL_DIR, name)):
+            return True
+        return messagebox.askyesno(
+            "Label template missing",
+            f"'{name}' is not in the app folder:\n\n{LABEL_DIR}\n\n"
+            "This part will print no label until the file is copied there "
+            "or another template is picked.\n\nSave anyway?")
 
     _set_label_entry("")
 
@@ -679,7 +698,7 @@ def render(parent):
             messagebox.showwarning("Validation", "PART NUMBER is required.")
             return
         save_spec_ui()   # capture current channel spec before saving
-        if not validate_channel_data():
+        if not validate_channel_data() or not _label_ok_to_save():
             return
         try:
             with db.get_cursor(commit=True) as cur:
@@ -723,7 +742,7 @@ def render(parent):
             messagebox.showwarning("Validation", "Select a part first.")
             return
         save_spec_ui()
-        if not validate_channel_data():
+        if not validate_channel_data() or not _label_ok_to_save():
             return
 
         try:
