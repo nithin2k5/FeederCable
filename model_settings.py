@@ -203,7 +203,9 @@ def render(parent):
     cb_channels.grid(row=0, column=1, sticky="ew", pady=6)
 
     # Label template: one of the .prn files in the app's own folder, the one
-    # Test Console prints from. Stored as the full path, as before.
+    # Test Console prints from. Stored by file name only; Test Console looks
+    # it up in that folder, and does the same with the file name of a full
+    # path saved by an older version.
     LABEL_DIR = os.path.dirname(os.path.abspath(__file__))
 
     def _label_choices():
@@ -240,7 +242,7 @@ def render(parent):
     cb_label.grid(row=1, column=1, sticky="ew", pady=6)
 
     def _set_label_entry(val):
-        """Show a stored template (a full path) by its file name."""
+        """Show a stored template by its file name (older rows hold a full path)."""
         _refresh_label_choices()
         if not val or val.strip().upper() == NO_LABEL:
             cb_label.set(NO_LABEL)
@@ -248,11 +250,11 @@ def render(parent):
             cb_label.set(os.path.basename(val))
 
     def _label_path():
-        """The chosen template as the full path stored in lblsel."""
+        """The chosen template as stored in lblsel: its file name."""
         name = cb_label.get().strip()
         if not name or name == NO_LABEL:
             return NO_LABEL
-        return os.path.join(LABEL_DIR, name)
+        return name
 
     _set_label_entry("")
 

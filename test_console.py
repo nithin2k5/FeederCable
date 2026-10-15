@@ -1465,16 +1465,20 @@ def _part_label_template(pno: str, is_rework: bool = False) -> str:
             if row: lbl_sel = row[0] or ""
     except Exception as ex:
         print(f"DB Error getting label: {ex}")
-    # lblsel is the full path of the .prn template picked in Model Settings.
+    # lblsel names the .prn template picked in Model Settings.
     # nice1.prn = regular-part template, nice1R.prn = rework-part template
     # (a sibling file with "R" inserted before the extension).
     if not lbl_sel.strip() or lbl_sel.strip().upper() == NO_LABEL:
         return NO_LABEL
+    # Templates are only ever taken from the app's own folder -- _internal in
+    # a build. Only the file name of lblsel is used: parts saved before Model
+    # Settings offered a list hold whatever full path was typed in, often a
+    # folder on some PC's desktop, and printing from there meant a template
+    # nobody could find or update with the app.
+    root, ext = os.path.splitext(os.path.basename(lbl_sel.strip()))
     suffix = "R" if is_rework else ""
-    prn_file = ""
-    if lbl_sel:
-        root, ext = os.path.splitext(lbl_sel)
-        prn_file = f"{root}{suffix}{ext or '.prn'}"
+    prn_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            f"{root}{suffix}{ext or '.prn'}")
     print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
     return prn_file
 
