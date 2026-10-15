@@ -1429,8 +1429,11 @@ def _apply_lot_3_letters(text: str, code: str) -> str:
     return text.replace("@lot3letters@", code).replace("@lot3letters", code)
 
 
-def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
-    base = os.path.dirname(__file__)
+def _part_label_template(pno: str, is_rework: bool = False) -> str:
+    """The .prn the part label is printed from, or "" when none is set.
+
+    The path is returned whether or not the file exists; the caller says so.
+    """
     lbl_sel = ""
     try:
         with db.get_cursor() as cur:
@@ -1448,6 +1451,49 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         root, ext = os.path.splitext(lbl_sel)
         prn_file = f"{root}{suffix}{ext or '.prn'}"
     print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
+    return prn_file
+
+
+# What a label scan is checked against. The scanner reads the barcode or data
+# matrix, not the printed text, so what counts is whether the lot number is
+# inside the code: a line that draws one (BARCODE, DMATRIX, ...) or a string
+# variable a code is drawn from (AC$="..." in a BASIC form).
+_CODE_COMMANDS = ("BARCODE", "DMATRIX", "QRCODE", "PDF417", "AZTEC", "MAXICODE")
+_LOT_PLACEHOLDERS = ("@lotNo@", "@traceabilityCode@")
+
+
+def _label_codes_lot(prn_file: str) -> bool:
+    """True when the template puts the lot number into its barcode/data matrix."""
+    try:
+        with open(prn_file, "r", encoding="latin-1") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        head = line.strip().upper()
+        is_code = head.startswith(_CODE_COMMANDS) or re.match(r"^\w+\$\s*=", head)
+        if is_code and any(p in line for p in _LOT_PLACEHOLDERS):
+            return True
+    return False
+
+
+def _scan_target(pno: str, is_rework: bool, lot_no: str, alc: str) -> tuple:
+    """(what the scan is checked for, its value): the lot number when the
+    part's label carries it in the code, otherwise the ALC code.
+
+    A label with both is checked by lot -- it is unique to the test, where the
+    ALC is the same on every label of the part. A template that cannot be
+    read is treated as carrying the lot, the stricter of the two.
+    """
+    prn_file = _part_label_template(pno, is_rework)
+    if prn_file and os.path.exists(prn_file) and not _label_codes_lot(prn_file):
+        return "ALC", alc
+    return "lot", lot_no
+
+
+def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_number: str, lot_no: str, machine_id: str, is_rework: bool = False, num_channels: int = 0, ir_ch: dict = None, acw_ch: dict = None, printer_name: str = _PRINTER_NAME):
+    base = os.path.dirname(__file__)
+    prn_file = _part_label_template(pno, is_rework)
     # No fallback template. TEMPPRN.prn is where the last label was rendered,
     # values and all, so falling back to it reprinted that label -- another
     # part's number and a stale lot code -- on every part with no template.
@@ -4078,7 +4124,8 @@ def render(parent):
             plc.close()
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
-        pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no; state["labelstr"] = lot_no
+        pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no
+        state["scan_by"], state["labelstr"] = _scan_target(pno, state.get("is_rework", False), lot_no, state["alc"])
         elapsed = (datetime.datetime.now() - state["start_time"]).total_seconds() if state["start_time"] else None
         elapsed_str = f"{elapsed:.1f}" if elapsed is not None else "—"
         # Cycle time == this test's duration (START to verdict), which is what
@@ -4151,8 +4198,8 @@ def render(parent):
             _set_awaiting_scan(False)
             _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
             return
-        if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK ({_fmt_scan(scanned)})")
-        else: res_str = "NG"; _log(f"Scan verify: NG (expected '{labelstr}', got '{_fmt_scan(scanned)}')")
+        if _scan_lot_ok(scanned, labelstr): res_str = "OK"; _log(f"Scan verify: OK by {state.get('scan_by', 'lot')} ({_fmt_scan(scanned)})")
+        else: res_str = "NG"; _log(f"Scan verify: NG (expected {state.get('scan_by', 'lot')} '{labelstr}', got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
         _update_scan_result(state["lot_no"], res_str)
         # Today's PASS Records was drawn when the test finished, before this

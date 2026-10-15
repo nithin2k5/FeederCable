@@ -169,8 +169,13 @@ CHAPTERS = [
           "label has been scanned. The START button is held — it reads SCAN LABEL "
           "TO CONTINUE — and the scan entry takes focus by itself, so pulling the "
           "scanner trigger is all that is needed."),
+    ("p", "What the scan is checked for depends on the part's label template. "
+          "If its barcode or data matrix carries the lot number (@lotNo@ or "
+          "@traceabilityCode@), the scan must contain this test's lot number. "
+          "If it does not, the scan must contain the part's ALC code instead. "
+          "A label carrying both is checked by lot number."),
     ("tbl", ["Verdict", "Meaning"], [
-        ["OK", "The scanned code matches the label just printed"],
+        ["OK", "The scanned code contains the lot number (or the ALC code, for a label without one)"],
         ["NG", "The code does not match — wrong label presented"],
         ["DUP", "This label was already scanned for an earlier lot"],
     ]),
