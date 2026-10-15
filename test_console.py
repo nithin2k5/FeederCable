@@ -1448,13 +1448,17 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         root, ext = os.path.splitext(lbl_sel)
         prn_file = f"{root}{suffix}{ext or '.prn'}"
     print(f"[PRINT DEBUG] pno={pno} lblsel='{lbl_sel}' is_rework={is_rework} -> template={prn_file or '(none)'}")
-    if not prn_file or not os.path.exists(prn_file):
-        if prn_file:    # a template was set for this part and is missing
-            _print_problem(f"part label template '{prn_file}' not found — "
-                           f"printing with TEMPPRN.prn instead")
-        prn_file = os.path.join(base, "TEMPPRN.prn")
+    # No fallback template. TEMPPRN.prn is where the last label was rendered,
+    # values and all, so falling back to it reprinted that label -- another
+    # part's number and a stale lot code -- on every part with no template.
+    # A missing label is caught at the line; a wrong one is not.
+    if not prn_file:
+        _print_problem(f"part label not printed: no label template set for part "
+                       f"{pno} — choose one in Model Settings")
+        return
     if not os.path.exists(prn_file):
-        _print_problem(f"part label not printed: no label file at all ({prn_file})")
+        _print_problem(f"part label not printed: template '{prn_file}' for part "
+                       f"{pno} not found — check it in Model Settings")
         return
     now = datetime.datetime.now()
     try:

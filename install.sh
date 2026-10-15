@@ -129,7 +129,7 @@ trap cleanup EXIT INT TERM
 # ── What the frozen app needs beside itself ──────────────────────────────────
 # Read-only assets, shipped inside the bundle. Label templates are chosen per
 # part in Model Settings, so every .prn ships -- a part whose template is
-# missing falls back to TEMPPRN.prn and prints the wrong label. The three
+# missing prints no part label at all. The three
 # date code tables ship with them, for the same reason: a station missing
 # one falls back to the built-in scheme and prints a code nobody chose.
 ASSET_FILES=(
