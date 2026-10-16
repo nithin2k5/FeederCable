@@ -1386,12 +1386,34 @@ _LOT_CODE_FALLBACK = {
 _LOT_CODE_UNKNOWN = "?"
 
 
+def _read_text_file(path: str) -> str:
+    """A hand-edited text file -- a .prn template or a lot code table -- as
+    text, whatever encoding the editor it was last saved in chose.
+
+    The printer takes single-byte TSPL, so these are read as Latin-1. But one
+    pasted into a new file in Notepad comes back saved as UTF-16 or as UTF-8
+    with a BOM: read as Latin-1, UTF-16 sends a zero byte between every
+    character and the printer prints nonsense, and a BOM puts three stray
+    bytes in front of the first command. Both are recognised here and decoded
+    to the same text the file was meant to hold.
+    """
+    with open(path, "rb") as f:
+        raw = f.read()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw[3:].decode("utf-8", errors="replace")
+    # UTF-16 saved without a BOM: plain ASCII with every other byte zero.
+    if len(raw) >= 4 and raw[1::2].count(0) > len(raw) // 4:
+        return raw.decode("utf-16-le", errors="replace")
+    return raw.decode("latin-1")
+
+
 def _read_lot_code_table(kind: str) -> list:
     """One code table, from its file, falling back to the built-in copy."""
     path = os.path.join(os.path.dirname(__file__), _LOT_CODE_TABLES[kind])
     try:
-        with open(path, "r", encoding="latin-1") as f:
-            raw = f.read().strip()
+        raw = _read_text_file(path).strip()
         # The tables are maintained by hand, and a hand written list tends to
         # get a full stop on the end of it: "...,3,4,5." Drop one closing stop
         # so the last entry is the single character the rest of the table is,
@@ -1499,8 +1521,7 @@ def _label_coded_fields(prn_file: str) -> set:
     """The _SCAN_FIELDS names the template puts into its barcode/data matrix,
     or None when the template cannot be read."""
     try:
-        with open(prn_file, "r", encoding="latin-1") as f:
-            lines = f.read().splitlines()
+        lines = _read_text_file(prn_file).splitlines()
     except OSError:
         return None
     found = set()
@@ -1557,7 +1578,7 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
         return
     now = datetime.datetime.now()
     try:
-        with open(prn_file, "r", encoding="latin-1") as f: text = f.read()
+        text = _read_text_file(prn_file)
         text = text.replace("@alcCode@", alc).replace("@partNumber@", pno).replace("@modelName@", model).replace("@vendorCode@", vendor_code).replace("@eoNumber@", eo_number).replace("@lotNo@", lot_no).replace("@traceabilityCode@", lot_no)
         text = text.replace("@ddMMyy@", now.strftime("%d%m%y")).replace("@HH:mm:ss@", now.strftime("%H:%M:%S")).replace("@machineID_NoAlphabet@", machine_id.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
         # The measured readings, CH1 first: "1204,1198,1210" for a 3-channel
@@ -1621,7 +1642,7 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         _print_problem(f"{marker} label not printed: MARKER.prn not found ({prn_file})")
         return
     try:
-        with open(prn_file, "r", encoding="latin-1") as f: template = f.read()
+        template = _read_text_file(prn_file)
     except Exception as ex:
         _print_problem(f"{marker} label not printed: could not read MARKER.prn ({ex})")
         return
@@ -1698,8 +1719,7 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
         "@HH:mm:ss@":    now.strftime("%H:%M:%S"),
     }
     try:
-        with open(prn_file, "r", encoding="latin-1") as f:
-            text = f.read()
+        text = _read_text_file(prn_file)
         for key, val in fields.items():
             text = text.replace(key, val or "")
         text = _apply_lot_3_letters(text, _lot_3_letters(now))
