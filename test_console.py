@@ -1330,6 +1330,12 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
         print(f"DB Error generating lot: {ex}")
     return f"{prefix}{highest + 1:07d}"
 
+def _serial_no(lot_no: str) -> str:
+    """The serial at the end of a lot number, as printed in it: 0000012 for
+    261016I9A2A0000012. Empty when the lot number does not end in digits."""
+    m = re.search(r"\d+$", lot_no or "")
+    return m.group(0) if m else ""
+
 def _fmt_channel_values(ch_res: dict, n_ch: int, fmt: str) -> str:
     """One channel's measured value per slot, in channel order, comma separated.
 
@@ -1583,7 +1589,7 @@ def _print_barcode_label(pno: str, alc: str, model: str, vendor_code: str, eo_nu
     now = datetime.datetime.now()
     try:
         text = _read_text_file(prn_file)
-        text = text.replace("@alcCode@", alc).replace("@partNumber@", pno).replace("@modelName@", model).replace("@vendorCode@", vendor_code).replace("@eoNumber@", eo_number).replace("@lotNo@", lot_no).replace("@traceabilityCode@", lot_no)
+        text = text.replace("@alcCode@", alc).replace("@partNumber@", pno).replace("@modelName@", model).replace("@vendorCode@", vendor_code).replace("@eoNumber@", eo_number).replace("@lotNo@", lot_no).replace("@traceabilityCode@", lot_no).replace("@serialNo@", _serial_no(lot_no))
         text = text.replace("@ddMMyy@", now.strftime("%d%m%y")).replace("@HH:mm:ss@", now.strftime("%H:%M:%S")).replace("@machineID_NoAlphabet@", machine_id.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
         # The measured readings, CH1 first: "1204,1198,1210" for a 3-channel
         # part. A template that wants them per channel can still have them --
@@ -1712,6 +1718,7 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
         "@vendorCode@":  vendor_code,
         "@eoNumber@":    eo_number,
         "@lotNo@":       lot_no,
+        "@serialNo@":    _serial_no(lot_no),
         "@lotQty@":      str(qty),
         "@lotCount@":    str(count),
         "@empCode@":     emp,
