@@ -259,11 +259,13 @@ def _scan_has(scanned: str, value: str) -> bool:
     T260905I1A2A0000006); others (most current templates) print the bare lot
     number with no prefix at all -- either way the lot number is a substring
     of that one field, so checking membership in the field is enough.
+
+    Case is ignored: a wedge scanner's letters follow the keyboard's Caps Lock.
     """
-    want = _alnum_words(value)
+    want = _alnum_words(value.upper())
     if not want:
         return False
-    got = _alnum_words(scanned)
+    got = _alnum_words(scanned.upper())
     if len(want) == 1:
         return any(want[0] in word for word in got)
     # A value with punctuation of its own -- a part number like 96230-K6510 --
@@ -3183,6 +3185,21 @@ def render(parent):
     ent_scan = _ent(scan_inner, w=16, editable=False, size=_fs(10))
     ent_scan.pack(fill="x", pady=(3, 3))
 
+    # A keyboard-wedge scanner types through the keyboard, so Caps Lock off
+    # turned the label's capitals into small letters. Each letter is put in
+    # as a capital instead, so the box always shows the label as printed.
+    def _scan_key_upper(event):
+        ch = event.char
+        if not (len(ch) == 1 and ch.islower()) or str(ent_scan.cget("state")) != "normal":
+            return None
+        try:
+            if ent_scan.selection_present():
+                ent_scan.delete("sel.first", "sel.last")
+        except Exception: pass
+        ent_scan.insert("insert", ch.upper())
+        return "break"
+    ent_scan.bind("<Key>", _scan_key_upper)
+
     def _lock_scan_entry():
         try:
             if ent_scan.winfo_exists():
@@ -4406,7 +4423,7 @@ def render(parent):
         label_ng_popup["win"] = dlg
 
     def _on_scan_enter(event=None):
-        scanned = ent_scan.get().strip(); checks = state.get("scan_checks") or []
+        scanned = ent_scan.get().strip().upper(); checks = state.get("scan_checks") or []
         if not scanned: return
         missing = [(name, val) for name, val in checks if not _scan_has(scanned, val)]
         print(f"[SCAN DEBUG] checks={checks!r} scanned={scanned!r} missing={missing!r}")
