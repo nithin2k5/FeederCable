@@ -2403,6 +2403,7 @@ def render(parent):
             # The lock itself outlives the page; its popup cannot, or it
             # would be left up with nothing on screen able to close it.
             _close_ng_lock()
+            _close_label_ng()
     content.bind("<Destroy>", _on_page_destroy)
     # Back on the page with an NG still unreset: put the hold back up. M11 is
     # read again once a part is loaded and the poll is running.
@@ -4308,6 +4309,102 @@ def render(parent):
             ent_scan.config(state="normal"); ent_scan.delete(0, "end"); ent_scan.focus_set()
         except Exception: pass
         _set_scan_box("")
+
+    # A scan that does not match is a printed label for the wrong part, or one
+    # misprinted -- and it is already in the operator's hand, ready to be
+    # stuck on. The NG in the scan box was easy to miss from the bench, so a
+    # mismatch stops the station with a popup saying what to do with the
+    # label, in the three languages spoken on the line. The next part waits
+    # until it is acknowledged, so the label cannot go on the cable that follows.
+    _LABEL_NG_LINES = (
+        ("ENGLISH", "This label is WRONG.\nDo NOT paste it on the part.\n"
+                    "Paste it in the NG Log Book.", ("Arial", _fs(15), "bold")),
+        ("தமிழ்", "இந்த லேபிள் தவறானது.\nஇதை பாகத்தில் ஒட்ட வேண்டாம்.\n"
+                  "இதை NG பதிவேட்டில் ஒட்டவும்.", ("Nirmala UI", _fs(14), "bold")),
+        ("हिन्दी", "यह लेबल गलत है।\nइसे पार्ट पर न चिपकाएँ।\n"
+                   "इसे NG लॉग बुक में चिपकाएँ।", ("Nirmala UI", _fs(15), "bold")),
+    )
+    label_ng_popup = {"win": None, "blink": None}
+
+    def _close_label_ng():
+        dlg, label_ng_popup["win"] = label_ng_popup["win"], None
+        if label_ng_popup["blink"]:
+            try: content.after_cancel(label_ng_popup["blink"])
+            except Exception: pass
+            label_ng_popup["blink"] = None
+        try:
+            if dlg is not None and dlg.winfo_exists():
+                dlg.grab_release(); dlg.destroy()
+        except Exception: pass
+
+    def _show_label_ng(pno: str, lot_no: str, why: str, on_ack):
+        """The LABEL NG alarm. on_ack runs once the operator presses ACCEPTED
+        -- the only way to close it."""
+        _close_label_ng()
+        top = parent.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.withdraw()
+        dlg.title("LABEL NG")
+        dlg.configure(bg="#111")
+        dlg.resizable(False, False)
+        dlg.transient(top)
+        dlg.attributes("-topmost", True)
+        head = tk.Frame(dlg, bg="#d50000", padx=30, pady=14)
+        head.pack(fill="x")
+        head_lbl = tk.Label(head, text="⚠  LABEL NG  ⚠", bg="#d50000", fg="white",
+                            font=("Arial", _fs(34), "bold"))
+        head_lbl.pack()
+        tk.Label(head, text="STOP — DO NOT USE THIS LABEL", bg="#d50000", fg="#ffeb3b",
+                 font=("Arial", _fs(13), "bold")).pack()
+        body = tk.Frame(dlg, bg="#111", padx=30, pady=14)
+        body.pack(fill="both", expand=True)
+        for i, (lang, text, font) in enumerate(_LABEL_NG_LINES):
+            if i:
+                tk.Frame(body, bg="#444", height=1).pack(fill="x", pady=8)
+            row = tk.Frame(body, bg="#111")
+            row.pack(fill="x")
+            tk.Label(row, text=lang, bg="#111", fg="#ff8a80", width=8, anchor="nw",
+                     font=("Nirmala UI", _fs(11), "bold")).pack(side="left", anchor="n")
+            tk.Label(row, text=text, bg="#111", fg="white", justify="left",
+                     anchor="w", font=font).pack(side="left", fill="x")
+        tk.Label(body, text=f"Part {pno or '?'}   ·   Lot {lot_no or '?'}\n{why}",
+                 bg="#111", fg="#999", font=("Arial", _fs(10)),
+                 justify="center", wraplength=560).pack(pady=(14, 0))
+
+        def _ack(_e=None):
+            _close_label_ng()
+            on_ack()
+        tk.Button(body, text="✔  ACCEPTED\nஏற்றுக்கொண்டேன்\nस्वीकार है",
+                  command=_ack, bg="#b71c1c", fg="white", activebackground="#7f0000",
+                  activeforeground="white", relief="flat", padx=16, pady=10,
+                  font=("Nirmala UI", _fs(11), "bold")).pack(pady=(16, 0), fill="x")
+        # Closed by the button only: the window X does nothing, and a scanner's
+        # Enter landing here must not acknowledge it unread.
+        dlg.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        # The header flashes red / black, the way the station's NG lamp does.
+        def _blink(on=True):
+            try:
+                if not head.winfo_exists(): return
+                bg = "#d50000" if on else "#3a0000"
+                head.config(bg=bg)
+                for w in head.winfo_children(): w.config(bg=bg)
+                label_ng_popup["blink"] = content.after(450, lambda: _blink(not on))
+            except Exception: pass
+        _blink()
+
+        dlg.update_idletasks()
+        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        x = top.winfo_rootx() + (top.winfo_width() - w) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - h) // 3
+        x = max(0, min(x, dlg.winfo_screenwidth() - w))
+        y = max(0, min(y, dlg.winfo_screenheight() - h))
+        dlg.geometry(f"+{x}+{y}")
+        dlg.deiconify()
+        try: dlg.grab_set()
+        except Exception: pass
+        label_ng_popup["win"] = dlg
+
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip(); checks = state.get("scan_checks") or []
         if not scanned: return
@@ -4346,6 +4443,22 @@ def render(parent):
         # _after(0, ...) runs after this callback returns -- so the reload sees
         # the new verdict.
         _after(0, lambda p=state["pno"]: _load_today_pass(p))
+        if res_str == "NG":
+            # Held -- START stays off and the PLC unread -- until the popup is
+            # acknowledged, then the page clears the way it does after an OK.
+            _lock_scan_entry(); _play_wav("NG.WAV")
+            try:
+                if btn_start.winfo_exists():
+                    btn_start.config(state="disabled", bg="#4a0000", fg="#ff8a80",
+                                     text="⛔  LABEL NG — PRESS ACCEPTED")
+            except Exception: pass
+            def _after_ack():
+                _log("Label NG accepted by the operator")
+                _set_awaiting_scan(False)
+                _after(500, _reset_for_next_part); _after(600, _input_poll_start)
+            _show_label_ng(state["pno"], state["lot_no"],
+                           f"Scan did not match: missing {want}", _after_ack)
+            return
         _set_awaiting_scan(False)
         _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
