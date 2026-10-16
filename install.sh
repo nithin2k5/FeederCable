@@ -143,7 +143,13 @@ for f in *.prn; do
     case "$f" in TEMP*) continue ;; esac
     PRN_FILES+=("$f")
 done
-shopt -u nullglob
+# The logos templates draw with PUTBMP: the app sends each one with any label
+# that names it, from the same folder as the templates.
+shopt -s nocaseglob
+for f in *.bmp; do
+    PRN_FILES+=("$f")
+done
+shopt -u nullglob nocaseglob
 ASSET_FILES=(
     "${PRN_FILES[@]}"
     "DAY CODE.txt"

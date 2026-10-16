@@ -321,6 +321,43 @@ def _print_problem(msg: str):
             pass
 
 
+# PUTBMP x,y,"NAME.BMP" draws a bitmap from the printer's own memory; it does
+# not send one. The logos a template draws are kept as .bmp files beside the
+# templates and sent ahead of the label -- only those the label names, so a
+# template without a logo goes out as it always did.
+_PUTBMP_RE = re.compile(rb'\bPUTBMP\s+[^,\r\n]*,[^,\r\n]*,\s*"([^"\r\n]+)"', re.I)
+_DOWNLOAD_RE = re.compile(rb'\bDOWNLOAD\s+(?:[FE]\s*,\s*)?"([^"\r\n]+)"', re.I)
+
+
+def _with_label_bitmaps(data: bytes, what: str) -> bytes:
+    """data with a TSPL DOWNLOAD in front of it for each .bmp it PUTBMPs.
+
+    A name the template already downloads itself is left alone. One with no
+    file beside the templates is reported and left to whatever the printer
+    already holds under that name -- a logo loaded into its flash by hand.
+    """
+    base = os.path.dirname(os.path.abspath(__file__))
+    have = {m.group(1).upper() for m in _DOWNLOAD_RE.finditer(data)}
+    head = b""
+    for m in _PUTBMP_RE.finditer(data):
+        name = m.group(1)
+        if name.upper() in have:
+            continue
+        have.add(name.upper())
+        path = os.path.join(base, os.path.basename(name.decode("latin-1")))
+        try:
+            with open(path, "rb") as f:
+                bmp = f.read()
+        except OSError:
+            _print_problem(f"{what}: '{name.decode('latin-1')}' not found beside "
+                           f"the templates ({path}) — the label prints with the "
+                           f"printer's own copy, or none")
+            continue
+        head += b'DOWNLOAD "%s",%d,' % (name, len(bmp)) + bmp + b"\r\n"
+        print(f"[PRINT DEBUG] {what}: sending {name.decode('latin-1')} ({len(bmp)} bytes) with the label")
+    return head + data
+
+
 def _print_raw(printer_name: str, filename: str) -> bool:
     """Send a .prn file to a printer verbatim. True when the spooler took it.
 
@@ -357,7 +394,7 @@ def _print_raw(printer_name: str, filename: str) -> bool:
             try:
                 win32print.StartPagePrinter(hPrinter)
                 with open(filename, "rb") as f:
-                    data = f.read()
+                    data = _with_label_bitmaps(f.read(), what)
                     win32print.WritePrinter(hPrinter, data)
                 win32print.EndPagePrinter(hPrinter)
                 print(f"[PRINT DEBUG] sent {len(data)} bytes to '{printer_name}' OK")
