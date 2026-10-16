@@ -287,6 +287,22 @@ def render(parent):
     ent_machine = mk_entry(f3)
     ent_machine.grid(row=2, column=1, sticky="ew", pady=6)
 
+    # Where LABEL TEMPLATE's list comes from. A station can hold more than one
+    # install (FeederCable and FeederCableV2, a dist copy), and a .prn dropped
+    # into another one's _internal never shows up -- this says which folder
+    # counts, and a click opens it.
+    lbl_dir = tk.Label(f3, text=f"Templates folder (click to open):\n{LABEL_DIR}",
+                       bg=PANEL, fg=TXT_DIM, font=('Arial', 9), anchor="w",
+                       justify="left", wraplength=420, cursor="hand2")
+    lbl_dir.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+    def _open_label_dir(_e=None):
+        try:
+            os.startfile(LABEL_DIR)
+        except OSError as ex:
+            messagebox.showerror("Templates folder", f"Could not open {LABEL_DIR}:\n{ex}")
+    lbl_dir.bind("<Button-1>", _open_label_dir)
+
     def _show_machine_id():
         ent_machine.config(state="normal")
         ent_machine.delete(0, "end")
