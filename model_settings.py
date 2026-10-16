@@ -216,17 +216,21 @@ def render(parent):
         here too -- choosing hehe.prn already prints heheR.prn for rework, and
         choosing heheR.prn would look for heheRR.prn.
         """
+        # NAME.prn.txt too: Notepad saving as "Text Documents" adds .txt, and
+        # Explorer hides it, so the file looks like NAME.prn to whoever saved it.
         try:
-            names = [n for n in os.listdir(LABEL_DIR) if n.lower().endswith(".prn")]
+            names = [n for n in os.listdir(LABEL_DIR)
+                     if n.lower().endswith((".prn", ".prn.txt"))]
         except OSError:
             return []
         lower = {n.lower() for n in names}
         keep = []
         for n in names:
-            stem = n[:-4]
+            ext = ".prn.txt" if n.lower().endswith(".prn.txt") else ".prn"
+            stem = n[:-len(ext)]
             if n.upper().startswith("TEMP") or n.upper() in ("MARKER.PRN", "LOTPRN.PRN"):
                 continue
-            if stem[-1:].upper() == "R" and (stem[:-1] + ".prn").lower() in lower:
+            if stem[-1:].upper() == "R" and (stem[:-1] + ext).lower() in lower:
                 continue
             keep.append(n)
         return sorted(keep, key=str.lower)

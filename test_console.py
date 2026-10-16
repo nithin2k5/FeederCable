@@ -1498,6 +1498,10 @@ def _part_label_template(pno: str, is_rework: bool = False) -> str:
     # folder on some PC's desktop, and printing from there meant a template
     # nobody could find or update with the app.
     root, ext = os.path.splitext(os.path.basename(lbl_sel.strip()))
+    # NAME.prn.txt (Notepad's "Text Documents" save): its rework sibling is
+    # NAMER.prn.txt, not NAME.prnR.txt.
+    if ext.lower() == ".txt" and root.lower().endswith(".prn"):
+        root, ext = root[:-4], root[-4:] + ext
     suffix = "R" if is_rework else ""
     prn_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             f"{root}{suffix}{ext or '.prn'}")
