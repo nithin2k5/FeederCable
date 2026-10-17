@@ -257,6 +257,12 @@ class App:
     }
 
     def load_page(self, page_name):
+        # Leaving (or reloading) the Test Console mid-test destroys the page
+        # under the running test, so every page change waits for it to end.
+        if test_console.test_in_progress():
+            test_console.show_test_in_progress(self.root)
+            return
+
         # Authentication check
         if page_name in self._LOGIN_PAGES:
             if not auth.show_login(self.root, title=self._LOGIN_PAGES[page_name],

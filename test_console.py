@@ -1786,7 +1786,8 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
 
 # render() publishes a callback here so main.py can close out the loaded
 # part's run when the program exits; None when no Test Console page is live.
-_ACTIVE = {"close_out": None}
+# "busy" is the same idea for navigation: it answers whether a test is running.
+_ACTIVE = {"close_out": None, "busy": None}
 
 # Set by an overall FAIL, cleared only by NG Reset (M11). Kept here rather than
 # in the page's state so leaving the Test Console and coming back -- which
@@ -1811,6 +1812,70 @@ def close_out_run() -> bool:
     except Exception as ex:
         print(f"[PRINT DEBUG] close-out failed: {ex}")
         return True
+
+def test_in_progress() -> bool:
+    """True while the Test Console has a test running.
+
+    main.py asks this before switching pages: leaving the page tears it down,
+    which closes the PLC link and drops the test's callbacks part-way through.
+    """
+    fn = _ACTIVE.get("busy")
+    if fn is None: return False
+    try: return bool(fn())
+    except Exception: return False
+
+_BUSY_POPUP = {"win": None}
+
+def show_test_in_progress(root):
+    """Tell the operator the page cannot be left until the test finishes.
+    One at a time: a second click on the sidebar brings the open one forward."""
+    dlg = _BUSY_POPUP.get("win")
+    try:
+        if dlg is not None and dlg.winfo_exists():
+            dlg.lift(); dlg.focus_force(); return
+    except Exception: pass
+    top = root.winfo_toplevel()
+    dlg = tk.Toplevel(top)
+    dlg.withdraw()
+    dlg.title("Test In Progress")
+    dlg.configure(bg="#111")
+    dlg.resizable(False, False)
+    dlg.transient(top)
+    # An amber cap: a hold, not a fault.
+    tk.Frame(dlg, bg="#e8a000", height=6).pack(fill="x")
+    body = tk.Frame(dlg, bg="#111", padx=44, pady=26)
+    body.pack(fill="both", expand=True)
+    tk.Label(body, text="⏳", bg="#111", fg="#e8a000",
+             font=("Arial", _fs(36))).pack()
+    tk.Label(body, text="Test is in progress", bg="#111", fg="white",
+             font=("Arial", _fs(20), "bold")).pack(pady=(8, 0))
+    tk.Label(body, text="Please wait until the test completes.", bg="#111", fg="#999",
+             font=("Arial", _fs(12))).pack(pady=(6, 0))
+
+    def _ok(_e=None):
+        _BUSY_POPUP["win"] = None
+        try:
+            dlg.grab_release(); dlg.destroy()
+        except Exception: pass
+    btn = tk.Button(body, text="OK", command=_ok, bg="#1b5e20", fg="white",
+                    activebackground="#0d3b10", activeforeground="white", relief="flat",
+                    padx=40, pady=8, font=("Arial", _fs(13), "bold"))
+    btn.pack(pady=(18, 0))
+    dlg.protocol("WM_DELETE_WINDOW", _ok)
+    dlg.bind("<Escape>", _ok)
+
+    dlg.update_idletasks()
+    w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+    x = top.winfo_rootx() + (top.winfo_width() - w) // 2
+    y = top.winfo_rooty() + (top.winfo_height() - h) // 3
+    x = max(0, min(x, dlg.winfo_screenwidth() - w))
+    y = max(0, min(y, dlg.winfo_screenheight() - h))
+    dlg.geometry(f"+{x}+{y}")
+    dlg.deiconify()
+    btn.focus_set()
+    try: dlg.grab_set()
+    except Exception: pass
+    _BUSY_POPUP["win"] = dlg
 
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 def _load_cam_cfg() -> dict:
@@ -2398,6 +2463,7 @@ def render(parent):
             # Navigating away is not "closing the program", so this only drops
             # the hook -- it does not print an END.
             _ACTIVE["close_out"] = None
+            _ACTIVE["busy"] = None
             _PRINT_LOG["fn"] = None
             for feed in _cam_feeds:
                 feed.stop()
@@ -4865,6 +4931,7 @@ def render(parent):
         state["pno"] = None
         return True
     _ACTIVE["close_out"] = _close_out_run
+    _ACTIVE["busy"] = lambda: state["test_running"]
 
     def _clear_part_fields():
         """Reset everything that belongs to one part -- the part/JIG entries,
