@@ -108,6 +108,10 @@ class App:
         self.load_page('test_console')
 
     def on_closing(self):
+        # Not mid-test: the PLC reset below would cut the channels under it.
+        if test_console.test_in_progress():
+            test_console.show_test_in_progress(self.root)
+            return
         # Close out the loaded part's run first: printing has to reach the
         # spooler while the interpreter is still alive. No-op unless a Test
         # Console page is live with a part loaded.
