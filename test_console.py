@@ -1951,6 +1951,9 @@ def render(parent):
         # rather than a single verdict for the whole station.
         db.ensure_column("testmaster", "cam1result", "VARCHAR(10)")
         db.ensure_column("testmaster", "cam2result", "VARCHAR(10)")
+        # What the scanner actually read, kept beside the scan verdict so an
+        # NG or DUP can be traced back to the label that caused it.
+        db.ensure_column("testmaster", "scanvalue", "VARCHAR(255)")
         # A test run is identified by (part number, lot number), because the lot
         # sequence restarts at 1 for each part every day. A live DB created
         # before that carries a UNIQUE index on lotno alone, which rejects the
@@ -3514,14 +3517,15 @@ def render(parent):
                 "There is no record of this part. Note the lot number and its "
                 "verdict now, and tell your supervisor before carrying on."))
 
-    def _update_scan_result(lot_no: str, scan_res: str):
+    def _update_scan_result(lot_no: str, scan_res: str, scanned: str):
         try:
             with db.get_cursor(commit=True) as cur:
                 # Scoped by part too: another part can hold the same lot string
                 # today, and stamping its row with this scan's verdict would
                 # quietly corrupt that part's record.
-                cur.execute("UPDATE testmaster SET scanresult=%s WHERE pno=%s AND lotno=%s",
-                            (scan_res, state["pno"], lot_no))
+                cur.execute("UPDATE testmaster SET scanresult=%s, scanvalue=%s "
+                            "WHERE pno=%s AND lotno=%s",
+                            (scan_res, _fmt_scan(scanned)[:255], state["pno"], lot_no))
         except Exception as ex: _log(f"Scan update error: {ex}")
 
     def _duplicate_check(scanned: str):
@@ -4450,7 +4454,7 @@ def render(parent):
                 # yet, so record what happened. Skipped when this lot has
                 # already been scanned -- there the row holds a real verdict
                 # and a duplicate must not overwrite it.
-                _update_scan_result(state["lot_no"], "DUP")
+                _update_scan_result(state["lot_no"], "DUP", scanned)
                 _after(0, lambda p=state["pno"]: _load_today_pass(p))
             # Held behind the alarm the same way a LABEL NG is.
             _lock_scan_entry(); _play_wav("NG.WAV")
@@ -4475,7 +4479,7 @@ def render(parent):
             want = ", ".join(f"{n} '{v}'" for n, v in missing) or "nothing to check"
             _log(f"Scan verify: NG (missing {want}, got '{_fmt_scan(scanned)}')")
         _set_scan_box(res_str, scanned)
-        _update_scan_result(state["lot_no"], res_str)
+        _update_scan_result(state["lot_no"], res_str, scanned)
         # Today's PASS Records was drawn when the test finished, before this
         # scan existed, so its SCAN column still reads "—" for this lot.
         # Refresh it now the row is stamped rather than leaving it stale until

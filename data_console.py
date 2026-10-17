@@ -43,11 +43,12 @@ SEL       = "#1a3340"
 
 # Identity first, then the measured values, then the verdicts -- CAM1/CAM2
 # alongside the electrical results and RESULT last, the same left-to-right
-# order as Today's PASS Records on the Test Console.
+# order as Today's PASS Records on the Test Console. The label scan comes after
+# the test, so its verdict and what the scanner read follow RESULT.
 COLS = ("SNO", "DATE", "TIME", "CUSTOMER NAME", "MODEL", "P/NUMBER", "P/NAME",
         "LOTNO", "ALC", "CHANNEL", "IR_VAL", "ACW_VAL", "CONTACT",
-        "CAM1", "CAM2", "RESULT")
-# Sized so all sixteen add up to ~1445px and RESULT is on screen without
+        "CAM1", "CAM2", "RESULT", "SCAN", "SCAN VALUE")
+# Sized so everything up to RESULT adds up to ~1445px and is on screen without
 # scrolling sideways on the machine's own display -- the verdict being the one
 # column you must scroll to reach would defeat the ordering above. CUSTOMER
 # NAME and P/NAME are the two that stretch, so a wider screen goes to the
@@ -55,7 +56,7 @@ COLS = ("SNO", "DATE", "TIME", "CUSTOMER NAME", "MODEL", "P/NUMBER", "P/NAME",
 COL_W = {"SNO": 50, "DATE": 95, "TIME": 80, "CUSTOMER NAME": 125, "MODEL": 95,
          "P/NUMBER": 115, "P/NAME": 115, "LOTNO": 165, "ALC": 60, "CHANNEL": 75,
          "IR_VAL": 85, "ACW_VAL": 90, "CONTACT": 85, "CAM1": 65, "CAM2": 65,
-         "RESULT": 80}
+         "RESULT": 80, "SCAN": 65, "SCAN VALUE": 260}
 
 PREVIEW_W, PREVIEW_H = 230, 150  # fixed image box -- a predictable, centered thumbnail
 
@@ -69,6 +70,10 @@ def _valid_date(txt: str) -> bool:
 
 
 def render(parent):
+    # The search reads scanvalue, which a DB predating it lacks until the Test
+    # Console adds it -- so add it here too in case this page is opened first.
+    try: db.ensure_column("testmaster", "scanvalue", "VARCHAR(255)")
+    except Exception: pass
     # Every style here is namespaced. The page used to configure the bare
     # "Treeview"/"TCombobox", which are the defaults every other page's plain
     # widgets inherit -- so opening the report restyled tables elsewhere in the
@@ -468,7 +473,8 @@ def render(parent):
                            (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) AS cname,
                            m.model, m.pno, m.pname, m.lotno, m.alc,
                            r.channel, r.ir_resistance, r.acw_current, r.contact_result,
-                           m.cam1result, m.cam2result, m.result, m.visionimg
+                           m.cam1result, m.cam2result, m.result, m.scanresult,
+                           m.scanvalue, m.visionimg
                     FROM testmaster m
                     LEFT JOIN testresult r ON m.lotno = r.lotno AND m.pno = r.pno
                     WHERE m.date >= %s AND m.date <= %s
@@ -481,13 +487,16 @@ def render(parent):
                 cur.execute(query, tuple(params))
                 for idx, row in enumerate(cur.fetchall(), start=1):
                     (date, time_, cname, model, r_pno, pname, lotno, alc,
-                     channel, ir_val, acw_val, contact, cam1, cam2, result, vimg) = row
+                     channel, ir_val, acw_val, contact, cam1, cam2, result,
+                     scan_res, scan_val, vimg) = row
                     iid = tree.insert("", "end", values=(
                         idx, date, time_, cname or "", model, r_pno, pname, lotno, alc,
                         channel or "", ir_val or "", acw_val or "", contact or "",
                         # A blank camera verdict means vision was off or the part
                         # has no model -- "—" says that, where "" reads as a bug.
-                        cam1 or "—", cam2 or "—", result))
+                        cam1 or "—", cam2 or "—", result,
+                        # Blank until the label is scanned, same as the cameras.
+                        scan_res or "—", scan_val or ""))
                     row_images[iid] = vimg or ""
                     parts[(r_pno, lotno)] = result
         except Exception as ex:
@@ -501,7 +510,7 @@ def render(parent):
         if not rows:
             tree.insert("", "end", values=("", "", "", "", "", "",
                                            "no records for this filter", "",
-                                           "", "", "", "", "", "", "", ""),
+                                           "", "", "", "", "", "", "", "", "", ""),
                         tags=("empty",))
         filters = f"part {pno}" + ("" if res == "ALL" else f"  ·  {res} only")
         status_lbl.config(text=f"{rows} rows  ·  {len(parts)} parts  ·  {start} → {end}  ·  {filters}",

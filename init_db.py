@@ -62,6 +62,7 @@ def init_db():
             empcode VARCHAR(50),
             result VARCHAR(20),
             scanresult VARCHAR(20),
+            scanvalue VARCHAR(255),
             machine VARCHAR(50),
             visionimg VARCHAR(255),
             cam1result VARCHAR(10),
