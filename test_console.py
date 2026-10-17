@@ -4341,6 +4341,14 @@ def render(parent):
         ("हिन्दी", "यह लेबल गलत है।\nइसे पार्ट पर न चिपकाएँ।\n"
                    "इसे NG लॉग बुक में चिपकाएँ।", ("Nirmala UI", _fs(15), "bold")),
     )
+    _LABEL_DUP_LINES = (
+        ("ENGLISH", "This label was ALREADY SCANNED.\nDo NOT paste it on the part.\n"
+                    "Paste it in the NG Log Book.", ("Arial", _fs(15), "bold")),
+        ("தமிழ்", "இந்த லேபிள் ஏற்கனவே ஸ்கேன் செய்யப்பட்டது.\nஇதை பாகத்தில் ஒட்ட வேண்டாம்.\n"
+                  "இதை NG பதிவேட்டில் ஒட்டவும்.", ("Nirmala UI", _fs(14), "bold")),
+        ("हिन्दी", "यह लेबल पहले ही स्कैन हो चुका है।\nइसे पार्ट पर न चिपकाएँ।\n"
+                   "इसे NG लॉग बुक में चिपकाएँ।", ("Nirmala UI", _fs(15), "bold")),
+    )
     label_ng_popup = {"win": None, "blink": None}
 
     def _close_label_ng():
@@ -4354,28 +4362,31 @@ def render(parent):
                 dlg.grab_release(); dlg.destroy()
         except Exception: pass
 
-    def _show_label_ng(pno: str, lot_no: str, why: str, on_ack):
+    def _show_label_ng(pno: str, lot_no: str, why: str, on_ack, duplicate=False):
         """The LABEL NG alarm. on_ack runs once the operator presses ACCEPTED
-        -- the only way to close it."""
+        -- the only way to close it. duplicate swaps the wording for a label
+        that was already scanned."""
         _close_label_ng()
+        title = "DUPLICATE LABEL" if duplicate else "LABEL NG"
+        lines = _LABEL_DUP_LINES if duplicate else _LABEL_NG_LINES
         top = parent.winfo_toplevel()
         dlg = tk.Toplevel(top)
         dlg.withdraw()
-        dlg.title("LABEL NG")
+        dlg.title(title)
         dlg.configure(bg="#111")
         dlg.resizable(False, False)
         dlg.transient(top)
         dlg.attributes("-topmost", True)
         head = tk.Frame(dlg, bg="#d50000", padx=30, pady=14)
         head.pack(fill="x")
-        head_lbl = tk.Label(head, text="⚠  LABEL NG  ⚠", bg="#d50000", fg="white",
+        head_lbl = tk.Label(head, text=f"⚠  {title}  ⚠", bg="#d50000", fg="white",
                             font=("Arial", _fs(34), "bold"))
         head_lbl.pack()
         tk.Label(head, text="STOP — DO NOT USE THIS LABEL", bg="#d50000", fg="#ffeb3b",
                  font=("Arial", _fs(13), "bold")).pack()
         body = tk.Frame(dlg, bg="#111", padx=30, pady=14)
         body.pack(fill="both", expand=True)
-        for i, (lang, text, font) in enumerate(_LABEL_NG_LINES):
+        for i, (lang, text, font) in enumerate(lines):
             if i:
                 tk.Frame(body, bg="#444", height=1).pack(fill="x", pady=8)
             row = tk.Frame(body, bg="#111")
@@ -4441,8 +4452,20 @@ def render(parent):
                 # and a duplicate must not overwrite it.
                 _update_scan_result(state["lot_no"], "DUP")
                 _after(0, lambda p=state["pno"]: _load_today_pass(p))
-            _set_awaiting_scan(False)
-            _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
+            # Held behind the alarm the same way a LABEL NG is.
+            _lock_scan_entry(); _play_wav("NG.WAV")
+            try:
+                if btn_start.winfo_exists():
+                    btn_start.config(state="disabled", bg="#4a0000", fg="#ff8a80",
+                                     text="⛔  DUPLICATE LABEL — PRESS ACCEPTED")
+            except Exception: pass
+            def _after_dup_ack():
+                _log("Duplicate label accepted by the operator")
+                _set_awaiting_scan(False)
+                _after(500, _reset_for_next_part); _after(600, _input_poll_start)
+            _show_label_ng(state["pno"], state["lot_no"],
+                           f"Label already scanned for lot {dup_lot}",
+                           _after_dup_ack, duplicate=True)
             return
         if checks and not missing:
             res_str = "OK"
