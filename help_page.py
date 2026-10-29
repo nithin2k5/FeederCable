@@ -267,11 +267,12 @@ CHAPTERS = [
     ("h", "Lot label placeholders"),
     ("p", "LOTPRN.prn takes all of the above except @traceabilityCode@, "
           "@irValues@ and @acwValues@ — which belong to one cable, not a box — "
-          "and adds the five below. The file lists the whole set in its own "
-          "comments as well, next to the layout."),
+          "and adds the five below. The comments at the top of the file list "
+          "most of them too, but not @serialNo@, @ddMMyy@ or @lot3letters@ — "
+          "this page is the full set."),
     ("tbl", ["Placeholder", "Replaced with"], [
         ["@lotQty@", "The Lot Qty typed on the Test Console — how many good parts make one box"],
-        ["@lotCount@", "The running OK count that reached it, so the second box of 50 reads QTY 50 and COUNT 100"],
+        ["@lotCount@", "How many OK parts went into this box. It counts per box, so the second box of 50 reads 50, not 100. A full box has the same figure as @lotQty@; a part-filled box printed from the Report page uses the quantity typed there for both"],
         ["@empCode@", "The employee ID signed in when the box was closed"],
         ["@machineID@", "The machine ID as it is, letters and all"],
         ["@dd/MM/yy@", "The date with separators, rather than the six digits of @ddMMyy@"],
