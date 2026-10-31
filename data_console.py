@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import tkinter.font as tkfont
 import datetime
 import csv
 import os
@@ -433,8 +434,22 @@ def render(parent):
 
     for col in COLS:
         tree.heading(col, text=col, command=lambda c=col: _sort_by(c))
-        tree.column(col, width=COL_W.get(col, 80), anchor="center",
+        tree.column(col, width=COL_W.get(col, 80),
+                    # Left, not centred: a scan longer than the column would
+                    # otherwise lose both its ends, the start included.
+                    anchor="w" if col == "SCAN VALUE" else "center",
                     stretch=(col in ("CUSTOMER NAME", "P/NAME")))
+
+    tree_font = tkfont.Font(font=("Consolas", 10))
+
+    def _fit_scan_col():
+        """Widen SCAN VALUE to its longest value. A whole label's data is far
+        more than the default width holds, and as the last column it can grow
+        without pushing anything else off screen -- the sideways scroll then
+        reaches the end of the text instead of stopping part way through it."""
+        longest = max((tree_font.measure(tree.set(i, "SCAN VALUE"))
+                       for i in tree.get_children()), default=0)
+        tree.column("SCAN VALUE", width=max(COL_W["SCAN VALUE"], longest + 20))
 
     def _set_stats(parts: dict):
         total = len(parts)
@@ -508,6 +523,7 @@ def render(parent):
             return
 
         _restripe()
+        _fit_scan_col()
         _set_stats(parts)
         rows = len(tree.get_children())
         if not rows:
