@@ -251,7 +251,7 @@ CHAPTERS = [
         ["@eoNumber@", "The EO number"],
         ["@lotNo@", "The lot number of this test"],
         ["@traceabilityCode@", "The lot number again, under the name some templates use for it"],
-        ["@serialNo@", "The serial number at the end of the lot number, zeros kept — 0000012 for lot 261016I9A2A0000012. It counts up per part number and starts again at 1 each day"],
+        ["@serialNo@", "The serial number at the end of the lot number, zeros kept — 0000012 for lot 261016I9A2A0000012. It counts up per part number, PASS parts only (an NG part is recorded with lot "-"), and starts again at 1 each day"],
         ["@irValues@", "The measured insulation resistance of every channel, CH1 first, comma separated — 1204,1198,1211 for a three-channel part"],
         ["@acwValues@", "The measured withstand current of every channel the same way, to three decimals — 0.123,0.500,1.000"],
         ["@machineID_NoAlphabet@", "The machine ID with its leading letters removed — PB1 becomes 1"],

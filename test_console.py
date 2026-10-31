@@ -1331,6 +1331,11 @@ class HiPotSerial:
         reading.limits_set = limits_set
         return reading
 
+# What an NG part gets in place of a lot number. Lot and serial numbers are
+# issued to PASS parts only -- an NG part gets no label -- so the sequence on
+# the labels runs without gaps.
+NG_LOT = "-"
+
 def _generate_lot_number(pno: str, machine_id: str) -> str:
     """Next lot number for this part, this machine, today: <yymmdd>I<machine>A2A<nnnnnnn>.
 
@@ -1345,6 +1350,9 @@ def _generate_lot_number(pno: str, machine_id: str) -> str:
     looked up -- testmaster is keyed UNIQUE (pno, lotno), and testresult
     carries the part number alongside the lot so its per-channel rows cannot
     be confused with another part's run of the same number.
+
+    Only PASS parts are numbered; NG parts are stored as NG_LOT, which never
+    matches the prefix, so they neither take nor skip a number.
 
     Continuing from the highest number this part has already been issued today
     (rather than from a row count) stops a deleted record from re-issuing a
@@ -2030,7 +2038,16 @@ def render(parent):
             _cur.execute("UPDATE testresult r JOIN testmaster m ON r.lotno = m.lotno "
                          "SET r.pno = m.pno WHERE r.pno IS NULL")
         db.drop_index("testmaster", "lotno")
-        db.ensure_unique_index("testmaster", "uq_pno_lotno", "pno, lotno")
+        # NG parts all carry NG_LOT, so (pno, lotno) can no longer be unique
+        # outright: the index skips them (NULLIF maps "-" to NULL, which a
+        # UNIQUE index never compares) and still guards every issued lot.
+        db.drop_index("testmaster", "uq_pno_lotno")
+        db.ensure_unique_index("testmaster", "uq_pno_lotno_issued",
+                               f"pno, (NULLIF(lotno, '{NG_LOT}'))")
+        # ...and testresult can no longer find its run by lot either, so each
+        # channel row points at its testmaster row by id. Rows written before
+        # this keep masterid NULL and are still joined by (pno, lotno).
+        db.ensure_column("testresult", "masterid", "INT")
     except Exception as ex:
         # DB may be unreachable right now -- don't block the page for it
         print(f"[DB MIGRATION] skipped: {ex}")
@@ -3553,7 +3570,9 @@ def render(parent):
             day_dir = os.path.join(_VISION_IMG_DIR, now.strftime("%Y"),
                                    now.strftime("%m"), now.strftime("%d"))
             os.makedirs(day_dir, exist_ok=True)
-            path = os.path.join(day_dir, f"{lot_no}.jpg")
+            # An NG part has no lot of its own to name the file after.
+            name = lot_no if lot_no != NG_LOT else f"NG_{state['pno']}_{now:%H%M%S%f}"
+            path = os.path.join(day_dir, f"{name}.jpg")
             cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, _VISION_JPEG_QUALITY,
                                       cv2.IMWRITE_JPEG_OPTIMIZE, 1])
             _log(f"Vision pass image saved: {path} "
@@ -3568,8 +3587,9 @@ def render(parent):
             with db.get_cursor(commit=True) as cur:
                 now = datetime.datetime.now(); pno = state["pno"]; emp = ent_emp.get().strip()
                 cur.execute("INSERT INTO testmaster (pno, pname, model, alc, channel, lotno, date, time, empcode, result, machine, visionimg, cam1result, cam2result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, state["pname"], state["model"], state["alc"], str(state["num_channels"]), lot_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), emp, overall, cfg["machine_id"], vision_img, state["cam_results"].get(1), state["cam_results"].get(2)))
+                master_id = cur.lastrowid
                 for ch in range(1, state["num_channels"] + 1):
-                    cur.execute("INSERT INTO testresult (pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), _meas_db(ir_ch.get(ch, {}).get("value")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), _meas_db(acw_ch.get(ch, {}).get("value")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
+                    cur.execute("INSERT INTO testresult (masterid, pno, lotno, channel, ir_volts, ir_resistance, ir_current, ir_result, acw_volts, acw_current, acw_result, contact_result) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (master_id, pno, lot_no, str(ch), str(ir_ch.get(ch, {}).get("appvol", "")), _meas_db(ir_ch.get(ch, {}).get("value")), "0.01", ir_ch.get(ch, {}).get("result", ""), str(acw_ch.get(ch, {}).get("appvol", "")), _meas_db(acw_ch.get(ch, {}).get("value")), acw_ch.get(ch, {}).get("result", ""), contact_ch.get(ch, {}).get("result", "")))
             _log(f"Saved {overall} → {lot_no}")
         except Exception as ex:
             # The part has already been tested and its label may already be
@@ -4329,7 +4349,9 @@ def render(parent):
             plc.close()
         _after(0, lambda: _set_safety_indicator(False))  # match the physical reset above
             
-        pno = state["pno"]; lot_no = _generate_lot_number(pno, cfg["machine_id"]); state["lot_no"] = lot_no
+        pno = state["pno"]
+        lot_no = _generate_lot_number(pno, cfg["machine_id"]) if overall == "PASS" else NG_LOT
+        state["lot_no"] = lot_no
         # NO LABEL parts print nothing, so there is nothing to scan either.
         label_tpl = _part_label_template(pno, state.get("is_rework", False))
         state["no_label"] = label_tpl == NO_LABEL

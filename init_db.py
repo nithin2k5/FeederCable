@@ -69,14 +69,16 @@ def init_db():
             cam2result VARCHAR(10),
             -- Part + lot, not lot alone: the lot sequence restarts at 1 for
             -- each part number every day, so two parts legitimately share a
-            -- lot string. It is the pair that identifies a test run.
-            CONSTRAINT uq_pno_lotno UNIQUE (pno, lotno)
+            -- lot string. NG parts are not numbered and all hold "-", so the
+            -- index leaves them out.
+            CONSTRAINT uq_pno_lotno_issued UNIQUE (pno, (NULLIF(lotno, '-')))
         )''')
 
         print("Creating testresult table...")
         cur.execute('''
         CREATE TABLE IF NOT EXISTS testresult (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            masterid INT,
             pno VARCHAR(50),
             lotno VARCHAR(100),
             channel VARCHAR(10),

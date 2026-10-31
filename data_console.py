@@ -463,7 +463,7 @@ def render(parent):
 
         pno, res = cb_pno.get(), cb_result.get()
         # One row per channel, not per part: testresult holds a row for each
-        # channel of a run, so the stat tiles count distinct (part, lot) pairs
+        # channel of a run, so the stat tiles count distinct testmaster rows
         # instead of rows -- otherwise an 8-channel part counts as eight parts.
         parts = {}
         try:
@@ -474,9 +474,12 @@ def render(parent):
                            m.model, m.pno, m.pname, m.lotno, m.alc,
                            r.channel, r.ir_resistance, r.acw_current, r.contact_result,
                            m.cam1result, m.cam2result, m.result, m.scanresult,
-                           m.scanvalue, m.visionimg
+                           m.scanvalue, m.visionimg, m.id
                     FROM testmaster m
-                    LEFT JOIN testresult r ON m.lotno = r.lotno AND m.pno = r.pno
+                    -- By id where the row has one: every NG run shares the
+                    -- lot "-", so (pno, lotno) only identifies older rows.
+                    LEFT JOIN testresult r ON r.masterid = m.id
+                        OR (r.masterid IS NULL AND m.lotno = r.lotno AND m.pno = r.pno)
                     WHERE m.date >= %s AND m.date <= %s
                 """
                 params = [start, end]
@@ -488,7 +491,7 @@ def render(parent):
                 for idx, row in enumerate(cur.fetchall(), start=1):
                     (date, time_, cname, model, r_pno, pname, lotno, alc,
                      channel, ir_val, acw_val, contact, cam1, cam2, result,
-                     scan_res, scan_val, vimg) = row
+                     scan_res, scan_val, vimg, mid) = row
                     iid = tree.insert("", "end", values=(
                         idx, date, time_, cname or "", model, r_pno, pname, lotno, alc,
                         channel or "", ir_val or "", acw_val or "", contact or "",
@@ -498,7 +501,7 @@ def render(parent):
                         # Blank until the label is scanned, same as the cameras.
                         scan_res or "—", scan_val or ""))
                     row_images[iid] = vimg or ""
-                    parts[(r_pno, lotno)] = result
+                    parts[mid] = result
         except Exception as ex:
             messagebox.showerror("DB Error", f"Failed to search: {ex}")
             status_lbl.config(text="search failed", fg=NG)

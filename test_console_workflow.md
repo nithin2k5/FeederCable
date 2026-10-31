@@ -82,7 +82,7 @@ flowchart TD
 After all tests execute (or immediately upon a failure):
 1. **Result Evaluation**: If IR, ACW, and Contact tests all passed, the overall result is `PASS`. Otherwise, it's `FAIL`.
 2. **Database Save**: 
-   - A unique Lot Number is generated.
+   - A PASS part is given the next Lot Number (and so serial number); an NG part is recorded with `-` instead, so NG parts never use up a number.
    - Saves overall metadata to the `testmaster` table.
    - Saves per-channel voltages, currents, resistances, and results to the `testresult` table.
 3. **UI Updates**:
