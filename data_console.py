@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import tkinter.font as tkfont
 import datetime
+import calendar as _cal
 import csv
 import os
 import threading
@@ -68,6 +69,102 @@ def _valid_date(txt: str) -> bool:
         return True
     except (AttributeError, ValueError):
         return False
+
+
+def _open_calendar(entry, on_pick):
+    """Drop a month calendar under `entry`; picking a day writes it in as
+    YYYY-MM-DD and calls on_pick. Plain tkinter so the frozen build needs no
+    extra package."""
+    try:
+        cur = datetime.datetime.strptime(entry.get().strip(), "%Y-%m-%d").date()
+    except ValueError:
+        cur = datetime.date.today()
+    state = {"y": cur.year, "m": cur.month}
+
+    top = tk.Toplevel(entry)
+    top.overrideredirect(True)
+    top.configure(bg=TEAL)
+    top.geometry(f"+{entry.winfo_rootx()}+{entry.winfo_rooty() + entry.winfo_height() + 2}")
+    body = tk.Frame(top, bg=PANEL, padx=8, pady=6)
+    body.pack(padx=1, pady=1)
+
+    head = tk.Frame(body, bg=PANEL); head.pack(fill="x")
+    grid = tk.Frame(body, bg=PANEL); grid.pack(pady=(6, 0))
+
+    def nav(text, delta):
+        b = tk.Label(head, text=text, bg=PANEL, fg=TEAL, font=("Arial", 12, "bold"),
+                     padx=8, cursor="hand2")
+        b.bind("<Button-1>", lambda e: shift(delta))
+        return b
+
+    nav("◀", -1).pack(side="left")
+    nav("▶", 1).pack(side="right")
+    title = tk.Label(head, bg=PANEL, fg=TXT, font=("Arial", 11, "bold"))
+    title.pack(side="left", expand=True)
+
+    def close(_e=None):
+        if top.winfo_exists():
+            top.destroy()
+
+    def pick(day):
+        d = datetime.date(state["y"], state["m"], day)
+        entry.config(state="normal")
+        entry.delete(0, "end"); entry.insert(0, d.strftime("%Y-%m-%d"))
+        entry.config(state="readonly")
+        close()
+        on_pick()
+
+    def draw():
+        for w in grid.winfo_children():
+            w.destroy()
+        title.config(text=f"{_cal.month_name[state['m']].upper()} {state['y']}")
+        for c, wd in enumerate(("MO", "TU", "WE", "TH", "FR", "SA", "SU")):
+            tk.Label(grid, text=wd, bg=PANEL, fg=TXT_DIM, width=4,
+                     font=("Arial", 8, "bold")).grid(row=0, column=c)
+        today = datetime.date.today()
+        for r, week in enumerate(_cal.monthcalendar(state["y"], state["m"]), start=1):
+            for c, day in enumerate(week):
+                if not day:
+                    continue
+                d = datetime.date(state["y"], state["m"], day)
+                is_sel, is_today = d == cur, d == today
+                bg = TEAL if is_sel else PANEL
+                fg = BG if is_sel else (WARN if is_today else TXT)
+                lbl = tk.Label(grid, text=str(day), bg=bg, fg=fg, width=4, pady=3,
+                               font=("Consolas", 10, "bold" if is_sel or is_today else "normal"),
+                               cursor="hand2")
+                lbl.grid(row=r, column=c, padx=1, pady=1)
+                lbl.bind("<Button-1>", lambda e, dd=day: pick(dd))
+                if not is_sel:
+                    lbl.bind("<Enter>", lambda e, w=lbl: w.config(bg="#122a33"))
+                    lbl.bind("<Leave>", lambda e, w=lbl, b=bg: w.config(bg=b))
+
+    def shift(delta):
+        m = state["m"] + delta
+        state["y"] += (m - 1) // 12
+        state["m"] = (m - 1) % 12 + 1
+        draw()
+
+    foot = tk.Label(body, text="TODAY", bg=PANEL, fg=TEAL, font=("Arial", 9, "bold"),
+                    cursor="hand2")
+    foot.pack(pady=(4, 0))
+    foot.bind("<Button-1>", lambda e: (state.update(y=datetime.date.today().year,
+                                                     m=datetime.date.today().month),
+                                       pick(datetime.date.today().day)))
+
+    draw()
+    top.bind("<Escape>", close)
+    # Close when the user clicks anywhere outside the popup.
+    def _maybe_close():
+        if not top.winfo_exists():
+            return
+        f = top.focus_get()
+        if f is None or not str(f).startswith(str(top)):
+            close()
+    top.bind("<FocusOut>", lambda e: top.after(150, _maybe_close))
+    top.lift()
+    top.focus_force()
+    return top
 
 
 def render(parent):
@@ -181,16 +278,41 @@ def render(parent):
     cb_result.grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(1, 8))
 
     mk_cap(filter_inner, "START DATE").grid(row=0, column=2, sticky="w", padx=(0, 10))
-    ent_start = mk_entry(filter_inner, 13)
-    ent_start.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=(1, 8))
+    def mk_date_field(col, padx):
+        box = tk.Frame(filter_inner, bg=BG)
+        box.grid(row=1, column=col, sticky="w", padx=padx, pady=(1, 8))
+        ent = mk_entry(box, 11)
+        ent.pack(side="left")
+        btn = tk.Label(box, text="📅", bg=PANEL, fg=TEAL, font=("Segoe UI Emoji", 10),
+                       bd=1, relief="solid", padx=4, cursor="hand2")
+        btn.pack(side="left", fill="y", padx=(2, 0))
+        btn.bind("<Button-1>", lambda e: _show_cal(ent))
+        return ent
+
+    ent_start = mk_date_field(2, (0, 10))
 
     mk_cap(filter_inner, "END DATE").grid(row=0, column=3, sticky="w", padx=(0, 18))
-    ent_end = mk_entry(filter_inner, 13)
-    ent_end.grid(row=1, column=3, sticky="w", padx=(0, 18), pady=(1, 8))
+    ent_end = mk_date_field(3, (0, 18))
 
     def _fill_dates(start: datetime.date, end: datetime.date):
         for ent, val in ((ent_start, start), (ent_end, end)):
+            ent.config(state="normal")
             ent.delete(0, "end"); ent.insert(0, val.strftime("%Y-%m-%d"))
+            ent.config(state="readonly")
+
+    # Dates are picked from a calendar, not typed: clicking the field (or the
+    # 📅 button beside it) drops a month view under it.
+    _cal_popup = {"w": None}
+
+    def _show_cal(ent):
+        old = _cal_popup["w"]
+        if old is not None and old.winfo_exists():
+            old.destroy()
+        _cal_popup["w"] = _open_calendar(ent, lambda: _do_search())
+
+    for ent in (ent_start, ent_end):
+        ent.config(state="readonly", readonlybackground=PANEL, cursor="hand2")
+        ent.bind("<Button-1>", lambda e, w=ent: _show_cal(w))
 
     _fill_dates(datetime.date.today() - datetime.timedelta(days=7), datetime.date.today())
 
