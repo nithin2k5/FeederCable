@@ -2109,8 +2109,17 @@ def render(parent):
         """Set the verdict, sized to the sidebar. "TESTING" is half again as
         wide as "PASS", so one fixed size either clips it or wastes the block
         on the short words -- pick the size from the word instead."""
+        longest = max(len(line) for line in text.split("\n"))
         result_lbl.config(text=text, bg=bg, fg=fg,
-                          font=("Arial", _fs(30) if len(text) <= 5 else _fs(22), "bold"))
+                          font=("Arial", _fs(30) if longest <= 5 else _fs(22), "bold"))
+
+    def _set_test_phase(name):
+        """Name the running test in the verdict block and on the START button
+        ("VISION" / "IR" / "ACW" / "CONTACT"), so the operator can see which stage the
+        cycle is in rather than a generic TESTING. The verdict splits it over
+        two lines so it fits the sidebar at the same size TESTING does."""
+        _after(0, lambda: _set_verdict(f"{name}\nTESTING", "#0033aa", "white"))
+        _after(0, lambda: btn_start.config(text=f"{name} TESTING..."))
 
     # Lot number and elapsed time tuck under the verdict as a two-line strip:
     # caption left, value right, small enough that the verdict block keeps
@@ -4235,6 +4244,7 @@ def render(parent):
                 # with either one is inspected.
                 _log(f"Vision WARNING: No vision model or wire colours configured for part '{state['pno']}'. Skipping vision.")
             else:
+                _set_test_phase("VISION")
                 _after(0, lambda: scan_lbl.config(text="👁  Vision Verification...", bg="#001830", fg="#e8a000"))
                 # Each enabled camera is inspected in turn against the part's
                 # one taught model, so the record can say which camera saw the
@@ -4328,10 +4338,13 @@ def render(parent):
                 _clear_all_io_indicators()
                 state["ng_showing"] = True
                 state["test_running"] = False; state["ct_running"] = False; _after(0, _ct_tick_stop); _after(0, _update_counts); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
+        _set_test_phase("IR")
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
+        _set_test_phase("ACW")
         _after(0, lambda: scan_lbl.config(text="⚡  ACW Testing (Withstand Voltage)…", bg="#001830", fg="#e8a000")); acw_pass, acw_ch = _run_acw_test(n_ch)
         if not acw_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, acw_ch, {}); return
+        _set_test_phase("CONTACT")
         _after(0, lambda: scan_lbl.config(text="🔗  Contact Testing…", bg="#001830", fg="#e8a000")); contact_pass, contact_ch = _run_contact_test(n_ch)
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
