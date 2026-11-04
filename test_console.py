@@ -2216,247 +2216,89 @@ def render(parent):
 
 
     def _open_camera_popup(e, cam_id):
+        """A large live view of one camera. View only: choosing the device and
+        flipping the image are done on the Vision Settings page, so the line
+        cannot change what inspection sees from here."""
+        cams = _load_cam_cfg()
+        idx = cams[f"cam{cam_id}_index"] if cams[f"cam{cam_id}_enabled"] else -1
+        w, h = cams[f"cam{cam_id}_width"], cams[f"cam{cam_id}_height"]
+
         dlg = tk.Toplevel(parent)
         dlg.withdraw()
-        dlg.title(f"Camera {cam_id} Configuration")
-        dlg.configure(bg="#222")
+        dlg.title(f"Camera {cam_id}")
+        dlg.configure(bg="#111")
         dlg.transient(parent)
         dlg.resizable(False, False)
 
-        cfg = _load_cam_cfg()
-        
-        try:
-            import cv2
-            cameras = []
-            for i in range(5):
-                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-                if cap.isOpened():
-                    ret, _ = cap.read()
-                    # Resolution is not a setting: every camera runs at the
-                    # largest mode it has, found here per device.
-                    size = camera.max_resolution(cap) if ret else None
-                    if size:
-                        cameras.append({"index": i, "name": f"Camera {i}", "width": size[0], "height": size[1]})
-                    cap.release()
-        except:
-            cameras = []
+        # As large as fits: up to 85% of the screen's width and 75% of its
+        # height, keeping the camera's own shape.
+        max_w = int(dlg.winfo_screenwidth() * 0.85)
+        max_h = int(dlg.winfo_screenheight() * 0.75)
+        scale = min(max_w / w, max_h / h)
+        disp_w, disp_h = max(1, int(w * scale)), max(1, int(h * scale))
 
-        cam_options = ["Disabled"] + [f"{c['name']} (index {c['index']})" for c in cameras]
-        cam_indices = [-1] + [c["index"] for c in cameras]
-        cam_sizes = [None] + [(c["width"], c["height"]) for c in cameras]
+        head = tk.Frame(dlg, bg="#111")
+        head.pack(fill="x", padx=12, pady=(10, 6))
+        tk.Label(head, text=f"CAMERA {cam_id}", bg="#111", fg="#e8a000",
+                 font=("Arial", _fs(13), "bold")).pack(side="left")
+        tk.Label(head, text=f"{w} x {h}" if idx >= 0 else "not configured", bg="#111", fg="#888",
+                 font=("Consolas", _fs(10))).pack(side="left", padx=(10, 0))
 
-        # Settings on the left, a large preview on the right: side by side
-        # the dialog stays short enough for the line PC's screen.
-        _LBL = {"bg": "#222", "fg": "white", "font": ("Arial", _fs(11))}
-        left = tk.Frame(dlg, bg="#222")
-        left.pack(side="left", fill="y", padx=(12, 6), pady=10)
-        right = tk.Frame(dlg, bg="#222")
-        right.pack(side="left", fill="both", expand=True, padx=(6, 12), pady=10)
+        box = tk.Frame(dlg, bg="#000", width=disp_w, height=disp_h, bd=1, relief="solid")
+        box.pack_propagate(False)
+        box.pack(padx=12)
+        view = tk.Label(box, bg="#000", fg="#666", font=("Arial", _fs(13)))
+        view.pack(fill="both", expand=True)
 
-        # Camera Config
-        lf = tk.LabelFrame(left, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
-        lf.pack(fill="x", pady=5)
-
-        tk.Label(lf, text="Device:", **_LBL).grid(row=0, column=0, padx=6, pady=6, sticky="w")
-        cmb_c = ttk.Combobox(lf, values=cam_options, state="readonly", width=28, font=("Arial", _fs(10)))
-        
-        c_idx_key = f"cam{cam_id}_index"
-        c_en_key = f"cam{cam_id}_enabled"
-        try:
-            c_idx = cam_indices.index(cfg[c_idx_key]) if cfg[c_en_key] else 0
-        except ValueError:
-            c_idx = 0
-        cmb_c.current(c_idx)
-        cmb_c.grid(row=0, column=1, padx=6, pady=6)
-
-        # Read-only: the camera always runs at its maximum resolution.
-        tk.Label(lf, text="Resolution:", **_LBL).grid(row=1, column=0, padx=6, pady=6, sticky="w")
-        res_lbl = tk.Label(lf, text="—", bg="#222", fg="#e8a000", font=("Consolas", _fs(11), "bold"), anchor="w")
-        res_lbl.grid(row=1, column=1, padx=6, pady=6, sticky="w")
-
-        # For a camera mounted upside down or seeing the part mirrored. Applied in vision_engine.camera, so
-        # the preview, both panels, teaching and the vision check all see it.
-        flip_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_flip"])
-        tk.Checkbutton(lf, text="Flip image top to bottom", variable=flip_var,
-                       bg="#222", fg="white", selectcolor="#111", activebackground="#222",
-                       activeforeground="white", font=("Arial", _fs(11)),
-                       command=lambda: _apply_flip()).grid(row=2, column=0, columnspan=2,
-                                                          padx=6, pady=(6, 0), sticky="w")
-        mirror_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_mirror"])
-        tk.Checkbutton(lf, text="Flip image left to right", variable=mirror_var,
-                       bg="#222", fg="white", selectcolor="#111", activebackground="#222",
-                       activeforeground="white", font=("Arial", _fs(11)),
-                       command=lambda: _apply_flip()).grid(row=3, column=0, columnspan=2,
-                                                          padx=6, sticky="w")
-        tk.Label(lf, text="Parts taught before changing these must be re-taught.",
-                 bg="#222", fg="#888", font=("Arial", _fs(9))).grid(
-                     row=4, column=0, columnspan=2, padx=6, pady=(0, 6), sticky="w")
-
-        # Live preview. Choosing between "Camera 0" and "Camera 1" from a
-        # dropdown is guesswork on a rig with two identical USB cameras --
-        # the picture is the only thing that says which one is which. Its
-        # height follows the camera's aspect so the picture is not squashed.
-        _PREV_W = _px(560)
-        lf2 = tk.LabelFrame(right, text="Preview", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
-        lf2.pack(fill="both", expand=True, pady=5)
-        prev_box = tk.Frame(lf2, bg="#111", width=_PREV_W, height=_PREV_W * 3 // 4, bd=1, relief="solid")
-        prev_box.pack_propagate(False)
-        prev_box.pack(padx=8, pady=8)
-        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", _fs(11)))
-        prev_lbl.pack(fill="both", expand=True)
-
-        preview = {"feed": None}
-
-        def _stop_preview():
-            feed, preview["feed"] = preview["feed"], None
-            if feed is not None:
-                try: feed.stop()
-                except Exception: pass
-
-        def _apply_flip():
-            """Show the flip on the preview straight away; only Save keeps it."""
-            d_sel = cmb_c.current()
-            if _cv2_ok and d_sel > 0:
-                camera.preview_flip(cam_indices[d_sel], flip_var.get(), mirror_var.get())
-
-        def _start_preview(*_a):
-            """(Re)open the preview for whatever the device dropdown now says."""
-            _stop_preview()
-            prev_lbl.config(image="", text="", fg="#666"); prev_lbl.image = None
-            d_sel = cmb_c.current()
-            idx = cam_indices[d_sel] if d_sel > 0 else -1
-            if idx < 0:
-                res_lbl.config(text="—")
-                prev_lbl.config(text="Camera disabled"); return
-            w, h = cam_sizes[d_sel]
-            res_lbl.config(text=f"{w} x {h}  (maximum)")
-            prev_h = max(1, round(_PREV_W * h / w))
-            prev_box.config(height=prev_h)
-            if not (_cv2_ok and _pil_ok):
-                prev_lbl.config(text="Preview unavailable\n(OpenCV or Pillow missing)", fg="#ff9800"); return
-            prev_lbl.config(text="Opening camera…", fg="#e8a000")
-            feed = CameraFeed(prev_lbl, idx, display_w=_PREV_W, display_h=prev_h, width=w, height=h)
-            preview["feed"] = feed
-            _apply_flip()
+        feed = None
+        if idx < 0:
+            view.config(text=f"Camera {cam_id} is not configured.\n\n"
+                             "Select it on the Vision Settings page.", fg="#ff9800")
+        elif not (_cv2_ok and _pil_ok):
+            view.config(text="Live view unavailable\n(OpenCV or Pillow missing)", fg="#ff9800")
+        else:
+            view.config(text="Opening camera…", fg="#e8a000")
+            # Shares the sidebar panel's stream (camera.acquire is reference
+            # counted), so the panel keeps running underneath.
+            feed = CameraFeed(view, idx, display_w=disp_w, display_h=disp_h, width=w, height=h)
             feed.start()
 
-        cmb_c.bind("<<ComboboxSelected>>", _start_preview)
-
-        # Active Dataset config (vision_config.json)
-        lf3 = tk.LabelFrame(left, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
-        lf3.pack(fill="x", pady=5)
-        
-        from vision_engine.vision_controller import load_vision_config, save_vision_config
-        v_cfg = load_vision_config()
-        current_part = state.get("pno", "")
-        
-        import os, glob
-        models_dir = os.path.join(os.path.dirname(__file__), "vision_models")
-        datasets = [os.path.basename(f) for f in glob.glob(os.path.join(models_dir, "*.npz"))]
-        
-        tk.Label(lf3, text=f"Part: {current_part if current_part else 'None Loaded'}", **_LBL).grid(row=0, column=0, columnspan=2, padx=6, pady=6, sticky="w")
-
-        tk.Label(lf3, text="Dataset:", **_LBL).grid(row=1, column=0, padx=6, pady=6, sticky="w")
-        cmb_dataset = ttk.Combobox(lf3, values=["(None)"] + datasets, state="readonly", width=28, font=("Arial", _fs(10)))
-        
-        current_mapped = v_cfg.get("part_mapping", {}).get(current_part)
-        if current_mapped in datasets:
-            cmb_dataset.current(datasets.index(current_mapped) + 1)
-        else:
-            cmb_dataset.current(0)
-            
-        cmb_dataset.grid(row=1, column=1, padx=5, pady=5)
-
-        def _save():
-            d_sel = cmb_c.current()
-
-            # Update only this camera's settings. Width/height are the
-            # device's maximum, measured when the dialog scanned it; a
-            # disabled camera keeps whatever it had.
-            cfg[f"cam{cam_id}_index"] = cam_indices[d_sel] if d_sel > 0 else -1
-            cfg[f"cam{cam_id}_enabled"] = d_sel > 0
-            if d_sel > 0:
-                cfg[f"cam{cam_id}_width"], cfg[f"cam{cam_id}_height"] = cam_sizes[d_sel]
-            cfg[f"cam{cam_id}_flip"] = flip_var.get()
-            cfg[f"cam{cam_id}_mirror"] = mirror_var.get()
-            
-            import configparser
-            new_cam = configparser.ConfigParser()
-            new_cam["CAMERA"] = {k: str(v) for k, v in cfg.items()}
-            with open(_CAM_CFG_PATH, "w") as f:
-                new_cam.write(f)
-                
-            # Save Dataset mapping
-            if current_part:
-                ds_val = cmb_dataset.get()
-                if ds_val == "(None)":
-                    v_cfg.get("part_mapping", {}).pop(current_part, None)
-                else:
-                    if "part_mapping" not in v_cfg:
-                        v_cfg["part_mapping"] = {}
-                    v_cfg["part_mapping"][current_part] = ds_val
-                save_vision_config(v_cfg)
-                
-            _stop_preview()
-            if _cv2_ok:
-                camera.end_flip_preview()
-            dlg.destroy()
-            
-            # Reload page to apply changes
-            try: parent.winfo_toplevel().event_generate("<<NavigateHome>>")
-            except: pass
-
-        tk.Button(left, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", _fs(12), "bold"), bd=0, padx=24, pady=10, command=_save).pack(side="bottom", fill="x", pady=(15, 5))
-
         def _close(_e=None):
-            """Dismissed without saving. nav_camera stopped the page's own
-            feeds to free the cameras for this dialog, so they have to be put
-            back -- otherwise cancelling left both panels dead until the next
-            navigation."""
-            _stop_preview()
-            if _cv2_ok:
-                camera.end_flip_preview()
-            for feed in _cam_feeds:
-                try: feed.start()
+            if feed is not None:
+                try: feed.stop()
                 except Exception: pass
             try: dlg.grab_release()
             except Exception: pass
             dlg.destroy()
+
+        tk.Button(dlg, text="Close", bg="#333", fg="white", font=("Arial", _fs(11), "bold"),
+                  bd=0, padx=30, pady=6, cursor="hand2", activebackground="#444",
+                  activeforeground="white", command=_close).pack(pady=10)
         dlg.protocol("WM_DELETE_WINDOW", _close)
         dlg.bind("<Escape>", _close)
 
-        # Centred on the app window rather than the screen: they are the same
-        # thing on a maximised single monitor and very much not on two.
+        # Centred on the app window, title bar included: Windows places the
+        # window frame at the requested point, not the client area, so the
+        # border is measured once mapped and the frame re-centred.
         dlg.update_idletasks()
-        w, h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        cw, ch = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
         top = parent.winfo_toplevel()
-        x = top.winfo_rootx() + (top.winfo_width() - w) // 2
-        y = top.winfo_rooty() + (top.winfo_height() - h) // 2
-        x = max(0, min(x, dlg.winfo_screenwidth() - w))
-        y = max(0, min(y, dlg.winfo_screenheight() - h))
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        x = max(0, top.winfo_rootx() + (top.winfo_width() - cw) // 2)
+        y = max(0, top.winfo_rooty() + (top.winfo_height() - ch) // 2)
+        dlg.geometry(f"{cw}x{ch}+{x}+{y}")
         dlg.deiconify()
         dlg.update_idletasks()
-        # Windows places the window *frame* at the requested point, while every
-        # measurement here is of the client area inside it, so the title bar and
-        # border push the dialog down and right of where it was asked to go.
-        # Measure that trim now the window is mapped, and centre the frame --
-        # the whole window is what the eye judges as centred, title bar included.
-        bx = max(0, dlg.winfo_rootx() - x)          # left border
-        by = max(0, dlg.winfo_rooty() - y)          # title bar + top border
-        fw, fh = w + 2 * bx, h + by + bx            # the frame, as the screen sees it
+        bx = max(0, dlg.winfo_rootx() - x)
+        by = max(0, dlg.winfo_rooty() - y)
+        fw, fh = cw + 2 * bx, ch + by + bx
         x = top.winfo_rootx() + (top.winfo_width() - fw) // 2
         y = top.winfo_rooty() + (top.winfo_height() - fh) // 2
         x = max(0, min(x, dlg.winfo_screenwidth() - fw))
         y = max(0, min(y, dlg.winfo_screenheight() - fh))
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.geometry(f"{cw}x{ch}+{x}+{y}")
         dlg.grab_set()
-        _start_preview()
 
     def nav_camera(e, cam_id):
-        # Stop feeds before popup
-        for feed in _cam_feeds:
-            feed.stop()
         _open_camera_popup(e, cam_id)
 
 
@@ -2467,7 +2309,7 @@ def render(parent):
         container.pack_propagate(False)
         container.pack(pady=(0, 4))
 
-        lbl = tk.Label(container, text=f"[ {cam_label} ]\n(Click to configure)",
+        lbl = tk.Label(container, text=f"[ {cam_label} ]\n(Click to enlarge)",
                        bg="#1a1a1a", fg="#555", font=("Arial", _fs(10), "bold"), cursor="hand2")
         lbl.pack(fill="both", expand=True)
         container.bind("<Button-1>", lambda e, cid=cam_id: nav_camera(e, cid))

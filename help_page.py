@@ -368,18 +368,14 @@ CHAPTERS = [
     ("p", "Two cameras can be fitted. Each enabled camera is inspected on every "
           "cycle against the one model taught for the part, and both verdicts are "
           "stored with the record as CAM1 and CAM2."),
-    ("h", "Configuring a camera"),
-    ("steps", [
-        "Click the camera panel on the right of the Test Console.",
-        "Pick the device from the dropdown. The preview shows what that camera sees, which is the only reliable way to tell two identical cameras apart.",
-        "The camera always runs at its maximum resolution, shown next to Resolution. There is nothing to choose.",
-        "Optionally map a vision dataset to the part currently loaded.",
-        "Press Save Settings.",
-    ]),
-    ("note", "Closing the dialog without saving restores the live panels. While "
-             "the dialog is open the camera belongs to the preview, so the panels "
-             "behind it pause."),
-    ("p", "Teaching and tuning the models themselves is done on the Vision "
+    ("h", "Viewing and configuring a camera"),
+    ("p", "Click a camera panel on the right of the Test Console to open a large "
+          "live view of that camera. The view is for looking only; nothing can "
+          "be changed from it."),
+    ("p", "Choosing the camera device and flipping the image are done on the "
+          "Vision Settings page. The camera always runs at its maximum "
+          "resolution; there is nothing to choose."),
+    ("p", "Teaching and tuning the models is also done on the Vision "
           "Settings page."),
 ]),
 
