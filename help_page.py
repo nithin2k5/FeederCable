@@ -372,7 +372,7 @@ CHAPTERS = [
     ("steps", [
         "Click the camera panel on the right of the Test Console.",
         "Pick the device from the dropdown. The preview shows what that camera sees, which is the only reliable way to tell two identical cameras apart.",
-        "Pick a resolution. The preview re-opens to match.",
+        "The camera always runs at its maximum resolution, shown next to Resolution. There is nothing to choose.",
         "Optionally map a vision dataset to the part currently loaded.",
         "Press Save Settings.",
     ]),

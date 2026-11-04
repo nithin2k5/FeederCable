@@ -53,9 +53,6 @@ BTN_NEUTRAL = ("#2a2f38", "#3a414d")
 _CAM_CFG_PATH = os.path.join(os.path.dirname(__file__), "camera_cfg.ini")
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), "vision_models")
 
-RESOLUTIONS = [(320, 240), (640, 480), (800, 600), (1280, 720), (1920, 1080)]
-
-
 # ── Camera config (same file and keys test_console reads) ──────────────────────
 
 def _load_cam_cfg() -> dict:
@@ -91,7 +88,8 @@ def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool
 
 
 def _probe_cameras(max_index: int = 6):
-    """Indices that open *and* deliver a frame, with their native resolution.
+    """Indices that open *and* deliver a frame, with their maximum resolution
+    (cameras always run at it -- there is no resolution setting).
 
     A device that opens but never yields a frame is worse than no device at all —
     it looks configured and then fails mid-cycle — so opening is not enough to
@@ -100,18 +98,16 @@ def _probe_cameras(max_index: int = 6):
     found = []
     if not _cv2_ok:
         return found
+    from vision_engine import camera
     for i in range(max_index):
         cap = None
         try:
             cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
             if cap.isOpened():
                 ret, _ = cap.read()
-                if ret:
-                    found.append({
-                        "index": i,
-                        "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640,
-                        "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480,
-                    })
+                size = camera.max_resolution(cap) if ret else None
+                if size:
+                    found.append({"index": i, "width": size[0], "height": size[1]})
         except Exception:
             pass
         finally:
@@ -3106,17 +3102,9 @@ def _open_camera_dialog(parent):
                            values=["Scanning…"], font=("Arial", 11))
     cmb_dev.pack(fill="x", pady=(3, 10))
 
-    tk.Label(cb_body, text="Resolution", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
-             anchor="w").pack(fill="x")
-    res_var = tk.StringVar()
-    cmb_res = ttk.Combobox(cb_body, textvariable=res_var, state="readonly",
-                           values=["%dx%d" % r for r in RESOLUTIONS],
-                           font=("Arial", 11))
-    cmb_res.pack(fill="x", pady=(3, 10))
-    res_var.set("%dx%d" % (cam["width"], cam["height"]))
-
-    tk.Label(cb_body, text="Reference images are captured at this resolution and "
-                           "must keep matching it, so changing it later means "
+    tk.Label(cb_body, text="The camera always runs at its maximum resolution "
+                           "(shown next to it above). Reference images are "
+                           "captured at it, so a different camera means "
                            "re-teaching every part.",
              bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
              justify="left", anchor="w").pack(fill="x")
@@ -3158,12 +3146,16 @@ def _open_camera_dialog(parent):
             stream["s"] = None
             stream["index"] = None
 
-    def _selected_index():
+    def _selected():
         label = dev_var.get()
         for c in found["cams"]:
             if label == "Camera %d  (%dx%d)" % (c["index"], c["width"], c["height"]):
-                return c["index"]
-        return -1
+                return c
+        return None
+
+    def _selected_index():
+        c = _selected()
+        return c["index"] if c else -1
 
     def _apply_flip():
         """Show the flip on the preview straight away. Only Save writes it; any
@@ -3179,7 +3171,8 @@ def _open_camera_dialog(parent):
             preview.set_placeholder("Camera disabled — vision will not run.")
             status.config(text="Vision inspection needs a camera.", fg=WARN)
             return
-        w, h = [int(v) for v in res_var.get().split("x")]
+        c = _selected()
+        w, h = c["width"], c["height"]
         preview.set_placeholder("Opening camera %d…" % idx)
         status.config(text="", fg=TXT_DIM)
         stream["s"] = camera.acquire(idx, w, h)
@@ -3187,7 +3180,6 @@ def _open_camera_dialog(parent):
         _apply_flip()
 
     cmb_dev.bind("<<ComboboxSelected>>", _on_device_change)
-    cmb_res.bind("<<ComboboxSelected>>", _on_device_change)
 
     def _scan():
         _stop_stream()
@@ -3253,8 +3245,10 @@ def _open_camera_dialog(parent):
             pass
 
     def _save():
-        idx = _selected_index()
-        w, h = [int(v) for v in res_var.get().split("x")]
+        c = _selected()
+        idx = c["index"] if c else -1
+        # A disabled camera keeps the size it had.
+        w, h = (c["width"], c["height"]) if c else (cam["width"], cam["height"])
         if idx >= 0 and stream["s"] is not None and stream["s"].latest() is None:
             if not messagebox.askyesno(
                     "No Preview",

@@ -2232,26 +2232,33 @@ def render(parent):
                 cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
                 if cap.isOpened():
                     ret, _ = cap.read()
-                    if ret:
-                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        cameras.append({"index": i, "name": f"Camera {i}", "width": w, "height": h})
+                    # Resolution is not a setting: every camera runs at the
+                    # largest mode it has, found here per device.
+                    size = camera.max_resolution(cap) if ret else None
+                    if size:
+                        cameras.append({"index": i, "name": f"Camera {i}", "width": size[0], "height": size[1]})
                     cap.release()
         except:
             cameras = []
-            
+
         cam_options = ["Disabled"] + [f"{c['name']} (index {c['index']})" for c in cameras]
         cam_indices = [-1] + [c["index"] for c in cameras]
-        
-        resolutions = [("320x240", 320, 240), ("640x480", 640, 480), ("800x600", 800, 600), ("1280x720", 1280, 720)]
-        res_options = [r[0] for r in resolutions]
+        cam_sizes = [None] + [(c["width"], c["height"]) for c in cameras]
+
+        # Settings on the left, a large preview on the right: side by side
+        # the dialog stays short enough for the line PC's screen.
+        _LBL = {"bg": "#222", "fg": "white", "font": ("Arial", _fs(11))}
+        left = tk.Frame(dlg, bg="#222")
+        left.pack(side="left", fill="y", padx=(12, 6), pady=10)
+        right = tk.Frame(dlg, bg="#222")
+        right.pack(side="left", fill="both", expand=True, padx=(6, 12), pady=10)
 
         # Camera Config
-        lf = tk.LabelFrame(dlg, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
-        lf.pack(fill="x", padx=10, pady=5)
-        
-        tk.Label(lf, text="Device:", bg="#222", fg="white").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        cmb_c = ttk.Combobox(lf, values=cam_options, state="readonly", width=25)
+        lf = tk.LabelFrame(left, text=f"Camera {cam_id}", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
+        lf.pack(fill="x", pady=5)
+
+        tk.Label(lf, text="Device:", **_LBL).grid(row=0, column=0, padx=6, pady=6, sticky="w")
+        cmb_c = ttk.Combobox(lf, values=cam_options, state="readonly", width=28, font=("Arial", _fs(10)))
         
         c_idx_key = f"cam{cam_id}_index"
         c_en_key = f"cam{cam_id}_enabled"
@@ -2260,46 +2267,42 @@ def render(parent):
         except ValueError:
             c_idx = 0
         cmb_c.current(c_idx)
-        cmb_c.grid(row=0, column=1, padx=5, pady=5)
+        cmb_c.grid(row=0, column=1, padx=6, pady=6)
 
-        tk.Label(lf, text="Resolution:", bg="#222", fg="white").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        cmb_r = ttk.Combobox(lf, values=res_options, state="readonly", width=25)
-        try:
-            w_key, h_key = f"cam{cam_id}_width", f"cam{cam_id}_height"
-            r_idx = res_options.index(f"{cfg[w_key]}x{cfg[h_key]}")
-        except ValueError:
-            r_idx = 1
-        cmb_r.current(r_idx)
-        cmb_r.grid(row=1, column=1, padx=5, pady=5)
+        # Read-only: the camera always runs at its maximum resolution.
+        tk.Label(lf, text="Resolution:", **_LBL).grid(row=1, column=0, padx=6, pady=6, sticky="w")
+        res_lbl = tk.Label(lf, text="—", bg="#222", fg="#e8a000", font=("Consolas", _fs(11), "bold"), anchor="w")
+        res_lbl.grid(row=1, column=1, padx=6, pady=6, sticky="w")
 
         # For a camera mounted upside down or seeing the part mirrored. Applied in vision_engine.camera, so
         # the preview, both panels, teaching and the vision check all see it.
         flip_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_flip"])
         tk.Checkbutton(lf, text="Flip image top to bottom", variable=flip_var,
                        bg="#222", fg="white", selectcolor="#111", activebackground="#222",
-                       activeforeground="white", font=("Arial", _fs(10)),
+                       activeforeground="white", font=("Arial", _fs(11)),
                        command=lambda: _apply_flip()).grid(row=2, column=0, columnspan=2,
-                                                          padx=5, pady=(5, 0), sticky="w")
+                                                          padx=6, pady=(6, 0), sticky="w")
         mirror_var = tk.BooleanVar(value=cfg[f"cam{cam_id}_mirror"])
         tk.Checkbutton(lf, text="Flip image left to right", variable=mirror_var,
                        bg="#222", fg="white", selectcolor="#111", activebackground="#222",
-                       activeforeground="white", font=("Arial", _fs(10)),
+                       activeforeground="white", font=("Arial", _fs(11)),
                        command=lambda: _apply_flip()).grid(row=3, column=0, columnspan=2,
-                                                          padx=5, sticky="w")
+                                                          padx=6, sticky="w")
         tk.Label(lf, text="Parts taught before changing these must be re-taught.",
                  bg="#222", fg="#888", font=("Arial", _fs(9))).grid(
-                     row=4, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="w")
+                     row=4, column=0, columnspan=2, padx=6, pady=(0, 6), sticky="w")
 
         # Live preview. Choosing between "Camera 0" and "Camera 1" from a
         # dropdown is guesswork on a rig with two identical USB cameras --
-        # the picture is the only thing that says which one is which.
-        _PREV_W, _PREV_H = 320, 240
-        lf2 = tk.LabelFrame(dlg, text="Preview", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
-        lf2.pack(fill="x", padx=10, pady=5)
-        prev_box = tk.Frame(lf2, bg="#111", width=_PREV_W, height=_PREV_H, bd=1, relief="solid")
+        # the picture is the only thing that says which one is which. Its
+        # height follows the camera's aspect so the picture is not squashed.
+        _PREV_W = _px(560)
+        lf2 = tk.LabelFrame(right, text="Preview", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
+        lf2.pack(fill="both", expand=True, pady=5)
+        prev_box = tk.Frame(lf2, bg="#111", width=_PREV_W, height=_PREV_W * 3 // 4, bd=1, relief="solid")
         prev_box.pack_propagate(False)
-        prev_box.pack(padx=6, pady=6)
-        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", _fs(10)))
+        prev_box.pack(padx=8, pady=8)
+        prev_lbl = tk.Label(prev_box, text="—", bg="#111", fg="#666", font=("Arial", _fs(11)))
         prev_lbl.pack(fill="both", expand=True)
 
         preview = {"feed": None}
@@ -2317,28 +2320,31 @@ def render(parent):
                 camera.preview_flip(cam_indices[d_sel], flip_var.get(), mirror_var.get())
 
         def _start_preview(*_a):
-            """(Re)open the preview for whatever the two dropdowns now say."""
+            """(Re)open the preview for whatever the device dropdown now says."""
             _stop_preview()
             prev_lbl.config(image="", text="", fg="#666"); prev_lbl.image = None
-            d_sel, r_sel = cmb_c.current(), cmb_r.current()
+            d_sel = cmb_c.current()
             idx = cam_indices[d_sel] if d_sel > 0 else -1
             if idx < 0:
+                res_lbl.config(text="—")
                 prev_lbl.config(text="Camera disabled"); return
+            w, h = cam_sizes[d_sel]
+            res_lbl.config(text=f"{w} x {h}  (maximum)")
+            prev_h = max(1, round(_PREV_W * h / w))
+            prev_box.config(height=prev_h)
             if not (_cv2_ok and _pil_ok):
                 prev_lbl.config(text="Preview unavailable\n(OpenCV or Pillow missing)", fg="#ff9800"); return
-            w, h = resolutions[r_sel][1], resolutions[r_sel][2]
             prev_lbl.config(text="Opening camera…", fg="#e8a000")
-            feed = CameraFeed(prev_lbl, idx, display_w=_PREV_W, display_h=_PREV_H, width=w, height=h)
+            feed = CameraFeed(prev_lbl, idx, display_w=_PREV_W, display_h=prev_h, width=w, height=h)
             preview["feed"] = feed
             _apply_flip()
             feed.start()
 
         cmb_c.bind("<<ComboboxSelected>>", _start_preview)
-        cmb_r.bind("<<ComboboxSelected>>", _start_preview)
 
         # Active Dataset config (vision_config.json)
-        lf3 = tk.LabelFrame(dlg, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", _fs(10), "bold"))
-        lf3.pack(fill="x", padx=10, pady=5)
+        lf3 = tk.LabelFrame(left, text="Active Vision Dataset (Current Part)", bg="#222", fg="#e8a000", font=("Arial", _fs(11), "bold"))
+        lf3.pack(fill="x", pady=5)
         
         from vision_engine.vision_controller import load_vision_config, save_vision_config
         v_cfg = load_vision_config()
@@ -2348,10 +2354,10 @@ def render(parent):
         models_dir = os.path.join(os.path.dirname(__file__), "vision_models")
         datasets = [os.path.basename(f) for f in glob.glob(os.path.join(models_dir, "*.npz"))]
         
-        tk.Label(lf3, text=f"Part: {current_part if current_part else 'None Loaded'}", bg="#222", fg="white").grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w")
-        
-        tk.Label(lf3, text="Dataset:", bg="#222", fg="white").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        cmb_dataset = ttk.Combobox(lf3, values=["(None)"] + datasets, state="readonly", width=25)
+        tk.Label(lf3, text=f"Part: {current_part if current_part else 'None Loaded'}", **_LBL).grid(row=0, column=0, columnspan=2, padx=6, pady=6, sticky="w")
+
+        tk.Label(lf3, text="Dataset:", **_LBL).grid(row=1, column=0, padx=6, pady=6, sticky="w")
+        cmb_dataset = ttk.Combobox(lf3, values=["(None)"] + datasets, state="readonly", width=28, font=("Arial", _fs(10)))
         
         current_mapped = v_cfg.get("part_mapping", {}).get(current_part)
         if current_mapped in datasets:
@@ -2363,13 +2369,14 @@ def render(parent):
 
         def _save():
             d_sel = cmb_c.current()
-            r_sel = cmb_r.current()
-            
-            # Update only this camera's settings
+
+            # Update only this camera's settings. Width/height are the
+            # device's maximum, measured when the dialog scanned it; a
+            # disabled camera keeps whatever it had.
             cfg[f"cam{cam_id}_index"] = cam_indices[d_sel] if d_sel > 0 else -1
             cfg[f"cam{cam_id}_enabled"] = d_sel > 0
-            cfg[f"cam{cam_id}_width"] = resolutions[r_sel][1]
-            cfg[f"cam{cam_id}_height"] = resolutions[r_sel][2]
+            if d_sel > 0:
+                cfg[f"cam{cam_id}_width"], cfg[f"cam{cam_id}_height"] = cam_sizes[d_sel]
             cfg[f"cam{cam_id}_flip"] = flip_var.get()
             cfg[f"cam{cam_id}_mirror"] = mirror_var.get()
             
@@ -2399,7 +2406,7 @@ def render(parent):
             try: parent.winfo_toplevel().event_generate("<<NavigateHome>>")
             except: pass
 
-        tk.Button(dlg, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", _fs(11), "bold"), bd=0, padx=20, pady=8, command=_save).pack(pady=15)
+        tk.Button(left, text="Save Settings", bg="#1b5e20", fg="white", font=("Arial", _fs(12), "bold"), bd=0, padx=24, pady=10, command=_save).pack(side="bottom", fill="x", pady=(15, 5))
 
         def _close(_e=None):
             """Dismissed without saving. nav_camera stopped the page's own

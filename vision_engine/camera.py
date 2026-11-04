@@ -40,6 +40,26 @@ _FLIP_PREVIEW: dict = {}
 # (vertical, horizontal) -> cv2.flip code.
 _FLIP_CODES = {(True, False): 0, (False, True): 1, (True, True): -1}
 
+# Cameras always run at the largest size they support -- there is no setting
+# for it. DirectShow snaps an oversized request to the nearest mode it has,
+# which for a request this big is the camera's largest one.
+_MAX_REQUEST = 10000
+
+
+def max_resolution(cap) -> Optional[tuple]:
+    """(width, height) of the largest mode an open cv2.VideoCapture supports.
+
+    Switches `cap` to that mode as a side effect. Measured from a real frame
+    rather than CAP_PROP_*, which some drivers report before the switch has
+    actually taken. None if the camera stops delivering frames.
+    """
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, _MAX_REQUEST)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _MAX_REQUEST)
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        return None
+    return int(frame.shape[1]), int(frame.shape[0])
+
 
 def _flipped(index: int) -> tuple:
     return _FLIP_PREVIEW.get(index, _FLIP.get(index, _NO_FLIP))
