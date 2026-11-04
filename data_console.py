@@ -312,7 +312,9 @@ def render(parent):
 
     for ent in (ent_start, ent_end):
         ent.config(state="readonly", readonlybackground=PANEL, cursor="hand2")
-        ent.bind("<Button-1>", lambda e, w=ent: _show_cal(w))
+        # "break" stops Entry's own click binding, which would take focus back
+        # from the popup and so close it the moment it opened.
+        ent.bind("<Button-1>", lambda e, w=ent: (_show_cal(w), "break")[1])
 
     _fill_dates(datetime.date.today() - datetime.timedelta(days=7), datetime.date.today())
 
