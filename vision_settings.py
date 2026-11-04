@@ -55,34 +55,38 @@ _MODELS_DIR = os.path.join(os.path.dirname(__file__), "vision_models")
 
 # ── Camera config (same file and keys test_console reads) ──────────────────────
 
-def _load_cam_cfg() -> dict:
+def _load_cam_cfg(cam_id: int = 1) -> dict:
+    """camN_* settings for camera slot `cam_id` (1 or 2)."""
     import configparser
     cfg = configparser.ConfigParser()
     cfg.read(_CAM_CFG_PATH)
+    k = "cam%d_" % cam_id
     return {
-        "index":   cfg.getint("CAMERA", "cam1_index", fallback=-1),
-        "width":   cfg.getint("CAMERA", "cam1_width", fallback=640),
-        "height":  cfg.getint("CAMERA", "cam1_height", fallback=480),
-        "enabled": cfg.getboolean("CAMERA", "cam1_enabled", fallback=False),
-        "flip":    cfg.getboolean("CAMERA", "cam1_flip", fallback=False),
-        "mirror":  cfg.getboolean("CAMERA", "cam1_mirror", fallback=False),
+        "index":   cfg.getint("CAMERA", k + "index", fallback=-1),
+        "width":   cfg.getint("CAMERA", k + "width", fallback=640),
+        "height":  cfg.getint("CAMERA", k + "height", fallback=480),
+        "enabled": cfg.getboolean("CAMERA", k + "enabled", fallback=False),
+        "flip":    cfg.getboolean("CAMERA", k + "flip", fallback=False),
+        "mirror":  cfg.getboolean("CAMERA", k + "mirror", fallback=False),
     }
 
 
 def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool = False,
-                  mirror: bool = False):
-    """Update cam1_* in place, leaving cam2_* and any other keys untouched."""
+                  mirror: bool = False, cam_id: int = 1):
+    """Update camN_* for slot `cam_id` in place, leaving the other slot and
+    any other keys untouched."""
     import configparser
     cfg = configparser.ConfigParser()
     cfg.read(_CAM_CFG_PATH)
     if not cfg.has_section("CAMERA"):
         cfg.add_section("CAMERA")
-    cfg.set("CAMERA", "cam1_index", str(index))
-    cfg.set("CAMERA", "cam1_width", str(width))
-    cfg.set("CAMERA", "cam1_height", str(height))
-    cfg.set("CAMERA", "cam1_enabled", str(bool(enabled)))
-    cfg.set("CAMERA", "cam1_flip", str(bool(flip)))
-    cfg.set("CAMERA", "cam1_mirror", str(bool(mirror)))
+    k = "cam%d_" % cam_id
+    cfg.set("CAMERA", k + "index", str(index))
+    cfg.set("CAMERA", k + "width", str(width))
+    cfg.set("CAMERA", k + "height", str(height))
+    cfg.set("CAMERA", k + "enabled", str(bool(enabled)))
+    cfg.set("CAMERA", k + "flip", str(bool(flip)))
+    cfg.set("CAMERA", k + "mirror", str(bool(mirror)))
     with open(_CAM_CFG_PATH, "w") as f:
         cfg.write(f)
 
@@ -821,6 +825,7 @@ def render(parent):
     cam_device = _kv_row(cb, "Device", "—", mono=True)
     cam_res = _kv_row(cb, "Resolution", "—", mono=True)
     cam_state = _kv_row(cb, "State", "Checking…", value_fg=TXT_DIM)
+    cam2_row = _kv_row(cb, "Camera 2", "—", mono=True)
 
     cam_btns = tk.Frame(cb, bg=PANEL)
     cam_btns.pack(fill="x", pady=(10, 0))
@@ -846,6 +851,11 @@ def render(parent):
         cam_res.config(text="  ·  ".join(["%d x %d" % (w, h)] + flips)
                        if configured else "—",
                        fg=TXT if configured else TXT_FAINT)
+        cam2 = _load_cam_cfg(2)
+        on2 = cam2["enabled"] and cam2["index"] >= 0
+        cam2_row.config(text=("Camera %d  ·  %d x %d" % (cam2["index"], cam2["width"], cam2["height"]))
+                        if on2 else "Not configured",
+                        fg=TXT if on2 else TXT_FAINT)
 
         if not _cv2_ok:
             _paint_camera("OpenCV missing", NG_RED)
@@ -3047,17 +3057,20 @@ def _prompt_part_number(parent, title, prompt, taken=()):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _open_camera_dialog(parent):
-    """Pick and verify the inspection camera. Returns True if the config changed."""
+    """Pick and verify the inspection cameras (slot 1 and slot 2). Returns
+    True if the config changed."""
     if not _cv2_ok or not _pil_ok:
         messagebox.showerror("Camera", "OpenCV and Pillow are required.", parent=parent)
         return False
 
     from vision_engine import camera
 
-    cam = _load_cam_cfg()
+    slot = {"id": 1}
+    cam = _load_cam_cfg(1)
     win = _dialog(parent, "Camera Configuration", 780, 700)
-    _dialog_header(win, "Inspection Camera",
-                   "The preview is the exact feed inspection will use.")
+    _dialog_header(win, "Inspection Cameras",
+                   "Pick Camera 1 or Camera 2, then its device. The preview is "
+                   "the exact feed inspection will use.")
 
     # Footer packed before the body so it keeps its height: packed after, it
     # got whatever the body left and the buttons fell off the bottom.
@@ -3095,7 +3108,26 @@ def _open_camera_dialog(parent):
     card.pack(fill="x")
     cb_body = card.body
 
-    tk.Label(cb_body, text="Camera", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
+    # Which of the two camera slots is being set up. Each slot is saved on
+    # its own; switching loads that slot's saved settings.
+    slot_row = tk.Frame(cb_body, bg=PANEL)
+    slot_row.pack(fill="x", pady=(0, 10))
+    slot_btns = {}
+    for sid in (1, 2):
+        b = tk.Button(slot_row, text="Camera %d" % sid, font=("Arial", 11, "bold"),
+                      bd=0, pady=5, cursor="hand2",
+                      command=lambda s_=sid: _switch_slot(s_))
+        b.pack(side="left", fill="x", expand=True, padx=(0, 4) if sid == 1 else (4, 0))
+        slot_btns[sid] = b
+
+    def _paint_slots():
+        for sid, b in slot_btns.items():
+            on = sid == slot["id"]
+            bg = BTN_PRIMARY[0] if on else BTN_NEUTRAL[0]
+            b.config(bg=bg, fg="white", activebackground=bg, activeforeground="white")
+    _paint_slots()
+
+    tk.Label(cb_body, text="Device", bg=PANEL, fg=TXT_DIM, font=("Arial", 11),
              anchor="w").pack(fill="x")
     dev_var = tk.StringVar()
     cmb_dev = ttk.Combobox(cb_body, textvariable=dev_var, state="readonly",
@@ -3181,6 +3213,28 @@ def _open_camera_dialog(parent):
 
     cmb_dev.bind("<<ComboboxSelected>>", _on_device_change)
 
+    def _device_label_for(c):
+        if c["enabled"] and c["index"] >= 0:
+            for f in found["cams"]:
+                if f["index"] == c["index"]:
+                    return "Camera %d  (%dx%d)" % (f["index"], f["width"], f["height"])
+        return DISABLED
+
+    def _switch_slot(sid):
+        if sid == slot["id"]:
+            return
+        # Unsaved flips previewed for the other slot are dropped with it.
+        camera.end_flip_preview()
+        slot["id"] = sid
+        cam.clear()
+        cam.update(_load_cam_cfg(sid))
+        flip_var.set(cam["flip"])
+        mirror_var.set(cam["mirror"])
+        _paint_slots()
+        if found["cams"]:
+            dev_var.set(_device_label_for(cam))
+            _on_device_change()
+
     def _scan():
         _stop_stream()
         preview.set_image(None)
@@ -3255,7 +3309,16 @@ def _open_camera_dialog(parent):
                     "No frames have arrived from camera %d yet.\n\nSave anyway?" % idx,
                     parent=win):
                 return
-        _save_cam_cfg(idx, w, h, idx >= 0, flip_var.get(), mirror_var.get())
+        other = _load_cam_cfg(2 if slot["id"] == 1 else 1)
+        if idx >= 0 and other["enabled"] and other["index"] == idx:
+            if not messagebox.askyesno(
+                    "Same Device",
+                    "Camera %d already uses this device (index %d).\n\n"
+                    "Use it for Camera %d as well?" % (2 if slot["id"] == 1 else 1, idx, slot["id"]),
+                    parent=win):
+                return
+        _save_cam_cfg(idx, w, h, idx >= 0, flip_var.get(), mirror_var.get(),
+                      cam_id=slot["id"])
         changed["v"] = True
         _close()
 

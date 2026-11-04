@@ -373,7 +373,9 @@ CHAPTERS = [
           "live view of that camera. The view is for looking only; nothing can "
           "be changed from it."),
     ("p", "Choosing the camera device and flipping the image are done on the "
-          "Vision Settings page. The camera always runs at its maximum "
+          "Vision Settings page: press Configure… on the Camera card, pick "
+          "Camera 1 or Camera 2 at the top, choose its device and press Save. "
+          "Each camera is saved on its own. Cameras always run at their maximum "
           "resolution; there is nothing to choose."),
     ("p", "Teaching and tuning the models is also done on the Vision "
           "Settings page."),
