@@ -91,6 +91,14 @@ def _save_cam_cfg(index: int, width: int, height: int, enabled: bool, flip: bool
         cfg.write(f)
 
 
+def _for_vision(frame):
+    """A camera or imported frame at the size vision is taught and judged at
+    (vision_engine.camera.VISION_WIDTH). Every frame teaching sees goes
+    through this, so references, drawn boxes and inspection share one scale."""
+    from vision_engine import camera
+    return camera.for_vision(frame)
+
+
 def _probe_cameras(max_index: int = 6):
     """Indices that open *and* deliver a frame, with their maximum resolution
     (cameras always run at it -- there is no resolution setting).
@@ -1805,7 +1813,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
         s = stream["s"]
         if s is None:
             return
-        frame = s.latest() if live["on"] else s.read(timeout=3.0)
+        frame = _for_vision(s.latest() if live["on"] else s.read(timeout=3.0))
         if frame is None:
             messagebox.showwarning("Capture", "No frame from the camera yet.",
                                    parent=win)
@@ -1827,7 +1835,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
             return
         skipped = []
         for p in paths:
-            img = cv2.imread(p)
+            img = _for_vision(cv2.imread(p))
             if img is None:
                 skipped.append((os.path.basename(p), "unreadable"))
                 continue
@@ -2004,7 +2012,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
             return
         s = stream["s"]
         if live["on"] and s is not None:
-            frame = s.latest()
+            frame = _for_vision(s.latest())
             if frame is not None:
                 view.set_image(frame)
             elif not s.is_alive():
@@ -2421,7 +2429,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
         s = stream["s"]
         if s is None:
             return
-        frame = s.latest() if live["on"] else s.read(timeout=3.0)
+        frame = _for_vision(s.latest() if live["on"] else s.read(timeout=3.0))
         if frame is None:
             messagebox.showwarning("Capture", "No frame from the camera yet.", parent=win)
             return
@@ -2434,7 +2442,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
             filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
         if not path:
             return
-        img = cv2.imread(path)
+        img = _for_vision(cv2.imread(path))
         if img is None:
             messagebox.showerror("Import", "Could not read that image file.", parent=win)
             return
@@ -2550,7 +2558,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
             return
         s = stream["s"]
         if live["on"] and s is not None:
-            frame = s.latest()
+            frame = _for_vision(s.latest())
             if frame is not None:
                 _set_frame(frame)
             elif not s.is_alive():
@@ -2877,7 +2885,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
             filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
         if not path:
             return
-        img = cv2.imread(path)
+        img = _for_vision(cv2.imread(path))
         if img is None:
             messagebox.showerror("Test Image", "Could not read that image file.", parent=win)
             return
@@ -3134,10 +3142,10 @@ def _open_camera_dialog(parent):
                            values=["Scanning…"], font=("Arial", 11))
     cmb_dev.pack(fill="x", pady=(3, 10))
 
-    tk.Label(cb_body, text="The camera always runs at its maximum resolution "
-                           "(shown next to it above). Reference images are "
-                           "captured at it, so a different camera means "
-                           "re-teaching every part.",
+    tk.Label(cb_body, text="The camera always runs at its maximum resolution, "
+                           "up to 1280 x 720 (shown next to it above). Vision "
+                           "works on a 640-wide copy, so a camera with a "
+                           "different shape means re-teaching every part.",
              bg=PANEL, fg=TXT_FAINT, font=("Arial", 10), wraplength=215,
              justify="left", anchor="w").pack(fill="x")
 

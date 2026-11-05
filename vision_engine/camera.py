@@ -40,14 +40,25 @@ _FLIP_PREVIEW: dict = {}
 # (vertical, horizontal) -> cv2.flip code.
 _FLIP_CODES = {(True, False): 0, (False, True): 1, (True, True): -1}
 
-# Cameras always run at the largest size they support -- there is no setting
-# for it. DirectShow snaps an oversized request to the nearest mode it has,
-# which for a request this big is the camera's largest one.
+# Cameras run at the largest size they support, up to CAMERA_CAP -- there is
+# no setting for it. DirectShow snaps an oversized request to the nearest mode
+# it has, which for a request this big is the camera's largest one. The cap
+# keeps a multi-megapixel camera from streaming frames nobody needs: the live
+# views are smaller than this, and vision works on a reduced copy anyway.
 _MAX_REQUEST = 10000
+CAMERA_CAP = (1280, 720)
+
+# Vision (teaching and inspection) works on frames no wider than this. Template
+# matching costs grow with the pixel count, so inspecting a full 1280x720 frame
+# took twice as long as 640x480 and a 5 MP camera took ~15x as long -- the
+# cycle's vision step went from 1-2 s to 10-15 s. Teaching uses the same
+# reduced frames, so references and inspected frames always share one scale.
+VISION_WIDTH = 640
 
 
 def max_resolution(cap) -> Optional[tuple]:
-    """(width, height) of the largest mode an open cv2.VideoCapture supports.
+    """(width, height) of the largest mode an open cv2.VideoCapture supports,
+    capped at CAMERA_CAP.
 
     Switches `cap` to that mode as a side effect. Measured from a real frame
     rather than CAP_PROP_*, which some drivers report before the switch has
@@ -58,7 +69,27 @@ def max_resolution(cap) -> Optional[tuple]:
     ret, frame = cap.read()
     if not ret or frame is None:
         return None
-    return int(frame.shape[1]), int(frame.shape[0])
+    w, h = int(frame.shape[1]), int(frame.shape[0])
+    if w > CAMERA_CAP[0] or h > CAMERA_CAP[1]:
+        # Larger than the cap: ask for the cap and take the mode the driver
+        # snaps to (the nearest one it has).
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_CAP[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_CAP[1])
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
+        w, h = int(frame.shape[1]), int(frame.shape[0])
+    return w, h
+
+
+def for_vision(frame: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    """`frame` reduced to VISION_WIDTH wide (aspect kept) for teaching and
+    inspection. Frames already that narrow come back unchanged, so applying
+    it twice is harmless and a 640x480 camera behaves exactly as before."""
+    if frame is None or frame.shape[1] <= VISION_WIDTH:
+        return frame
+    h = max(1, round(frame.shape[0] * VISION_WIDTH / frame.shape[1]))
+    return cv2.resize(frame, (VISION_WIDTH, h), interpolation=cv2.INTER_AREA)
 
 
 def _flipped(index: int) -> tuple:

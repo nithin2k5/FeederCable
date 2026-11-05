@@ -420,6 +420,7 @@ class VisionController:
         profile = profile or self.wire_profile(part_number)
         if not profile:
             return None
+        frame = camera.for_vision(frame)
         cfg = self._wire_engine_config(part_number, profile)
         result = wire_engine.inspect(frame, cfg, part_number)
 
@@ -519,6 +520,9 @@ class VisionController:
             frame = self._capture_frame()
             if frame is None:
                 return _error("Camera not available")
+        # Judged at the reduced vision size, the size every part is taught at
+        # (see camera.VISION_WIDTH) -- a no-op for frames already that small.
+        frame = camera.for_vision(frame)
 
         # ── 1. Wire colours ─────────────────────────────────────────────────
         wires, wires_ok = None, None
