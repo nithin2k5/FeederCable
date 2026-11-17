@@ -106,6 +106,7 @@ class App:
         
         # Start on the default page
         self.load_page('test_console')
+        self._nav_lock_tick()
 
     def on_closing(self):
         # Not mid-test: the PLC reset below would cut the channels under it.
@@ -238,16 +239,42 @@ class App:
         is cancelled leaves the highlight where it was rather than moving it
         to a page the operator never reached.
         """
+        self._active_page = page_name
+        self._paint_nav()
+
+    # Tiles other than the current page, while the Test Console cannot be left:
+    # dimmed, with the arrow cursor, so they read as unavailable before anyone
+    # clicks one. A click still lands, and says why.
+    _NAV_LOCKED = ("#111", "#444", "#222")
+
+    def _paint_nav(self):
+        locked = getattr(self, "_nav_locked", False)
+        active = getattr(self, "_active_page", None)
         for page, widgets in getattr(self, "nav_tiles", {}).items():
-            bg, fg, border = self._NAV_ACTIVE if page == page_name else self._NAV_IDLE
+            if page == active:
+                (bg, fg, border), cursor = self._NAV_ACTIVE, "hand2"
+            elif locked:
+                (bg, fg, border), cursor = self._NAV_LOCKED, "arrow"
+            else:
+                (bg, fg, border), cursor = self._NAV_IDLE, "hand2"
             frame, inner, icon, text = widgets
             try:
-                frame.config(bg=bg, highlightbackground=border)
-                inner.config(bg=bg)
-                icon.config(bg=bg, fg=fg)
-                text.config(bg=bg, fg=fg)
+                frame.config(bg=bg, highlightbackground=border, cursor=cursor)
+                inner.config(bg=bg, cursor=cursor)
+                icon.config(bg=bg, fg=fg, cursor=cursor)
+                text.config(bg=bg, fg=fg, cursor=cursor)
             except Exception:
                 pass
+
+    def _nav_lock_tick(self):
+        """Follow the Test Console's state. Polled, because the test runs on
+        its own thread and the page is rebuilt on every visit -- a flag read
+        here needs no hook threaded through either."""
+        locked = bool(test_console.nav_block_reason())
+        if locked != getattr(self, "_nav_locked", False):
+            self._nav_locked = locked
+            self._paint_nav()
+        self.root.after(250, self._nav_lock_tick)
 
     # Pages nobody reaches without a login. Vision Settings is in here
     # because teaching, re-teaching or deleting a model changes what the line
@@ -263,8 +290,11 @@ class App:
     def load_page(self, page_name):
         # Leaving (or reloading) the Test Console mid-test destroys the page
         # under the running test, so every page change waits for it to end.
-        if test_console.test_in_progress():
-            test_console.show_test_in_progress(self.root)
+        # The same wait covers a PASS whose label has not been scanned yet:
+        # rebuilding the page would drop the pending scan.
+        reason = test_console.nav_block_reason()
+        if reason:
+            test_console.show_test_in_progress(self.root, reason)
             return
 
         # Authentication check
