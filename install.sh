@@ -236,7 +236,7 @@ if [ "$DO_BUILD" = 1 ]; then
         mysql.connector.locales.eng.client_error \
         mysql.connector.plugins.mysql_native_password \
         win32print win32timezone \
-        PIL._tkinter_finder
+        PIL._tkinter_finder PIL._webp
     do
         ARGS+=(--hidden-import "$hidden")
     done

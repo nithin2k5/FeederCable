@@ -3390,17 +3390,20 @@ def render(parent):
 
     _VISION_IMG_DIR = os.path.join(os.path.dirname(__file__), "vision_captures")
 
-    # Saved at OpenCV's default the 640x480 pass image is ~64 KB, and a
-    # station writes one per PASS all shift, every shift, for as long as the
-    # records are kept. Quality 80 with an optimized Huffman table halves that
-    # -- ~33 KB -- for 41 dB PSNR against the source frame, which on a boxed
-    # overlay whose whole job is to show where the match was and what it
-    # scored is a difference nobody will see.
+    # A station writes one pass image per PASS, all shift, every shift -- at
+    # 30,000 tests a day that is the bulk of the disk the station uses. WebP
+    # at quality 60 is about half the size of the JPEG (quality 80) it
+    # replaces at the same PSNR to within a dB or so, measured on 640-wide
+    # frames: ~19-25 KB against ~47-50 KB. On a boxed overlay whose whole job
+    # is to show where the match was and what it scored, that difference is
+    # one nobody will see. JPEG stays as the fallback for an OpenCV build
+    # without a WebP encoder, so a save never fails over the format.
+    _VISION_WEBP_QUALITY = 60
     _VISION_JPEG_QUALITY = 80
 
     def _save_vision_pass_image(lot_no: str) -> str:
         """If vision passed on this cycle, save the judged (boxed) frame to
-        vision_captures/<yyyy>/<mm>/<dd>/<lotno>.jpg and return its path,
+        vision_captures/<yyyy>/<mm>/<dd>/<lotno>.webp and return its path,
         else None.
 
         One folder per day, nested under its month and year. A station saves
@@ -3430,9 +3433,15 @@ def render(parent):
             os.makedirs(day_dir, exist_ok=True)
             # An NG part has no lot of its own to name the file after.
             name = lot_no if lot_no != NG_LOT else f"NG_{state['pno']}_{now:%H%M%S%f}"
-            path = os.path.join(day_dir, f"{name}.jpg")
-            cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, _VISION_JPEG_QUALITY,
-                                      cv2.IMWRITE_JPEG_OPTIMIZE, 1])
+            path = os.path.join(day_dir, f"{name}.webp")
+            try:
+                saved = cv2.imwrite(path, frame, [cv2.IMWRITE_WEBP_QUALITY, _VISION_WEBP_QUALITY])
+            except cv2.error:
+                saved = False
+            if not saved:
+                path = os.path.join(day_dir, f"{name}.jpg")
+                cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, _VISION_JPEG_QUALITY,
+                                          cv2.IMWRITE_JPEG_OPTIMIZE, 1])
             _log(f"Vision pass image saved: {path} "
                  f"({os.path.getsize(path) / 1024:.0f} KB)")
             return path

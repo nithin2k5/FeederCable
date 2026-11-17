@@ -1830,7 +1830,7 @@ def _open_teach_wizard(parent, cam, part_number=None):
     def _import():
         paths = filedialog.askopenfilenames(
             parent=win, title="Select Reference Images",
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.webp"), ("All files", "*.*")])
         if not paths:
             return
         skipped = []
@@ -2439,7 +2439,7 @@ def _open_wire_dialog(parent, ctrl, part_number):
     def _import():
         path = filedialog.askopenfilename(
             parent=win, title="Select Image",
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.webp"), ("All files", "*.*")])
         if not path:
             return
         img = _for_vision(cv2.imread(path))
@@ -2882,7 +2882,7 @@ def _open_test_dialog(parent, ctrl, part_number, on_changed=None):
 
         path = filedialog.askopenfilename(
             parent=win, title="Select Test Image",
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")])
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.webp"), ("All files", "*.*")])
         if not path:
             return
         img = _for_vision(cv2.imread(path))
