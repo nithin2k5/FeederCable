@@ -4389,7 +4389,19 @@ def render(parent):
 
     def _on_scan_enter(event=None):
         scanned = ent_scan.get().strip().upper(); checks = state.get("scan_checks") or []
-        if not scanned: return
+        if not scanned:
+            # An Enter with nothing in front of it -- a misread, or the key hit
+            # by hand -- used to be dropped without a word, leaving the operator
+            # waiting on a verdict that was never coming. Only while a label is
+            # actually expected: the box is readonly otherwise and an Enter
+            # there is not a scan.
+            if state.get("awaiting_scan"):
+                _log("Scan verify: empty scan — scan the label again")
+                messagebox.showwarning("Empty Scan",
+                                       "No label data was read.\n\nScan the printed barcode label again.",
+                                       parent=parent.winfo_toplevel())
+                _show_scan_entry()   # focus back on the entry once the popup closes
+            return
         missing = [(name, val) for name, val in checks if not _scan_has(scanned, val)]
         print(f"[SCAN DEBUG] checks={checks!r} scanned={scanned!r} missing={missing!r}")
         # Only a label with the lot in its code can be told apart from the
