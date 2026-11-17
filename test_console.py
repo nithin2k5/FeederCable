@@ -4259,7 +4259,7 @@ def render(parent):
                 _after(0, _show_scan_entry)
             else:
                 _after(0, lambda: _set_scan_box(""))
-                _after(500, _input_poll_start)
+                _after(0, _input_poll_start)
                 _after(3000, _reset_for_next_part)
         else:
             _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
@@ -4269,7 +4269,7 @@ def render(parent):
         # Queued after the restore above, so the gate has the last word.
         if state.get("awaiting_scan"): _after(0, lambda: _set_awaiting_scan(True))
         if _NG_LOCK["on"]: _after(0, _show_ng_lock)
-        if overall == "FAIL": _after(200, _input_poll_start)
+        if overall == "FAIL": _after(0, _input_poll_start)
 
     def _show_scan_entry():
         """Called once a PASS has had time to print. Puts keyboard focus on
@@ -4428,7 +4428,7 @@ def render(parent):
             def _after_dup_ack():
                 _log("Duplicate label accepted by the operator")
                 _set_awaiting_scan(False)
-                _after(500, _reset_for_next_part); _after(600, _input_poll_start)
+                _after(500, _reset_for_next_part); _after(0, _input_poll_start)
             _show_label_ng(state["pno"], state["lot_no"],
                            f"Label already scanned for lot {dup_lot}",
                            _after_dup_ack, duplicate=True)
@@ -4461,7 +4461,7 @@ def render(parent):
             def _after_ack():
                 _log("Label NG accepted by the operator")
                 _set_awaiting_scan(False)
-                _after(500, _reset_for_next_part); _after(600, _input_poll_start)
+                _after(500, _reset_for_next_part); _after(0, _input_poll_start)
             _show_label_ng(state["pno"], state["lot_no"],
                            f"Scan did not match: missing {want}", _after_ack)
             return
@@ -4474,7 +4474,7 @@ def render(parent):
         _log("Label scan OK — starting the next test")
         _trigger_test()
         if not state["test_running"]:
-            _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
+            _after(3000, _reset_for_next_part); _after(0, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     # Gap between poll ticks. A tick is two transactions on an already-open
