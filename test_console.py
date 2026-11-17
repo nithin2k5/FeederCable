@@ -1682,7 +1682,8 @@ def _marker_line(y: int, font: str, mul: int, content: str) -> str:
     line takes the same x instead, which lines them up on the left."""
     return f'TEXT {_MARKER_X},{y},"{font}",180,{mul},{mul},"{content}"'
 
-def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME):
+def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: str = _PRINTER_NAME,
+                        extra: list = None):
     """Print the text-only label that brackets a part's run on the roll.
 
     START goes out when a part finishes loading, END when it is released or
@@ -1692,6 +1693,9 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
 
     MARKER.prn holds the stock setup (size, gap, tear) and the body is
     generated here, because placing each line needs its rendered width.
+
+    extra is further (caption, value) rows under the standard three -- the
+    END label carries the run's tested quantity and its last lot number.
     """
     base = os.path.dirname(__file__)
     prn_file = os.path.join(base, "MARKER.prn")
@@ -1716,7 +1720,7 @@ def _print_marker_label(pno: str, marker: str, machine_id: str, printer_name: st
         ("P/NO",  pno),
         ("D&T",   now.strftime("%d/%m/%y %H:%M")),
         ("MC ID", machine_id),
-    )]
+    ) + tuple(extra or ())]
     # Read top to bottom on the label; with rotation 180 that is y descending.
     rows = [_MARKER_FIRST_ROW_Y - i * _MARKER_ROW_PITCH for i in range(len(fields))]
     body = '\r\n'.join(
@@ -1794,8 +1798,10 @@ def _print_lot_label(pno: str, model: str, alc: str, vendor_code: str, eo_number
 
 # render() publishes a callback here so main.py can close out the loaded
 # part's run when the program exits; None when no Test Console page is live.
-# "busy" is the same idea for navigation: it answers whether a test is running.
-_ACTIVE = {"close_out": None, "busy": None}
+# "busy" is the same idea for closing the program: it answers whether a test is
+# running. "nav_block" is the wider question asked before a page change -- see
+# nav_block_reason.
+_ACTIVE = {"close_out": None, "busy": None, "nav_block": None}
 
 # Set by an overall FAIL, cleared only by NG Reset (M11). Kept here rather than
 # in the page's state so leaving the Test Console and coming back -- which
@@ -1832,11 +1838,30 @@ def test_in_progress() -> bool:
     try: return bool(fn())
     except Exception: return False
 
+def nav_block_reason() -> str:
+    """Why the Test Console cannot be left right now, or "" when it can.
+
+    Wider than test_in_progress: a PASS waiting for its label scan is part of
+    the same cycle. Leaving the page then rebuilds it from nothing, which
+    drops the pending scan -- the label goes on the part never verified.
+    """
+    fn = _ACTIVE.get("nav_block")
+    if fn is None: return ""
+    try: return fn() or ""
+    except Exception: return ""
+
 _BUSY_POPUP = {"win": None}
 
-def show_test_in_progress(root):
+# Headline and hint for each reason nav_block_reason gives.
+_BUSY_TEXT = {
+    "test": ("Test is in progress", "Please wait until the test completes."),
+    "scan": ("Scan the printed label", "Scan the label for the part just tested before leaving this page."),
+}
+
+def show_test_in_progress(root, reason: str = "test"):
     """Tell the operator the page cannot be left until the test finishes.
     One at a time: a second click on the sidebar brings the open one forward."""
+    headline, hint = _BUSY_TEXT.get(reason, _BUSY_TEXT["test"])
     dlg = _BUSY_POPUP.get("win")
     try:
         if dlg is not None and dlg.winfo_exists():
@@ -1855,9 +1880,9 @@ def show_test_in_progress(root):
     body.pack(fill="both", expand=True)
     tk.Label(body, text="⏳", bg="#111", fg="#e8a000",
              font=("Arial", _fs(36))).pack()
-    tk.Label(body, text="Test is in progress", bg="#111", fg="white",
+    tk.Label(body, text=headline, bg="#111", fg="white",
              font=("Arial", _fs(20), "bold")).pack(pady=(8, 0))
-    tk.Label(body, text="Please wait until the test completes.", bg="#111", fg="#999",
+    tk.Label(body, text=hint, bg="#111", fg="#999",
              font=("Arial", _fs(12))).pack(pady=(6, 0))
 
     def _ok(_e=None):
@@ -2059,6 +2084,10 @@ def render(parent):
         "last_vision_result": None, "is_rework": False,
         "ct_last": None, "ct_running": False, "batch_no": 0, "batch_ok": 0, "batch_reason": "", "batch_shown": None,
         "cam_results": {1: None, 2: None},
+        # The run is everything tested since the part's START label; its END
+        # label reports it. Not the day's totals in "total"/"ok"/"ng", which
+        # are read back from testmaster and so include earlier runs.
+        "run_tested": 0, "run_last_lot": "",
     }
     plc = DeltaPLC(cfg["io_port"], cfg["io_baud"])
     hipot = HiPotSerial(cfg["hp_port"], cfg["hp_baud"])
@@ -2339,6 +2368,7 @@ def render(parent):
             # the hook -- it does not print an END.
             _ACTIVE["close_out"] = None
             _ACTIVE["busy"] = None
+            _ACTIVE["nav_block"] = None
             _PRINT_LOG["fn"] = None
             for feed in _cam_feeds:
                 feed.stop()
@@ -4234,6 +4264,8 @@ def render(parent):
         if elapsed is not None:
             state["ct_last"] = elapsed
         state["total"] += 1; state["ok" if overall == "PASS" else "ng"] += 1
+        state["run_tested"] += 1
+        if overall == "PASS": state["run_last_lot"] = lot_no
         _after(0, _update_counts)
         # Queued, not called here: this runs on the test thread and the
         # announcement is a modal dialog.
@@ -4817,7 +4849,19 @@ def render(parent):
         mid-flow loading or releasing a part."""
         _log(f"{marker} label -> {pno}")
         threading.Thread(target=_print_marker_label,
-                         args=(pno, marker, cfg["machine_id"]), daemon=True).start()
+                         args=(pno, marker, cfg["machine_id"]),
+                         kwargs={"extra": _end_rows() if marker == "END" else None},
+                         daemon=True).start()
+
+    def _end_rows() -> list:
+        """The END label's own rows: how many parts this run tested, and the
+        lot number of its last good one -- where the run's labels stop on the
+        roll. Read now, before _clear_part_fields resets the run."""
+        return [("QTY", str(state['run_tested'])),
+                ("LOT", state["run_last_lot"] or "-")]
+
+    def _start_run():
+        state.update(run_tested=0, run_last_lot="")
 
     def _close_out_run() -> bool:
         """END for the part still loaded when the program closes. Prints on
@@ -4840,11 +4884,13 @@ def render(parent):
                                   "Close anyway"):
             return False
         _log(f"END label -> {state['pno']} (program closing)")
-        _print_marker_label(state["pno"], "END", cfg["machine_id"])
+        _print_marker_label(state["pno"], "END", cfg["machine_id"], extra=_end_rows())
         state["pno"] = None
         return True
     _ACTIVE["close_out"] = _close_out_run
     _ACTIVE["busy"] = lambda: state["test_running"]
+    _ACTIVE["nav_block"] = lambda: ("test" if state["test_running"]
+                                    else "scan" if state.get("awaiting_scan") else "")
 
     def _clear_part_fields():
         """Reset everything that belongs to one part -- the part/JIG entries,
@@ -5175,6 +5221,7 @@ def render(parent):
             # the shift -- the operator packed and closed that one before they
             # switched away.
             _start_batch(f"part {pno}")
+            _start_run()
             _print_marker("START", pno)
             _announce_part_loaded(pno)
             # Focus goes to Lot Qty rather than START: releasing the last part
