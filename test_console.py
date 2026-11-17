@@ -4454,7 +4454,15 @@ def render(parent):
                            f"Scan did not match: missing {want}", _after_ack)
             return
         _set_awaiting_scan(False)
-        _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
+        # A good scan is also the operator's go for the next part: the label
+        # goes on the finished cable while the next one is already in the jig,
+        # so START is a second step nobody needs. _trigger_test runs every
+        # gate the START button does (employee ID, lot qty, database, clock);
+        # when one of them refuses, the page falls back to waiting for START.
+        _log("Label scan OK — starting the next test")
+        _trigger_test()
+        if not state["test_running"]:
+            _after(3000, _reset_for_next_part); _after(3100, _input_poll_start)
     ent_scan.bind("<Return>", _on_scan_enter)
 
     # Gap between poll ticks. A tick is two transactions on an already-open
