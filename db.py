@@ -53,6 +53,15 @@ def drop_index(table: str, index: str):
         if e.errno != 1091:  # 1091 = ER_CANT_DROP_FIELD_OR_KEY, i.e. already gone
             raise
 
+def ensure_index(table: str, index: str, columns: str):
+    """Add a plain (non-unique) index if it isn't there yet. Idempotent."""
+    try:
+        with get_cursor(commit=True) as cur:
+            cur.execute(f"ALTER TABLE {table} ADD INDEX {index} ({columns})")
+    except mysql.connector.Error as e:
+        if e.errno != 1061:  # 1061 = ER_DUP_KEYNAME, i.e. already added
+            raise
+
 def ensure_unique_index(table: str, index: str, columns: str):
     """Add a UNIQUE index if it isn't there yet. Idempotent.
 

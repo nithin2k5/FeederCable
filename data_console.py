@@ -62,6 +62,69 @@ COL_W = {"SNO": 50, "DATE": 95, "TIME": 80, "CUSTOMER NAME": 125, "MODEL": 95,
 
 PREVIEW_W, PREVIEW_H = 230, 150  # fixed image box -- a predictable, centered thumbnail
 
+# Schema the search depends on, prepared once per run of the app and off the
+# UI thread (see _prepare_schema).
+_schema = {"ready": False, "lock": threading.Lock()}
+
+def _prepare_schema():
+    """Make sure the columns and indexes the search needs are there.
+
+    The indexes are what keep the page usable on a station with history.
+    Without them every search read the whole of testresult once for every
+    test in the date range -- minutes on a few months of production, with
+    the window "Not responding" the whole time. Adding one to a large table
+    takes a while the first time, so this runs on the search thread, once.
+    """
+    with _schema["lock"]:
+        if _schema["ready"]:
+            return
+        # The search reads scanvalue, which a DB predating it lacks until the
+        # Test Console adds it -- so add it here too in case this page is
+        # opened first.
+        for step in (lambda: db.ensure_column("testmaster", "scanvalue", "VARCHAR(255)"),
+                     lambda: db.ensure_index("testmaster", "ix_tm_date", "date"),
+                     lambda: db.ensure_index("testresult", "ix_tr_masterid", "masterid"),
+                     lambda: db.ensure_index("testresult", "ix_tr_pno_lotno", "pno, lotno")):
+            try: step()
+            except Exception as ex: print(f"[REPORT] schema step skipped: {ex}")
+        _schema["ready"] = True
+
+# Each run's channel rows are found by masterid; rows written before masterid
+# existed are found by (pno, lotno) instead. That used to be one join with an
+# OR between the two, and an OR across two columns is something MySQL cannot
+# use an index for -- so it is two joins, one per kind of row. The legacy half
+# skips NG runs: they all share the lot "-", so (pno, "-") matches every old
+# NG run of the part rather than the one in the row.
+_SEARCH_COLS = """m.date, m.time,
+       (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) AS cname,
+       m.model, m.pno, m.pname, m.lotno, m.alc,
+       r.channel, r.ir_resistance, r.acw_current, r.contact_result,
+       m.cam1result, m.cam2result, m.result, m.scanresult,
+       m.scanvalue, m.visionimg, m.id"""
+
+def _search_rows(start: str, end: str, pno: str, res: str) -> list:
+    where = "m.date >= %s AND m.date <= %s"
+    params = [start, end]
+    if pno != "ALL": where += " AND m.pno = %s"; params.append(pno)
+    if res != "ALL": where += " AND m.result = %s"; params.append(res)
+    query = f"""
+        SELECT * FROM (
+            SELECT {_SEARCH_COLS}
+            FROM testmaster m JOIN testresult r ON r.masterid = m.id
+            WHERE {where}
+            UNION ALL
+            SELECT {_SEARCH_COLS}
+            FROM testmaster m LEFT JOIN testresult r
+                ON r.masterid IS NULL AND r.pno = m.pno AND r.lotno = m.lotno
+                   AND m.lotno <> '-'
+            WHERE {where}
+              AND NOT EXISTS (SELECT 1 FROM testresult x WHERE x.masterid = m.id)
+        ) q
+        ORDER BY q.date DESC, q.time DESC, q.lotno, q.channel"""
+    with db.get_cursor() as cur:
+        cur.execute(query, tuple(params * 2))
+        return cur.fetchall()
+
 
 def _valid_date(txt: str) -> bool:
     try:
@@ -168,10 +231,6 @@ def _open_calendar(entry, on_pick):
 
 
 def render(parent):
-    # The search reads scanvalue, which a DB predating it lacks until the Test
-    # Console adds it -- so add it here too in case this page is opened first.
-    try: db.ensure_column("testmaster", "scanvalue", "VARCHAR(255)")
-    except Exception: pass
     # Every style here is namespaced. The page used to configure the bare
     # "Treeview"/"TCombobox", which are the defaults every other page's plain
     # widgets inherit -- so opening the report restyled tables elsewhere in the
@@ -566,14 +625,6 @@ def render(parent):
 
     tree_font = tkfont.Font(font=("Consolas", 10))
 
-    def _fit_scan_col():
-        """Widen SCAN VALUE to its longest value. A whole label's data is far
-        more than the default width holds, and as the last column it can grow
-        without pushing anything else off screen -- the sideways scroll then
-        reaches the end of the text instead of stopping part way through it."""
-        longest = max((tree_font.measure(tree.set(i, "SCAN VALUE"))
-                       for i in tree.get_children()), default=0)
-        tree.column("SCAN VALUE", width=max(COL_W["SCAN VALUE"], longest + 20))
 
     def _set_stats(parts: dict):
         total = len(parts)
@@ -583,6 +634,10 @@ def render(parent):
         st_pass.config(text=str(passed) if total else "—")
         st_fail.config(text=str(failed) if total else "—")
         st_ngpct.config(text=f"{failed / total * 100:.1f}" if total else "—")
+
+    # Bumped by every search, so one that finishes after a newer one has
+    # started is thrown away instead of overwriting the newer results.
+    search_gen = {"n": 0}
 
     def _do_search():
         start, end = ent_start.get().strip(), ent_end.get().strip()
@@ -601,53 +656,75 @@ def render(parent):
             tree.heading(c, text=c)
 
         pno, res = cb_pno.get(), cb_result.get()
+        search_gen["n"] += 1
+        gen = search_gen["n"]
+        status_lbl.config(text=f"searching {start} → {end}…", fg=WARN)
+
+        # The query runs off the UI thread: a long date range is a lot of
+        # rows, and the page has to keep painting while MySQL works.
+        def _work():
+            try:
+                _prepare_schema()
+                rows, err = _search_rows(start, end, pno, res), None
+            except Exception as ex:
+                rows, err = [], ex
+            try:
+                parent.after(0, lambda: _show_results(gen, rows, err, start, end, pno, res))
+            except Exception:
+                pass    # page (or app) closed while the search ran
+        threading.Thread(target=_work, daemon=True).start()
+
+    _CHUNK = 400    # rows inserted per UI tick, so a big result never freezes the page
+
+    def _show_results(gen, rows, err, start, end, pno, res):
+        if gen != search_gen["n"] or not tree.winfo_exists():
+            return
+        if err is not None:
+            status_lbl.config(text="search failed", fg=NG)
+            messagebox.showerror("DB Error", f"Failed to search: {err}")
+            return
         # One row per channel, not per part: testresult holds a row for each
         # channel of a run, so the stat tiles count distinct testmaster rows
         # instead of rows -- otherwise an 8-channel part counts as eight parts.
         parts = {}
-        try:
-            with db.get_cursor() as cur:
-                query = """
-                    SELECT m.date, m.time,
-                           (SELECT cname FROM settingmaster s WHERE s.pno=m.pno LIMIT 1) AS cname,
-                           m.model, m.pno, m.pname, m.lotno, m.alc,
-                           r.channel, r.ir_resistance, r.acw_current, r.contact_result,
-                           m.cam1result, m.cam2result, m.result, m.scanresult,
-                           m.scanvalue, m.visionimg, m.id
-                    FROM testmaster m
-                    -- By id where the row has one: every NG run shares the
-                    -- lot "-", so (pno, lotno) only identifies older rows.
-                    LEFT JOIN testresult r ON r.masterid = m.id
-                        OR (r.masterid IS NULL AND m.lotno = r.lotno AND m.pno = r.pno)
-                    WHERE m.date >= %s AND m.date <= %s
-                """
-                params = [start, end]
-                if pno != "ALL": query += " AND m.pno = %s"; params.append(pno)
-                if res != "ALL": query += " AND m.result = %s"; params.append(res)
-                query += " ORDER BY m.date DESC, m.time DESC, m.lotno, r.channel"
+        longest = {"scan": ""}
 
-                cur.execute(query, tuple(params))
-                for idx, row in enumerate(cur.fetchall(), start=1):
-                    (date, time_, cname, model, r_pno, pname, lotno, alc,
-                     channel, ir_val, acw_val, contact, cam1, cam2, result,
-                     scan_res, scan_val, vimg, mid) = row
-                    iid = tree.insert("", "end", values=(
-                        idx, date, time_, cname or "", model, r_pno, pname, lotno, alc,
-                        channel or "", ir_val or "", acw_val or "", contact or "",
-                        # A blank camera verdict means vision was off or the part
-                        # has no model -- "—" says that, where "" reads as a bug.
-                        cam1 or "—", cam2 or "—", result,
-                        # Blank until the label is scanned, same as the cameras.
-                        scan_res or "—", scan_val or ""))
-                    row_images[iid] = vimg or ""
-                    parts[mid] = result
-        except Exception as ex:
-            messagebox.showerror("DB Error", f"Failed to search: {ex}")
-            status_lbl.config(text="search failed", fg=NG)
-            return
+        def _insert(i=0):
+            if gen != search_gen["n"] or not tree.winfo_exists():
+                return
+            for idx in range(i, min(i + _CHUNK, len(rows))):
+                (date, time_, cname, model, r_pno, pname, lotno, alc,
+                 channel, ir_val, acw_val, contact, cam1, cam2, result,
+                 scan_res, scan_val, vimg, mid) = rows[idx]
+                iid = tree.insert("", "end", values=(
+                    idx + 1, date, time_, cname or "", model, r_pno, pname, lotno, alc,
+                    channel or "", ir_val or "", acw_val or "", contact or "",
+                    # A blank camera verdict means vision was off or the part
+                    # has no model -- "—" says that, where "" reads as a bug.
+                    cam1 or "—", cam2 or "—", result,
+                    # Blank until the label is scanned, same as the cameras.
+                    scan_res or "—", scan_val or ""),
+                    tags=("fail",) if str(result).upper() == "FAIL"
+                         else ("odd" if idx % 2 else "even",))
+                row_images[iid] = vimg or ""
+                parts[mid] = result
+                if scan_val and len(scan_val) > len(longest["scan"]):
+                    longest["scan"] = scan_val
+            if i + _CHUNK < len(rows):
+                status_lbl.config(text=f"loading {i + _CHUNK} / {len(rows)} rows…", fg=WARN)
+                tree.after(1, lambda: _insert(i + _CHUNK))
+                return
+            _finish(parts, longest["scan"], start, end, pno, res)
+        _insert()
 
-        _restripe()
-        _fit_scan_col()
+    def _finish(parts, longest_scan, start, end, pno, res):
+        # SCAN VALUE is widened to its longest value: a whole label's data is
+        # far more than the default width holds, and as the last column it can
+        # grow without pushing anything else off screen. The font is
+        # fixed-pitch, so the longest string is the widest one -- no need to
+        # measure every row.
+        tree.column("SCAN VALUE", width=max(COL_W["SCAN VALUE"],
+                                            tree_font.measure(longest_scan) + 20))
         _set_stats(parts)
         rows = len(tree.get_children())
         if not rows:
