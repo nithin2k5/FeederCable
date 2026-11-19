@@ -22,7 +22,9 @@ flowchart TD
     LastCh -- No --> AbortSeat["Abort — cable not seated"]
     LastCh -- Yes --> NextCh{"CH n+1 <br/> X2 must be LOW <br/> (skipped when n = 8)"}
     NextCh -- "X2 High" --> AbortWrong["Abort — wrong cable or JIG"]
-    NextCh -- "X2 Low" --> IRTest[IR Test Sequence]
+    NextCh -- "X2 Low" --> Vision{"Vision check<br/>(enabled cameras)"}
+    Vision -- NG --> AbortVision["Abort — VISION TEST NG"]
+    Vision -- "OK / skipped" --> IRTest[IR Test Sequence]
     
     IRTest --> M28ON[Turn Safety Relay M28 ON <br/> High Voltage Mode]
     M28ON --> AllCoilsON[Turn All Channel Coils ON]

@@ -4115,6 +4115,41 @@ def render(parent):
             _log(f"X3 (Rework select): {'ON — rework part' if is_rework else 'OFF — regular part'}")
             _after(0, lambda a=is_rework: _set_rework_active(a))
 
+        _after(0, lambda: scan_lbl.config(text=f"Checking contact (CH{min(n_ch, MAX_CH)}"
+                                               + (f" / CH{min(n_ch, MAX_CH) + 1})..." if min(n_ch, MAX_CH) < MAX_CH else ")..."),
+                                          bg="#001830", fg="#e8a000"))
+        if _modbus_ok:
+            verdict = _run_contact_boundary_check(n_ch)
+            if verdict != "OK":
+                # Each failure gets its own wording: "not seated" and "wrong
+                # cable/jig" need different things done to the fixture, and
+                # one generic message had the operator re-seating a cable
+                # that was never the right one.
+                if verdict == "EXTRA":
+                    title, popup = "Wrong Cable / JIG", (f"Contact found on CH{min(n_ch, MAX_CH) + 1}, but this part has only "
+                                                         f"{min(n_ch, MAX_CH)} channels.\n\n"
+                                                         "Wrong cable or wrong JIG — please check.")
+                    banner = "❌  Extra channel detected — wrong cable or JIG"
+                elif verdict == "NOT_SEATED":
+                    title, popup = "Contact", (f"No contact on CH{min(n_ch, MAX_CH)}.\n\n"
+                                               "The cable is not fully seated. Please check the jig.")
+                    banner = "❌  Contact NOT OK — check and retry"
+                elif verdict == "STUCK":
+                    title, popup = "Contact Signal Stuck", (f"X2 (Contact OK) stayed High after "
+                                                            f"CH{min(n_ch, MAX_CH)} was switched off.\n\n"
+                                                            "A channel relay is not dropping out, or the jig is still "
+                                                            "holding continuity. Check the fixture — this is not a "
+                                                            "fault with the cable.")
+                    banner = "❌  X2 stuck High — check the JIG, not the cable"
+                else:
+                    title, popup = "PLC", "PLC Modbus port blocked or disconnected."
+                    banner = "❌  PLC not reachable — check the connection"
+                _log(f"Contact boundary check failed ({verdict}) — aborting")
+                _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
+                _clear_all_io_indicators()
+                state["ng_showing"] = True
+                state["test_running"] = False; state["ct_running"] = False; _after(0, _ct_tick_stop); _after(0, _update_counts); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
+
         # --- VISION VERIFICATION (Contour Matching) ---
         vision_failed = []   # every enabled camera that did not come back OK
         if vision_ctrl:
@@ -4189,43 +4224,10 @@ def render(parent):
             failed_cams = ", ".join(f"CAM{cid}" for cid in vision_failed)
             _log(f"Vision failed on {failed_cams} — NG, electrical tests skipped")
             state["flag"] = False
-            _finish_test("FAIL", {}, {}, {}, fail_banner=f"❌  NG — vision failed on {failed_cams}")
+            _finish_test("FAIL", {}, {}, {}, fail_banner=f"❌  VISION TEST NG — {failed_cams}",
+                         fail_verdict="VISION\nNG")
             return
 
-        _after(0, lambda: scan_lbl.config(text=f"Checking contact (CH{min(n_ch, MAX_CH)}"
-                                               + (f" / CH{min(n_ch, MAX_CH) + 1})..." if min(n_ch, MAX_CH) < MAX_CH else ")..."),
-                                          bg="#001830", fg="#e8a000"))
-        if _modbus_ok:
-            verdict = _run_contact_boundary_check(n_ch)
-            if verdict != "OK":
-                # Each failure gets its own wording: "not seated" and "wrong
-                # cable/jig" need different things done to the fixture, and
-                # one generic message had the operator re-seating a cable
-                # that was never the right one.
-                if verdict == "EXTRA":
-                    title, popup = "Wrong Cable / JIG", (f"Contact found on CH{min(n_ch, MAX_CH) + 1}, but this part has only "
-                                                         f"{min(n_ch, MAX_CH)} channels.\n\n"
-                                                         "Wrong cable or wrong JIG — please check.")
-                    banner = "❌  Extra channel detected — wrong cable or JIG"
-                elif verdict == "NOT_SEATED":
-                    title, popup = "Contact", (f"No contact on CH{min(n_ch, MAX_CH)}.\n\n"
-                                               "The cable is not fully seated. Please check the jig.")
-                    banner = "❌  Contact NOT OK — check and retry"
-                elif verdict == "STUCK":
-                    title, popup = "Contact Signal Stuck", (f"X2 (Contact OK) stayed High after "
-                                                            f"CH{min(n_ch, MAX_CH)} was switched off.\n\n"
-                                                            "A channel relay is not dropping out, or the jig is still "
-                                                            "holding continuity. Check the fixture — this is not a "
-                                                            "fault with the cable.")
-                    banner = "❌  X2 stuck High — check the JIG, not the cable"
-                else:
-                    title, popup = "PLC", "PLC Modbus port blocked or disconnected."
-                    banner = "❌  PLC not reachable — check the connection"
-                _log(f"Contact boundary check failed ({verdict}) — aborting")
-                _after(0, lambda t=title, m=popup: messagebox.showwarning(t, m)); _after(0, lambda: _set_verdict("READY", "#1a1a1a", "#555")); _after(0, lambda b=banner: scan_lbl.config(text=b, bg="#220000", fg="#ff5555"))
-                _clear_all_io_indicators()
-                state["ng_showing"] = True
-                state["test_running"] = False; state["ct_running"] = False; _after(0, _ct_tick_stop); _after(0, _update_counts); _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20", fg="white", text="▶  START TEST")); _after(0, _input_poll_start); return
         _set_test_phase("IR")
         _after(0, lambda: scan_lbl.config(text="⚡  IR Testing (Insulation Resistance)...", bg="#001830", fg="#e8a000")); ir_pass, ir_ch = _run_ir_test(n_ch)
         if not ir_pass: state["flag"] = False; _finish_test("FAIL", ir_ch, {}, {}); return
@@ -4237,7 +4239,8 @@ def render(parent):
         overall = "PASS" if (ir_pass and acw_pass and contact_pass) else "FAIL"
         state["flag"] = (overall == "PASS"); _finish_test(overall, ir_ch, acw_ch, contact_ch)
 
-    def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, fail_banner: str = None):
+    def _finish_test(overall: str, ir_ch: dict, acw_ch: dict, contact_ch: dict, fail_banner: str = None,
+                     fail_verdict: str = "FAIL"):
         # First thing, and on this thread: everything queued below repaints the
         # CT box from _ct_text, and the clock has to be stopped before any of
         # it is queued or the running count would be what lands last.
@@ -4303,7 +4306,7 @@ def render(parent):
                 _after(0, _input_poll_start)
                 _after(3000, _reset_for_next_part)
         else:
-            _after(0, lambda: _set_verdict("FAIL", "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
+            _after(0, lambda v=fail_verdict: _set_verdict(v, "#b71c1c", "white")); _after(0, lambda b=fail_banner or "❌  FAIL — Check cable and retry": scan_lbl.config(text=b, bg="#220000", fg="#ff5555")); _play_wav("NG.WAV"); blink_start()
             state["ng_showing"] = True; _NG_LOCK["on"] = True
         _after(0, lambda p=pno: _load_today_pass(p)); _log(f"── Test Complete: {overall} | Lot: {lot_no} | Time: {elapsed_str}s ──")
         state["test_running"] = False; _after(0, lambda: btn_start.config(state="normal", bg="#1b5e20" if overall == "PASS" else "#b71c1c", fg="white", text="▶  START TEST"))
