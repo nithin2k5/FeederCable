@@ -3529,7 +3529,7 @@ def render(parent):
         """
         try:
             with db.get_cursor() as cur:
-                cur.execute("SELECT lotno FROM testmaster WHERE pno=%s AND DATE(date)=CURDATE() "
+                cur.execute("SELECT lotno, scanresult FROM testmaster WHERE pno=%s AND DATE(date)=CURDATE() "
                             "AND scanresult IS NOT NULL AND scanresult<>'' ORDER BY time DESC",
                             (state["pno"],))
                 rows = cur.fetchall()
@@ -3538,7 +3538,13 @@ def render(parent):
             # to the normal OK/NG comparison rather than blocking a good part.
             _log(f"Duplicate check failed: {ex}"); return "", False
         done = {row[0] for row in rows if row[0]}
-        dup = next((lot for lot in done if _scan_has(scanned, lot)), "")
+        # The lot on the bench only counts as used once its label has scanned
+        # OK. A wrong or duplicate label scanned against it first stamps NG/DUP
+        # on its row, and the operator is then sent back to scan the right
+        # label -- which would otherwise read as a duplicate of its own lot.
+        used = {row[0] for row in rows if row[0]
+                and (row[0] != state["lot_no"] or str(row[1]).upper() == "OK")}
+        dup = next((lot for lot in used if _scan_has(scanned, lot)), "")
         return dup, state["lot_no"] in done
 
     def _validate_employee(empno: str) -> bool:
@@ -4470,9 +4476,9 @@ def render(parent):
                                      text="⛔  DUPLICATE LABEL — PRESS ACCEPTED")
             except Exception: pass
             def _after_dup_ack():
-                _log("Duplicate label accepted by the operator")
-                _set_awaiting_scan(False)
-                _after(500, _reset_for_next_part); _after(0, _input_poll_start)
+                # Back to the same part: the right label still has to be scanned.
+                _log("Duplicate label accepted by the operator — scan the correct label")
+                _set_awaiting_scan(True); _show_scan_entry()
             _show_label_ng(state["pno"], state["lot_no"],
                            f"Label already scanned for lot {dup_lot}",
                            _after_dup_ack, duplicate=True)
@@ -4495,7 +4501,7 @@ def render(parent):
         _after(0, lambda p=state["pno"]: _load_today_pass(p))
         if res_str == "NG":
             # Held -- START stays off and the PLC unread -- until the popup is
-            # acknowledged, then the page clears the way it does after an OK.
+            # acknowledged, then focus goes back to the scan box for this part.
             _lock_scan_entry(); _play_wav("NG.WAV")
             try:
                 if btn_start.winfo_exists():
@@ -4503,9 +4509,9 @@ def render(parent):
                                      text="⛔  LABEL NG — PRESS ACCEPTED")
             except Exception: pass
             def _after_ack():
-                _log("Label NG accepted by the operator")
-                _set_awaiting_scan(False)
-                _after(500, _reset_for_next_part); _after(0, _input_poll_start)
+                # Back to the same part: the right label still has to be scanned.
+                _log("Label NG accepted by the operator — scan the correct label")
+                _set_awaiting_scan(True); _show_scan_entry()
             _show_label_ng(state["pno"], state["lot_no"],
                            f"Scan did not match: missing {want}", _after_ack)
             return
